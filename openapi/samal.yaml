@@ -1,0 +1,170 @@
+openapi: 3.0.3
+info:
+  title: SAMAL API
+  version: 0.1.0
+  description: Native messenger for Kyrgyzstan. TLS + session auth. E2EE is phase 2.
+servers:
+  - url: http://localhost:8080
+paths:
+  /healthz:
+    get:
+      responses:
+        "200":
+          description: ok
+  /v1/auth/otp/request:
+    post:
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phone]
+              properties:
+                phone: { type: string, example: "+996700000001" }
+      responses:
+        "200":
+          description: OTP sent. `dev_code` only when SAMAL_OTP_DEV=true
+  /v1/auth/otp/verify:
+    post:
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phone, code]
+              properties:
+                phone: { type: string }
+                code: { type: string }
+                device:
+                  type: object
+                  properties:
+                    platform: { type: string, enum: [ios, android, web] }
+                    device_name: { type: string }
+                    push_token: { type: string }
+      responses:
+        "200":
+          description: Session
+  /v1/auth/refresh:
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token: { type: string }
+      responses:
+        "200":
+          description: Session
+  /v1/me:
+    get:
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200": { description: User }
+    patch:
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200": { description: User }
+  /v1/chats:
+    get:
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: query
+          name: q
+          schema: { type: string }
+        - in: query
+          name: type
+          schema: { type: string, enum: [direct, group] }
+      responses:
+        "200": { description: Chat list }
+  /v1/chats/direct:
+    post:
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_id]
+              properties:
+                user_id: { type: string, format: uuid }
+      responses:
+        "200": { description: Chat }
+  /v1/chats/groups:
+    post:
+      security: [{ bearerAuth: [] }]
+      responses:
+        "201": { description: Chat }
+  /v1/chats/{chatID}/messages:
+    get:
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: chatID
+          required: true
+          schema: { type: string, format: uuid }
+        - in: query
+          name: cursor
+          schema: { type: string }
+        - in: query
+          name: q
+          schema: { type: string }
+        - in: query
+          name: limit
+          schema: { type: integer }
+      responses:
+        "200": { description: Messages newest-first }
+    post:
+      security: [{ bearerAuth: [] }]
+      description: Idempotent on client_id. Optimistic UI on the client.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [client_id, type, payload]
+              properties:
+                client_id: { type: string }
+                type: { type: string, enum: [text, photo, file, voice, location] }
+                payload: { type: object }
+                reply_to_id: { type: string, format: uuid }
+                upload_ids:
+                  type: array
+                  items: { type: string, format: uuid }
+      responses:
+        "201": { description: Message }
+  /v1/receipts:
+    post:
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [message_ids, status]
+              properties:
+                message_ids:
+                  type: array
+                  items: { type: string, format: uuid }
+                status: { type: string, enum: [delivered, read] }
+      responses:
+        "200": { description: ok }
+  /v1/uploads/intent:
+    post:
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200": { description: Presigned PUT }
+  /v1/chats/{chatID}/calls:
+    post:
+      security: [{ bearerAuth: [] }]
+      responses:
+        "201": { description: Call }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT

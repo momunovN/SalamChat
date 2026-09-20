@@ -1,0 +1,28 @@
+<resources>
+    <string name="app_name">SAMAL</string>
+    <string name="tab_chats">Чаты</string>
+    <string name="tab_calls">Звонки</string>
+    <string name="tab_contacts">Контакты</string>
+    <string name="tab_more">Ещё</string>
+    <string name="seg_all">Все</string>
+    <string name="seg_direct">Личные</string>
+    <string name="seg_groups">Группы</string>
+    <string name="seg_calls">Звонки</string>
+    <string name="search">Поиск</string>
+    <string name="composer">Сообщение</string>
+    <string name="voice_cancel">слайд влево — отмена</string>
+    <string name="voice_lock">вверх — закрепить</string>
+    <string name="incoming_video">Входящий видеозвонок</string>
+    <string name="decline">Сбросить</string>
+    <string name="answer">Ответить</string>
+    <string name="in_call">Идёт звонок</string>
+    <string name="chats_empty">Пока нет чатов</string>
+    <string name="online">в сети</string>
+    <string name="auth_phone_title">Номер телефона</string>
+    <string name="auth_phone_subtitle">SAMAL отправит SMS с кодом</string>
+    <string name="auth_country_kg">Кыргызстан +996</string>
+    <string name="auth_country_ru">Россия +7</string>
+    <string name="auth_continue">Продолжить</string>
+    <string name="auth_otp_title">Код из SMS</string>
+    <string name="auth_otp_subtitle">Введите 6 цифр</string>
+</resources>

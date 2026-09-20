@@ -1,0 +1,94 @@
+import SwiftUI
+
+struct CallsView: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(L10n.tabCalls)
+                .font(SamalFont.title())
+                .foregroundStyle(SamalColor.text)
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(SamalColor.bg)
+    }
+}
+
+struct IncomingCallView: View {
+    let call: APICall
+    @EnvironmentObject var session: SessionStore
+
+    var body: some View {
+        VStack(spacing: 24) {
+            Spacer()
+            Text(call.kind == "video" ? L10n.incomingVideo : L10n.incomingAudio)
+                .font(SamalFont.title())
+                .foregroundStyle(SamalColor.text)
+                .multilineTextAlignment(.center)
+            Text(L10n.inCall)
+                .font(SamalFont.subhead())
+                .foregroundStyle(SamalColor.muted)
+            HStack(spacing: 48) {
+                Button {
+                    session.incomingCall = nil
+                } label: {
+                    VStack {
+                        Circle().fill(SamalColor.danger).frame(width: 72, height: 72)
+                            .overlay(Image(systemName: "phone.down.fill").font(.title).foregroundStyle(.white))
+                        Text(L10n.decline).font(SamalFont.caption()).foregroundStyle(SamalColor.muted)
+                    }
+                }
+                Button {
+                    if var c = session.incomingCall {
+                        c.status = "active"
+                        session.incomingCall = c
+                    }
+                } label: {
+                    VStack {
+                        Circle().fill(SamalColor.success).frame(width: 72, height: 72)
+                            .overlay(Image(systemName: "phone.fill").font(.title).foregroundStyle(.white))
+                        Text(L10n.answer).font(SamalFont.caption()).foregroundStyle(SamalColor.muted)
+                    }
+                }
+            }
+            Spacer()
+        }
+        .padding()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(SamalColor.bg.opacity(0.96).ignoresSafeArea())
+    }
+}
+
+struct ContactsView: View {
+    var body: some View {
+        VStack(alignment: .leading) {
+            Text(L10n.tabContacts).font(SamalFont.title()).foregroundStyle(SamalColor.text)
+                .padding(16)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(SamalColor.bg)
+    }
+}
+
+struct MoreView: View {
+    @EnvironmentObject var session: SessionStore
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(L10n.tabMore).font(SamalFont.title()).foregroundStyle(SamalColor.text)
+            Text(session.user?.displayName ?? "")
+                .font(SamalFont.headline())
+                .foregroundStyle(SamalColor.text)
+            Text(session.user?.phone ?? "")
+                .font(SamalFont.subhead())
+                .foregroundStyle(SamalColor.muted)
+            Button("Выйти") { session.logout() }
+                .foregroundStyle(SamalColor.danger)
+            Spacer()
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(SamalColor.bg)
+    }
+}

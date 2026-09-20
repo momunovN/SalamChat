@@ -1,0 +1,212 @@
+package dev.samal.app.ui.auth
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import dev.samal.app.R
+import dev.samal.app.data.session.SessionStore
+import dev.samal.app.ui.theme.Accent
+import dev.samal.app.ui.theme.Bg
+import dev.samal.app.ui.theme.Danger
+import dev.samal.app.ui.theme.Elevated
+import dev.samal.app.ui.theme.Muted
+import dev.samal.app.ui.theme.Success
+import dev.samal.app.ui.theme.Text
+import kotlinx.coroutines.launch
+
+@Composable
+fun PhoneAuthScreen(session: SessionStore) {
+    var cc by remember { mutableStateOf("996") }
+    var phone by remember { mutableStateOf("+996") }
+    var code by remember { mutableStateOf("") }
+    var step by remember { mutableIntStateOf(0) }
+    var busy by remember { mutableStateOf(false) }
+    var hint by remember { mutableStateOf<String?>(null) }
+    var hintError by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    fun go() {
+        if (busy) return
+        busy = true
+        hint = null
+        scope.launch {
+            try {
+                if (step == 0) {
+                    hint = session.requestOtp(phone)
+                    hintError = false
+                    step = 1
+                } else {
+                    session.login(phone, code)
+                }
+            } catch (e: Exception) {
+                hint = e.message
+                hintError = true
+            } finally {
+                busy = false
+            }
+        }
+    }
+
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(Bg)
+            .statusBarsPadding()
+            .navigationBarsPadding()
+            .imePadding()
+            .padding(24.dp),
+    ) {
+        Spacer(Modifier.height(24.dp))
+        Text(
+            stringResource(R.string.app_name),
+            color = Text,
+            fontSize = 28.sp,
+            fontWeight = FontWeight.Bold,
+        )
+        Spacer(Modifier.height(16.dp))
+        Text(
+            stringResource(if (step == 0) R.string.auth_phone_title else R.string.auth_otp_title),
+            color = Text,
+            fontSize = 17.sp,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            stringResource(if (step == 0) R.string.auth_phone_subtitle else R.string.auth_otp_subtitle),
+            color = Muted,
+            fontSize = 14.sp,
+        )
+        Spacer(Modifier.height(16.dp))
+        if (step == 0) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                CountryChip(
+                    label = stringResource(R.string.auth_country_kg),
+                    selected = cc == "996",
+                    onClick = {
+                        cc = "996"
+                        phone = "+996" + phone.removePrefix("+996").removePrefix("+7")
+                    },
+                )
+                CountryChip(
+                    label = stringResource(R.string.auth_country_ru),
+                    selected = cc == "7",
+                    onClick = {
+                        cc = "7"
+                        phone = "+7" + phone.removePrefix("+996").removePrefix("+7")
+                    },
+                )
+            }
+            Spacer(Modifier.height(12.dp))
+            AuthField(
+                value = phone,
+                onValueChange = { phone = it },
+                keyboard = KeyboardType.Phone,
+                onGo = ::go,
+            )
+        } else {
+            AuthField(
+                value = code,
+                onValueChange = { code = it.filter(Char::isDigit).take(6) },
+                keyboard = KeyboardType.Number,
+                onGo = ::go,
+            )
+        }
+        hint?.let {
+            Spacer(Modifier.height(12.dp))
+            Text(it, color = if (hintError) Danger else Success, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+        }
+        Spacer(Modifier.height(16.dp))
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(52.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(Accent.copy(alpha = if (busy) 0.6f else 1f))
+                .clickable(enabled = !busy, onClick = ::go),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                stringResource(R.string.auth_continue),
+                color = Color.White,
+                fontSize = 17.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
+        Spacer(Modifier.weight(1f))
+    }
+}
+
+@Composable
+private fun CountryChip(label: String, selected: Boolean, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .clip(RoundedCornerShape(20.dp))
+            .background(if (selected) Accent else Elevated)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+    ) {
+        Text(label, color = Text, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+@Composable
+private fun AuthField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    keyboard: KeyboardType,
+    onGo: () -> Unit,
+) {
+    TextField(
+        value = value,
+        onValueChange = onValueChange,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp)),
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = keyboard, imeAction = ImeAction.Done),
+        keyboardActions = KeyboardActions(onDone = { onGo() }),
+        colors = TextFieldDefaults.colors(
+            focusedContainerColor = Elevated,
+            unfocusedContainerColor = Elevated,
+            focusedTextColor = Text,
+            unfocusedTextColor = Text,
+            cursorColor = Accent,
+            focusedIndicatorColor = Color.Transparent,
+            unfocusedIndicatorColor = Color.Transparent,
+        ),
+    )
+}

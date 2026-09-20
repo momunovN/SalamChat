@@ -1,0 +1,31 @@
+@import "tailwindcss";
+
+@theme inline {
+  --color-bg: #0b0d10;
+  --color-elevated: #14181e;
+  --color-accent: #2b6bff;
+  --color-incoming: #1b212b;
+  --color-outgoing: #2b6bff;
+  --color-ink: #f4f6f8;
+  --color-muted: #8b95a5;
+  --color-success: #3ddc97;
+  --color-danger: #ff4d6a;
+  --color-line: rgb(255 255 255 / 0.06);
+  --font-sans: var(--font-inter);
+}
+
+html,
+body {
+  height: 100%;
+  background: var(--color-bg);
+  color: var(--color-ink);
+}
+
+body {
+  font-family: var(--font-sans), "Segoe UI", system-ui, sans-serif;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #2a3140 transparent;
+}

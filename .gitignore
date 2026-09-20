@@ -1,0 +1,56 @@
+# env / secrets
+.env
+.env.local
+*.pem
+*.p12
+*.jks
+*.keystore
+
+# go
+server/bin/
+server/tmp/
+server/vendor/
+*.exe
+*.test
+*.out
+coverage.html
+
+# ide
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# xcode / ios
+apps/ios/build/
+apps/ios/DerivedData/
+apps/ios/*.xcworkspace/xcuserdata/
+apps/ios/*.xcodeproj/xcuserdata/
+apps/ios/*.xcodeproj/project.xcworkspace/xcuserdata/
+apps/ios/Pods/
+apps/ios/.swiftpm/
+xcuserdata/
+
+# android
+apps/android/.gradle/
+apps/android/build/
+apps/android/app/build/
+apps/android/local.properties
+*.apk
+*.aab
+*.iml
+
+# minio / data
+.data/
+docker-data/
+
+# node
+node_modules/
+apps/web/.next/
+apps/web/data/
+apps/web/*.tsbuildinfo
+
+# android extras
+apps/android/app/build/
+apps/android/.kotlin/

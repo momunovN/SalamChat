@@ -1,0 +1,14 @@
+DROP TRIGGER IF EXISTS messages_touch_chat ON messages;
+DROP FUNCTION IF EXISTS touch_chat_updated_at();
+DROP TABLE IF EXISTS call_events;
+DROP TABLE IF EXISTS calls;
+DROP TABLE IF EXISTS uploads;
+DROP TABLE IF EXISTS receipts;
+DROP TABLE IF EXISTS attachments;
+ALTER TABLE IF EXISTS chats DROP CONSTRAINT IF EXISTS chats_last_message_fk;
+DROP TABLE IF EXISTS messages;
+DROP TABLE IF EXISTS chat_members;
+DROP TABLE IF EXISTS chats;
+DROP TABLE IF EXISTS otp_challenges;
+DROP TABLE IF EXISTS devices;
+DROP TABLE IF EXISTS users;

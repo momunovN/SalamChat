@@ -1,0 +1,850 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  ArrowLeft,
+  ArrowUp,
+  Check,
+  CheckCheck,
+  Languages,
+  LogOut,
+  MessageSquare,
+  Mic,
+  Paperclip,
+  Pencil,
+  Phone,
+  PhoneOff,
+  Plus,
+  Search,
+  Settings,
+  Users,
+  Video,
+  X,
+} from "lucide-react";
+import { api, loadSession, saveSession } from "@/lib/api";
+import { dict, type Lang } from "@/lib/i18n";
+import type { Call, Chat, Envelope, Message, Session, User } from "@/lib/types";
+import { Avatar } from "./Avatar";
+import { PhoneAuth } from "./PhoneAuth";
+
+type Tab = "chats" | "calls" | "contacts" | "more";
+type Seg = "all" | "direct" | "group";
+
+function lastText(m?: Message | null) {
+  if (!m) return "";
+  if (m.type === "text") return m.payload?.text || "";
+  if (m.type === "photo") return "📷";
+  if (m.type === "file") return "📎";
+  if (m.type === "voice") return "🎤";
+  if (m.type === "location") return "📍";
+  return "";
+}
+
+function fmtTime(iso: string) {
+  const d = new Date(iso);
+  const now = new Date();
+  const same = d.toDateString() === now.toDateString();
+  return same
+    ? d.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })
+    : d.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" });
+}
+
+export function MessengerApp() {
+  const [session, setSession] = useState<Session | null>(null);
+  const [ready, setReady] = useState(false);
+  const [lang, setLang] = useState<Lang>("ru");
+  const t = dict[lang];
+
+  const [tab, setTab] = useState<Tab>("chats");
+  const [seg, setSeg] = useState<Seg>("all");
+  const [query, setQuery] = useState("");
+  const [chats, setChats] = useState<Chat[]>([]);
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [text, setText] = useState("");
+  const [calls, setCalls] = useState<Call[]>([]);
+  const [people, setPeople] = useState<User[]>([]);
+  const [contactQ, setContactQ] = useState("");
+  const [incoming, setIncoming] = useState<Call | null>(null);
+  const [activeCall, setActiveCall] = useState<Call | null>(null);
+  const [typing, setTyping] = useState<Record<string, number>>({});
+  const [composerBusy, setComposerBusy] = useState(false);
+  const [newOpen, setNewOpen] = useState<"direct" | "group" | null>(null);
+  const [groupTitle, setGroupTitle] = useState("");
+  const [picked, setPicked] = useState<string[]>([]);
+  const [attach, setAttach] = useState(false);
+  const [name, setName] = useState("");
+  const [username, setUsername] = useState("");
+  const [bio, setBio] = useState("");
+  const bottomRef = useRef<HTMLDivElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const activeIdRef = useRef<string | null>(null);
+  const meRef = useRef<string | undefined>(undefined);
+  const typingAt = useRef(0);
+
+  const active = chats.find((c) => c.id === activeId) || null;
+  const me = session?.user.id;
+  activeIdRef.current = activeId;
+  meRef.current = me;
+
+  useEffect(() => {
+    const s = loadSession();
+    setSession(s);
+    if (s?.user) {
+      setName(s.user.display_name);
+      setUsername(s.user.username || "");
+      setBio(s.user.bio || "");
+    }
+    const stored = localStorage.getItem("samal.lang");
+    if (stored === "ru" || stored === "ky") setLang(stored);
+    setReady(true);
+  }, []);
+
+  const refreshChats = useCallback(async () => {
+    const type = seg === "all" ? "" : seg;
+    const r = await api.chats(query, type);
+    setChats(r.items);
+  }, [query, seg]);
+
+  const refreshMessages = useCallback(async (chatId: string) => {
+    const r = await api.messages(chatId);
+    const items = [...r.items].reverse();
+    setMessages(items);
+    const incomingIds = items.filter((m) => m.author_id && m.author_id !== me).map((m) => m.id);
+    if (incomingIds.length) void api.receipts(incomingIds, "read");
+  }, [me]);
+
+  useEffect(() => {
+    if (!session) return;
+    const id = window.setTimeout(() => {
+      void refreshChats().catch(() => undefined);
+    }, 250);
+    return () => window.clearTimeout(id);
+  }, [session, refreshChats]);
+
+  useEffect(() => {
+    const onLost = () => {
+      setSession(null);
+      setChats([]);
+      setMessages([]);
+      setActiveId(null);
+    };
+    window.addEventListener("samal:auth-lost", onLost);
+    return () => window.removeEventListener("samal:auth-lost", onLost);
+  }, []);
+
+  useEffect(() => {
+    if (!session || !activeId) return;
+    void refreshMessages(activeId).catch(() => undefined);
+  }, [session, activeId, refreshMessages]);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages.length, activeId]);
+
+  useEffect(() => {
+    if (!session) return;
+    const es = new EventSource(`/v1/stream?token=${encodeURIComponent(session.access_token)}`);
+    es.onmessage = (ev) => {
+      try {
+        const env = JSON.parse(ev.data) as Envelope;
+        const openId = activeIdRef.current;
+        const myId = meRef.current;
+        if (env.type === "message.created") {
+          const msg = env.body as Message;
+          setMessages((prev) => {
+            if (!openId || msg.chat_id !== openId) return prev;
+            if (prev.some((m) => m.id === msg.id || m.client_id === msg.client_id)) {
+              return prev.map((m) => (m.client_id === msg.client_id ? msg : m));
+            }
+            return [...prev, msg];
+          });
+          void refreshChats();
+          if (msg.chat_id === openId && msg.author_id !== myId) {
+            void api.receipts([msg.id], "read");
+          }
+        }
+        if (env.type === "receipt.upserted") {
+          const body = env.body as { message_id: string; status: string };
+          setMessages((prev) => prev.map((m) => (m.id === body.message_id ? { ...m, status: body.status } : m)));
+        }
+        if (env.type === "typing") {
+          const body = env.body as { chat_id: string };
+          setTyping((prev) => ({ ...prev, [body.chat_id]: Date.now() }));
+        }
+        if (env.type === "call.updated") {
+          const call = env.body as Call;
+          void api.calls().then((r) => setCalls(r.items ?? []));
+          if (call.status === "ringing" && call.initiator_id !== myId) setIncoming(call);
+          if (call.status === "active") {
+            setIncoming(null);
+            setActiveCall(call);
+          }
+          if (["ended", "missed", "declined"].includes(call.status)) {
+            setIncoming(null);
+            setActiveCall((c) => (c?.id === call.id ? null : c));
+          }
+        }
+      } catch {
+        /* ignore */
+      }
+    };
+    return () => es.close();
+  }, [session, refreshChats]);
+
+  useEffect(() => {
+    if (!session || tab !== "calls") return;
+    void api.calls().then((r) => setCalls(r.items));
+  }, [session, tab]);
+
+  useEffect(() => {
+    if (!session || tab !== "contacts") return;
+    const q = contactQ.trim();
+    if (!q) {
+      setPeople([]);
+      return;
+    }
+    const id = setTimeout(() => {
+      void api.users(q).then((r) => setPeople((r.items ?? []).filter((u) => u.id !== me)));
+    }, 200);
+    return () => clearTimeout(id);
+  }, [session, tab, contactQ, me]);
+
+  async function send() {
+    const trimmed = text.trim();
+    if (!trimmed || !activeId || !me) return;
+    const clientId = crypto.randomUUID();
+    const optimistic: Message = {
+      id: clientId,
+      chat_id: activeId,
+      author_id: me,
+      type: "text",
+      payload: { text: trimmed },
+      client_id: clientId,
+      created_at: new Date().toISOString(),
+      status: "sending",
+    };
+    setText("");
+    setMessages((prev) => [...prev, optimistic]);
+    try {
+      const msg = await api.send(activeId, clientId, "text", { text: trimmed });
+      setMessages((prev) => prev.map((m) => (m.client_id === clientId ? msg : m)));
+      void refreshChats();
+    } catch {
+      setMessages((prev) => prev.map((m) => (m.client_id === clientId ? { ...m, status: "failed" } : m)));
+    }
+  }
+
+  async function sendFile(file: File, kind: "photo" | "file") {
+    if (!activeId || !me) return;
+    setAttach(false);
+    setComposerBusy(true);
+    try {
+      const uploadId = await api.upload(file, kind);
+      const clientId = crypto.randomUUID();
+      const msg = await api.send(activeId, clientId, kind, { caption: file.name }, [uploadId]);
+      setMessages((prev) => [...prev, msg]);
+      void refreshChats();
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setComposerBusy(false);
+    }
+  }
+
+  async function openDirect(userId: string) {
+    const chat = await api.direct(userId);
+    await refreshChats();
+    setActiveId(chat.id);
+    setTab("chats");
+    setNewOpen(null);
+  }
+
+  async function createGroup() {
+    if (!groupTitle.trim()) return;
+    const chat = await api.group(groupTitle.trim(), picked);
+    await refreshChats();
+    setActiveId(chat.id);
+    setTab("chats");
+    setNewOpen(null);
+    setGroupTitle("");
+    setPicked([]);
+  }
+
+  function logout() {
+    void api.logout().catch(() => undefined);
+    saveSession(null);
+    setSession(null);
+    setChats([]);
+    setMessages([]);
+    setActiveId(null);
+  }
+
+  async function saveProfile() {
+    const user = await api.patchMe({ display_name: name, username: username || undefined, bio });
+    if (session) {
+      const next = { ...session, user };
+      saveSession(next);
+      setSession(next);
+    }
+  }
+
+  const filteredPeople = useMemo(() => people, [people]);
+  const isTyping = activeId ? Date.now() - (typing[activeId] || 0) < 3000 : false;
+
+  if (!ready) return <div className="min-h-full bg-bg" />;
+  if (!session) {
+    return (
+      <div className="min-h-full bg-bg">
+        <PhoneAuth
+          t={t}
+          onSession={(s) => {
+            setSession(s);
+            setName(s.user.display_name);
+            setUsername(s.user.username || "");
+            setBio(s.user.bio || "");
+          }}
+        />
+      </div>
+    );
+  }
+
+  const navBtn = (id: Tab, icon: ReactNode, label: string) => (
+    <button
+      type="button"
+      onClick={() => {
+        setTab(id);
+        if (id !== "chats") setActiveId(null);
+      }}
+      className={`flex flex-col items-center gap-1 rounded-xl px-2 py-2 text-[10px] font-medium transition-colors ${
+        tab === id ? "text-accent" : "text-muted hover:text-ink"
+      }`}
+    >
+      {icon}
+      <span>{label}</span>
+    </button>
+  );
+
+  const listPanel = (
+    <div className="flex h-full min-w-0 flex-col border-r border-line bg-bg">
+      <div className="flex items-center justify-between px-4 pt-3 pb-2">
+        <h1 className="text-[28px] font-bold tracking-tight text-ink">
+          {tab === "chats" ? t.app : tab === "calls" ? t.tabCalls : tab === "contacts" ? t.tabContacts : t.tabMore}
+        </h1>
+        {tab === "chats" ? (
+          <button
+            type="button"
+            onClick={() => setNewOpen("direct")}
+            className="flex h-9 w-9 items-center justify-center rounded-full text-ink hover:bg-elevated"
+            aria-label={t.newChat}
+          >
+            <Pencil size={18} />
+          </button>
+        ) : null}
+      </div>
+
+      {tab === "chats" || tab === "contacts" ? (
+        <div className="px-4 pb-3">
+          <label className="flex h-10 items-center gap-2 rounded-xl bg-elevated px-3">
+            <Search size={16} className="text-muted" />
+            <input
+              value={tab === "chats" ? query : contactQ}
+              onChange={(e) => (tab === "chats" ? setQuery(e.target.value) : setContactQ(e.target.value))}
+              placeholder={t.search}
+              className="w-full bg-transparent text-sm text-ink outline-none placeholder:text-muted"
+            />
+          </label>
+        </div>
+      ) : null}
+
+      {tab === "chats" ? (
+        <div className="flex gap-1 px-4 pb-2">
+          {(["all", "direct", "group"] as Seg[]).map((s) => (
+            <button
+              key={s}
+              type="button"
+              onClick={() => setSeg(s)}
+              className={`h-8 rounded-full px-3 text-sm font-semibold transition-colors ${
+                seg === s ? "bg-accent text-ink" : "text-muted hover:text-ink"
+              }`}
+            >
+              {s === "all" ? t.segAll : s === "direct" ? t.segDirect : t.segGroups}
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        {tab === "chats" && chats.length === 0 ? (
+          <p className="px-4 pt-16 text-center text-base text-muted">{t.emptyChats}</p>
+        ) : null}
+        {tab === "chats"
+          ? chats.map((c) => (
+              <button
+                key={c.id}
+                type="button"
+                onClick={() => setActiveId(c.id)}
+                className={`flex w-full items-center gap-3 px-4 py-[10px] text-left transition-colors ${
+                  activeId === c.id ? "bg-elevated" : "hover:bg-elevated/60"
+                }`}
+              >
+                <Avatar name={c.title} src={c.avatar_url} size={56} online={c.peer?.online} />
+                <div className="min-w-0 flex-1 border-b border-line pb-2">
+                  <div className="flex items-center gap-2">
+                    <p className="min-w-0 flex-1 truncate text-[17px] font-semibold text-ink">{c.title}</p>
+                    <span className="text-[12px] font-medium text-muted">{fmtTime(c.updated_at)}</span>
+                  </div>
+                  <div className="mt-0.5 flex items-center gap-2">
+                    <p className="min-w-0 flex-1 truncate text-sm text-muted">
+                      {Date.now() - (typing[c.id] || 0) < 3000 ? t.typing : lastText(c.last_message)}
+                    </p>
+                    {c.unread_count > 0 ? (
+                      <span className="min-w-5 rounded-full bg-accent px-1.5 text-center text-[12px] font-medium text-ink">
+                        {c.unread_count}
+                      </span>
+                    ) : null}
+                  </div>
+                </div>
+              </button>
+            ))
+          : null}
+
+        {tab === "calls" && calls.length === 0 ? (
+          <p className="px-4 pt-16 text-center text-base text-muted">{t.emptyCalls}</p>
+        ) : null}
+        {tab === "calls"
+          ? calls.map((c) => (
+              <div key={c.id} className="flex items-center gap-3 px-4 py-3">
+                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-elevated text-accent">
+                  {c.kind === "video" ? <Video size={18} /> : <Phone size={18} />}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate font-semibold text-ink">{c.kind === "video" ? t.video : t.audio}</p>
+                  <p className="text-sm text-muted">
+                    {c.status} · {fmtTime(c.started_at)}
+                  </p>
+                </div>
+              </div>
+            ))
+          : null}
+
+        {tab === "contacts" && !contactQ ? (
+          <p className="px-4 pt-16 text-center text-base text-muted">{t.emptyContacts}</p>
+        ) : null}
+        {tab === "contacts"
+          ? filteredPeople.map((u) => (
+              <button
+                key={u.id}
+                type="button"
+                onClick={() => void openDirect(u.id)}
+                className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-elevated/60"
+              >
+                <Avatar name={u.display_name} src={u.avatar_url} online={u.online} />
+                <div>
+                  <p className="font-semibold text-ink">{u.display_name}</p>
+                  <p className="text-sm text-muted">{u.phone}</p>
+                </div>
+              </button>
+            ))
+          : null}
+
+        {tab === "more" ? (
+          <div className="px-4 py-2">
+            <div className="flex items-center gap-3 rounded-2xl bg-elevated p-4">
+              <Avatar name={session.user.display_name} src={session.user.avatar_url} size={56} />
+              <div>
+                <p className="font-semibold text-ink">{session.user.display_name}</p>
+                <p className="text-sm text-muted">{session.user.phone}</p>
+              </div>
+            </div>
+            <label className="mt-5 block text-xs font-medium text-muted">{t.name}</label>
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="mt-1 h-11 w-full rounded-xl bg-elevated px-3 text-ink outline-none"
+            />
+            <label className="mt-3 block text-xs font-medium text-muted">{t.username}</label>
+            <input
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              className="mt-1 h-11 w-full rounded-xl bg-elevated px-3 text-ink outline-none"
+            />
+            <label className="mt-3 block text-xs font-medium text-muted">{t.bio}</label>
+            <textarea
+              value={bio}
+              onChange={(e) => setBio(e.target.value)}
+              rows={3}
+              className="mt-1 w-full resize-none rounded-xl bg-elevated px-3 py-2 text-ink outline-none"
+            />
+            <button
+              type="button"
+              onClick={() => void saveProfile()}
+              className="mt-3 h-11 w-full rounded-xl bg-accent font-semibold text-white"
+            >
+              {t.save}
+            </button>
+            <div className="mt-6 flex items-center justify-between">
+              <span className="flex items-center gap-2 text-sm text-muted">
+                <Languages size={16} /> {t.language}
+              </span>
+              <div className="flex rounded-full bg-elevated p-1">
+                {(["ru", "ky"] as Lang[]).map((l) => (
+                  <button
+                    key={l}
+                    type="button"
+                    onClick={() => {
+                      setLang(l);
+                      localStorage.setItem("samal.lang", l);
+                    }}
+                    className={`rounded-full px-3 py-1 text-sm font-semibold ${lang === l ? "bg-accent text-ink" : "text-muted"}`}
+                  >
+                    {l.toUpperCase()}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={logout}
+              className="mt-6 flex items-center gap-2 text-danger"
+            >
+              <LogOut size={16} /> {t.logout}
+            </button>
+            <p className="mt-8 text-xs text-muted">{t.apiHint}</p>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+
+  const conversation = active ? (
+    <div className="flex h-full min-w-0 flex-1 flex-col bg-bg">
+      <div className="flex h-14 items-center gap-2.5 border-b border-line px-2">
+        <button
+          type="button"
+          className="flex h-9 w-9 items-center justify-center rounded-full text-ink md:hidden"
+          onClick={() => setActiveId(null)}
+        >
+          <ArrowLeft size={18} />
+        </button>
+        <Avatar name={active.title} src={active.avatar_url} size={36} online={active.peer?.online} />
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-[17px] font-semibold text-ink">{active.title}</p>
+          <p className="text-[12px] font-medium text-success">
+            {isTyping ? t.typing : active.peer?.online ? t.online : active.type === "group" ? `${active.member_count} ${t.members}` : t.lastSeen}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => void api.startCall(active.id, "audio")}
+          className="flex h-9 w-9 items-center justify-center text-ink"
+        >
+          <Phone size={18} />
+        </button>
+        <button
+          type="button"
+          onClick={() => void api.startCall(active.id, "video")}
+          className="flex h-9 w-9 items-center justify-center text-ink"
+        >
+          <Video size={18} />
+        </button>
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto px-3 py-2">
+        {messages.map((m) => {
+          const mine = m.author_id === me;
+          return (
+            <div key={m.id} className={`mb-1 flex ${mine ? "justify-end" : "justify-start"}`}>
+              <div className={`max-w-[78%] ${mine ? "items-end" : "items-start"} flex flex-col`}>
+                <div
+                  className={`px-3 py-2 text-base text-ink ${
+                    mine
+                      ? "rounded-[16px] rounded-br-sm bg-outgoing"
+                      : "rounded-[16px] rounded-bl-sm bg-incoming"
+                  }`}
+                >
+                  {m.attachments?.map((a) =>
+                    a.kind === "photo" ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img key={a.id} src={a.url} alt="" className="mb-1 max-h-64 rounded-lg" />
+                    ) : (
+                      <a key={a.id} href={a.url} className="mb-1 block text-sm underline" target="_blank" rel="noreferrer">
+                        {a.filename || a.kind}
+                      </a>
+                    ),
+                  )}
+                  {m.payload?.text}
+                </div>
+                <div className="mt-0.5 flex items-center gap-1 px-1 text-[12px] font-medium text-muted">
+                  <span>{fmtTime(m.created_at)}</span>
+                  {mine ? (
+                    m.status === "read" ? (
+                      <CheckCheck size={12} className="text-success" />
+                    ) : m.status === "delivered" ? (
+                      <CheckCheck size={12} />
+                    ) : (
+                      <Check size={12} />
+                    )
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+        <div ref={bottomRef} />
+      </div>
+      {attach ? (
+        <div className="flex gap-4 bg-elevated px-6 py-4">
+          <button
+            type="button"
+            onClick={() => {
+              fileRef.current?.setAttribute("accept", "image/*");
+              fileRef.current?.click();
+            }}
+            className="flex flex-1 flex-col items-center gap-2 text-xs text-muted"
+          >
+            <span className="flex h-14 w-14 items-center justify-center rounded-full bg-accent/20 text-accent">
+              <Paperclip size={20} />
+            </span>
+            {t.attachPhoto}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              fileRef.current?.setAttribute("accept", "*/*");
+              fileRef.current?.click();
+            }}
+            className="flex flex-1 flex-col items-center gap-2 text-xs text-muted"
+          >
+            <span className="flex h-14 w-14 items-center justify-center rounded-full bg-accent/20 text-accent">
+              <Paperclip size={20} />
+            </span>
+            {t.attachFile}
+          </button>
+        </div>
+      ) : null}
+      <input
+        ref={fileRef}
+        type="file"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          e.target.value = "";
+          if (!f) return;
+          void sendFile(f, f.type.startsWith("image/") ? "photo" : "file");
+        }}
+      />
+      <div className="flex items-end gap-2 px-3 py-2">
+        <button
+          type="button"
+          onClick={() => setAttach((v) => !v)}
+          className="flex h-10 w-10 items-center justify-center rounded-full bg-elevated text-ink"
+        >
+          <Plus size={20} />
+        </button>
+        <textarea
+          value={text}
+          onChange={(e) => {
+            setText(e.target.value);
+            if (activeId && Date.now() - typingAt.current > 800) {
+              typingAt.current = Date.now();
+              void api.typing(activeId);
+            }
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              void send();
+            }
+          }}
+          rows={1}
+          placeholder={t.composer}
+          className="max-h-32 min-h-[40px] flex-1 resize-none rounded-[20px] bg-elevated px-3 py-2.5 text-base text-ink outline-none placeholder:text-muted"
+        />
+        {text.trim() ? (
+          <button
+            type="button"
+            disabled={composerBusy}
+            onClick={() => void send()}
+            className="flex h-10 w-10 items-center justify-center rounded-full bg-accent text-white"
+          >
+            <ArrowUp size={16} />
+          </button>
+        ) : (
+          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-elevated text-ink">
+            <Mic size={18} />
+          </div>
+        )}
+      </div>
+    </div>
+  ) : (
+    <div className="hidden flex-1 items-center justify-center bg-bg text-muted md:flex">
+      <div className="text-center">
+        <MessageSquare className="mx-auto mb-3 text-accent" size={36} />
+        <p className="text-lg font-semibold text-ink">{t.app}</p>
+        <p className="mt-1 text-sm">{t.emptyChats}</p>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="flex h-[100dvh] bg-bg text-ink">
+      <aside className="hidden w-16 flex-col items-center gap-2 border-r border-line bg-elevated py-4 md:flex">
+        <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-2xl bg-accent text-sm font-bold">S</div>
+        {navBtn("chats", <MessageSquare size={20} />, t.tabChats)}
+        {navBtn("calls", <Phone size={20} />, t.tabCalls)}
+        {navBtn("contacts", <Users size={20} />, t.tabContacts)}
+        {navBtn("more", <Settings size={20} />, t.tabMore)}
+      </aside>
+
+      <div className={`w-full md:w-[340px] md:shrink-0 ${activeId ? "hidden md:flex md:flex-col" : "flex flex-col"}`}>
+        {listPanel}
+        <nav className="flex border-t border-line bg-elevated py-1.5 md:hidden">
+          <div className="flex w-full justify-around">
+            {navBtn("chats", <MessageSquare size={20} />, t.tabChats)}
+            {navBtn("calls", <Phone size={20} />, t.tabCalls)}
+            {navBtn("contacts", <Users size={20} />, t.tabContacts)}
+            {navBtn("more", <Settings size={20} />, t.tabMore)}
+          </div>
+        </nav>
+      </div>
+
+      <div className={`${activeId ? "flex" : "hidden md:flex"} min-w-0 flex-1`}>{conversation}</div>
+
+      {newOpen ? (
+        <div className="fixed inset-0 z-20 flex items-end justify-center bg-black/50 md:items-center">
+          <div className="w-full max-w-md rounded-t-2xl bg-elevated p-5 md:rounded-2xl">
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-lg font-semibold">{newOpen === "group" ? t.newGroup : t.newChat}</h2>
+              <button type="button" onClick={() => setNewOpen(null)}>
+                <X size={18} />
+              </button>
+            </div>
+            <div className="mb-3 flex gap-2">
+              <button
+                type="button"
+                onClick={() => setNewOpen("direct")}
+                className={`rounded-full px-3 py-1 text-sm font-semibold ${newOpen === "direct" ? "bg-accent" : "bg-bg text-muted"}`}
+              >
+                {t.newChat}
+              </button>
+              <button
+                type="button"
+                onClick={() => setNewOpen("group")}
+                className={`rounded-full px-3 py-1 text-sm font-semibold ${newOpen === "group" ? "bg-accent" : "bg-bg text-muted"}`}
+              >
+                {t.newGroup}
+              </button>
+            </div>
+            {newOpen === "group" ? (
+              <input
+                value={groupTitle}
+                onChange={(e) => setGroupTitle(e.target.value)}
+                placeholder={t.groupTitle}
+                className="mb-3 h-11 w-full rounded-xl bg-bg px-3 text-ink outline-none"
+              />
+            ) : null}
+            <label className="mb-3 flex h-10 items-center gap-2 rounded-xl bg-bg px-3">
+              <Search size={16} className="text-muted" />
+              <input
+                value={contactQ}
+                onChange={(e) => {
+                  setContactQ(e.target.value);
+                  if (e.target.value.trim()) {
+                    void api.users(e.target.value).then((r) => setPeople(r.items.filter((u) => u.id !== me)));
+                  } else setPeople([]);
+                }}
+                placeholder={t.search}
+                className="w-full bg-transparent text-sm outline-none"
+              />
+            </label>
+            <div className="max-h-64 overflow-y-auto">
+              {people.map((u) => {
+                const on = picked.includes(u.id);
+                return (
+                  <button
+                    key={u.id}
+                    type="button"
+                    onClick={() => {
+                      if (newOpen === "direct") void openDirect(u.id);
+                      else setPicked((prev) => (on ? prev.filter((id) => id !== u.id) : [...prev, u.id]));
+                    }}
+                    className="flex w-full items-center gap-3 py-2"
+                  >
+                    <Avatar name={u.display_name} src={u.avatar_url} size={40} />
+                    <div className="min-w-0 flex-1 text-left">
+                      <p className="truncate font-semibold">{u.display_name}</p>
+                      <p className="text-xs text-muted">{u.phone}</p>
+                    </div>
+                    {newOpen === "group" ? (
+                      <span className={`h-5 w-5 rounded-full border ${on ? "border-accent bg-accent" : "border-muted"}`} />
+                    ) : null}
+                  </button>
+                );
+              })}
+            </div>
+            {newOpen === "group" ? (
+              <button
+                type="button"
+                onClick={() => void createGroup()}
+                className="mt-4 h-11 w-full rounded-xl bg-accent font-semibold"
+              >
+                {t.create}
+              </button>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
+      {incoming ? (
+        <div className="fixed inset-0 z-30 flex flex-col items-center justify-center bg-bg/95">
+          <p className="text-[28px] font-bold">{incoming.kind === "video" ? t.incomingVideo : t.incomingAudio}</p>
+          <p className="mt-2 text-muted">{t.inCall}</p>
+          <div className="mt-10 flex gap-12">
+            <button
+              type="button"
+              onClick={() => {
+                void api.rejectCall(incoming.id);
+                setIncoming(null);
+              }}
+              className="flex flex-col items-center gap-2"
+            >
+              <span className="flex h-[72px] w-[72px] items-center justify-center rounded-full bg-danger text-white">
+                <PhoneOff size={28} />
+              </span>
+              <span className="text-xs text-muted">{t.decline}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                void api.answerCall(incoming.id);
+              }}
+              className="flex flex-col items-center gap-2"
+            >
+              <span className="flex h-[72px] w-[72px] items-center justify-center rounded-full bg-success text-white">
+                <Phone size={28} />
+              </span>
+              <span className="text-xs text-muted">{t.answer}</span>
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {activeCall ? (
+        <div className="fixed inset-0 z-30 flex flex-col items-center justify-center bg-bg/95">
+          <p className="text-[28px] font-bold">{t.inCall}</p>
+          <button
+            type="button"
+            onClick={() => {
+              void api.hangupCall(activeCall.id);
+              setActiveCall(null);
+            }}
+            className="mt-10 flex h-[72px] w-[72px] items-center justify-center rounded-full bg-danger text-white"
+          >
+            <PhoneOff size={28} />
+          </button>
+          <span className="mt-2 text-xs text-muted">{t.hangup}</span>
+        </div>
+      ) : null}
+    </div>
+  );
+}
