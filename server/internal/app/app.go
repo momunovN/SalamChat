@@ -68,7 +68,7 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger) (http.Handler
 	}))
 
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
-		httpx.JSON(w, 200, map[string]any{"ok": true, "name": "samal"})
+		httpx.JSON(w, 200, map[string]any{"ok": true, "name": "tooapp"})
 	})
 
 	r.Route("/v1", func(r chi.Router) {
@@ -116,7 +116,7 @@ func Run() error {
 	}
 	defer cleanup()
 
-	log.Info("samal api listening", "addr", cfg.HTTPAddr)
+	log.Info("tooapp api listening", "addr", cfg.HTTPAddr)
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
 		Handler:           h,

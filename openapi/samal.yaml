@@ -1,8 +1,8 @@
 openapi: 3.0.3
 info:
-  title: SAMAL API
+  title: TooApp API
   version: 0.1.0
-  description: Native messenger for Kyrgyzstan. TLS + session auth. E2EE is phase 2.
+  description: TooApp messenger. TLS + session auth. E2EE is phase 2.
 servers:
   - url: http://localhost:8080
 paths:

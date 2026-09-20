@@ -1,4 +1,4 @@
-# SAMAL realtime (WebSocket)
+# TooApp realtime (WebSocket)
 
 `GET /v1/ws?token=<access_token>`  
 or `Authorization: Bearer <access_token>`.

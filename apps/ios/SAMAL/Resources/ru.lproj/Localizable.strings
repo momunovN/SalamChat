@@ -1,4 +1,4 @@
-"app.name" = "SAMAL";
+"app.name" = "TooApp";
 "tab.chats" = "Чаты";
 "tab.calls" = "Звонки";
 "tab.contacts" = "Контакты";
@@ -23,7 +23,7 @@
 "attach.file" = "Файл";
 "attach.geo" = "Гео";
 "auth.phone_title" = "Номер телефона";
-"auth.phone_subtitle" = "SAMAL отправит SMS с кодом";
+"auth.phone_subtitle" = "TooApp отправит SMS с кодом";
 "auth.country_kg" = "Кыргызстан";
 "auth.country_ru" = "Россия";
 "auth.continue" = "Продолжить";

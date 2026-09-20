@@ -1,4 +1,4 @@
-# SAMAL
+# TooApp
 
 Native messenger for Kyrgyzstan. UI: Russian + Kyrgyz. Dark-first.
 

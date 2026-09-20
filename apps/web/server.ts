@@ -83,7 +83,7 @@ async function main() {
   });
 
   server.listen(port, () => {
-    console.log(`SAMAL web+api http://localhost:${port}`);
+    console.log(`TooApp web+api http://localhost:${port}`);
     void migrate()
       .then(() => warmup())
       .catch((err) => console.error("db warmup", err));

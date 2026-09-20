@@ -61,7 +61,7 @@ export async function handleRequest(req: Request): Promise<Response> {
     const url = new URL(req.url);
     const pathname = url.pathname.replace(/\/$/, "") || "/";
     if (pathname === "/healthz") {
-      return json(200, { ok: true, name: "samal" });
+      return json(200, { ok: true, name: "tooapp" });
     }
     if (pathname.startsWith("/media/")) {
       const key = pathname.slice("/media/".length);

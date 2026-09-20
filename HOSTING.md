@@ -1,4 +1,4 @@
-# Деплой SAMAL на RelaxDev
+# Деплой TooApp на RelaxDev
 
 Сайт и API живут вместе. После деплоя:
 
@@ -43,7 +43,7 @@
 
 ```
 GET https://<имя>.relaxdev.ru/healthz
-→ {"ok":true,"name":"samal"}
+→ {"ok":true,"name":"tooapp"}
 ```
 
 Приложения: база API = `https://<имя>.relaxdev.ru`.

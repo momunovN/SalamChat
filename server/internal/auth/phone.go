@@ -49,7 +49,7 @@ func NormalizePhone(raw string) (string, bool) {
 
 func DefaultDisplayName(phone string) string {
 	if len(phone) < 4 {
-		return "SAMAL"
+		return "TooApp"
 	}
 	return "• " + phone[len(phone)-4:]
 }

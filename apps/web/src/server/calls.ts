@@ -56,7 +56,7 @@ export async function startCall(userId: string, chatId: string, kind: string) {
   if (kind !== "audio" && kind !== "video") throw new HttpError(400, "bad_request", "kind");
   await mustMember(chatId, userId);
   const id = crypto.randomUUID();
-  const room = "samal-" + id;
+  const room = "tooapp-" + id;
   await query(
     `INSERT INTO calls (id, chat_id, initiator_id, kind, status, sfu_room) VALUES ($1,$2,$3,$4,'ringing',$5)`,
     [id, chatId, userId, kind, room],

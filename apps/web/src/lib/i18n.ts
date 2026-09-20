@@ -1,7 +1,7 @@
 export type Lang = "ru" | "ky";
 
 const ru = {
-  app: "SAMAL",
+  app: "TooApp",
   tabChats: "Чаты",
   tabCalls: "Звонки",
   tabContacts: "Контакты",
@@ -15,7 +15,7 @@ const ru = {
   emptyCalls: "Пока нет звонков",
   emptyContacts: "Найдите человека по имени или номеру",
   phoneTitle: "Номер телефона",
-  phoneSubtitle: "SAMAL отправит SMS с кодом",
+  phoneSubtitle: "TooApp отправит SMS с кодом",
   countryKg: "Кыргызстан",
   countryRu: "Россия",
   phonePlaceholderKg: "+996 XXX XXX XXX",
@@ -60,11 +60,11 @@ const ru = {
   video: "Видео",
   members: "участников",
   you: "Вы",
-  apiHint: "Тот же API для приложений: /v1",
+  apiHint: "TooApp API: /v1",
 };
 
 const ky: typeof ru = {
-  app: "SAMAL",
+  app: "TooApp",
   tabChats: "Чаттар",
   tabCalls: "Чалуулар",
   tabContacts: "Байланыштар",
@@ -78,7 +78,7 @@ const ky: typeof ru = {
   emptyCalls: "Чалуулар жок",
   emptyContacts: "Атын же номерин жазыңыз",
   phoneTitle: "Телефон номери",
-  phoneSubtitle: "SAMAL SMS менен код жөнөтөт",
+  phoneSubtitle: "TooApp SMS менен код жөнөтөт",
   countryKg: "Кыргызстан",
   countryRu: "Россия",
   phonePlaceholderKg: "+996 XXX XXX XXX",
@@ -123,7 +123,7 @@ const ky: typeof ru = {
   video: "Видео",
   members: "катышуучу",
   you: "Сиз",
-  apiHint: "Колдонмолор үчүн ошол эле API: /v1",
+  apiHint: "TooApp API: /v1",
 };
 
 export const dict = { ru, ky };

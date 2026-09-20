@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">SAMAL</string>
+    <string name="app_name">TooApp</string>
     <string name="tab_chats">Чаты</string>
     <string name="tab_calls">Звонки</string>
     <string name="tab_contacts">Контакты</string>
@@ -19,7 +19,7 @@
     <string name="chats_empty">Пока нет чатов</string>
     <string name="online">в сети</string>
     <string name="auth_phone_title">Номер телефона</string>
-    <string name="auth_phone_subtitle">SAMAL отправит SMS с кодом</string>
+    <string name="auth_phone_subtitle">TooApp отправит SMS с кодом</string>
     <string name="auth_country_kg">Кыргызстан +996</string>
     <string name="auth_country_ru">Россия +7</string>
     <string name="auth_continue">Продолжить</string>

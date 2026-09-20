@@ -41,7 +41,7 @@ func New(cfg config.Config, log *slog.Logger) Sender {
 				q := url.Values{
 					"api_id": {cfg.SMSAPIKey},
 					"to":     {digits(phone)},
-					"msg":    {"SAMAL: " + code},
+					"msg":    {"TooApp: " + code},
 					"json":   {"1"},
 				}
 				if cfg.SMSSender != "" {
@@ -70,7 +70,7 @@ func New(cfg config.Config, log *slog.Logger) Sender {
 					"login":  {cfg.SMSLogin},
 					"psw":    {cfg.SMSAPIKey},
 					"phones": {digits(phone)},
-					"mes":    {"SAMAL: " + code},
+					"mes":    {"TooApp: " + code},
 					"fmt":    {"3"},
 				}
 				if cfg.SMSSender != "" {

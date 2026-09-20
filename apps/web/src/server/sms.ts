@@ -5,12 +5,12 @@ function digits(phone: string) {
 }
 
 function text(code: string) {
-  return `SAMAL: ${code}`;
+  return `TooApp: ${code}`;
 }
 
 async function sendSmsRu(phone: string, code: string) {
   const key = env("SMS_API_KEY");
-  const from = env("SMS_SENDER", "SAMAL");
+  const from = env("SMS_SENDER", "TooApp");
   const url = new URL("https://sms.ru/sms/send");
   url.searchParams.set("api_id", key);
   url.searchParams.set("to", digits(phone));
@@ -27,7 +27,7 @@ async function sendSmsRu(phone: string, code: string) {
 async function sendSmsc(phone: string, code: string) {
   const login = env("SMS_LOGIN");
   const psw = env("SMS_API_KEY");
-  const from = env("SMS_SENDER", "SAMAL");
+  const from = env("SMS_SENDER", "TooApp");
   const url = new URL("https://smsc.ru/sys/send.php");
   url.searchParams.set("login", login);
   url.searchParams.set("psw", psw);
@@ -58,7 +58,7 @@ export async function sendOTP(phone: string, code: string) {
       await sendSmsc(phone, code);
       return "smsc";
     default:
-      console.log(`SAMAL OTP ${phone} ${code}`);
+      console.log(`TooApp OTP ${phone} ${code}`);
       return "stub";
   }
 }

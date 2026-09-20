@@ -24,7 +24,7 @@ func signAccess(secret []byte, userID, deviceID uuid.UUID, ttl time.Duration) (s
 			Subject:   userID.String(),
 			ExpiresAt: jwt.NewNumericDate(exp),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
-			Issuer:    "samal",
+			Issuer:    "tooapp",
 		},
 	})
 	s, err := t.SignedString(secret)

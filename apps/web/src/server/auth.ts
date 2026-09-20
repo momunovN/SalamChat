@@ -106,7 +106,7 @@ async function issueSession(user: User, deviceId: string, refresh: string) {
   const access = await new SignJWT({ did: deviceId })
     .setProtectedHeader({ alg: "HS256" })
     .setSubject(user.id)
-    .setIssuer("samal")
+    .setIssuer("tooapp")
     .setIssuedAt()
     .setExpirationTime("7d")
     .sign(secretKey());
@@ -202,7 +202,7 @@ export async function logout(deviceId: string) {
 
 export async function parseAccess(token: string) {
   try {
-    const { payload } = await jwtVerify(token, secretKey(), { issuer: "samal" });
+    const { payload } = await jwtVerify(token, secretKey(), { issuer: ["tooapp", "samal"] });
     const userId = String(payload.sub || "");
     const deviceId = String(payload.did || "");
     if (!userId || !deviceId) throw new Error("claims");

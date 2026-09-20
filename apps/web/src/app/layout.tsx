@@ -8,8 +8,8 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "SAMAL",
-  description: "Мессенджер для Кыргызстана. Веб и API /v1.",
+  title: "TooApp",
+  description: "TooApp — мессенджер. Веб и API /v1.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

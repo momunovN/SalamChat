@@ -1,4 +1,4 @@
-# SAMAL Web + API
+# TooApp Web + API
 
 Веб-мессенджер и тот же REST/realtime API, что и у iOS/Android.
 

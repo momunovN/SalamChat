@@ -21,6 +21,6 @@ export function normalizePhone(raw: string): string | null {
 }
 
 export function defaultDisplayName(phone: string) {
-  if (phone.length < 4) return "SAMAL";
+  if (phone.length < 4) return "TooApp";
   return "• " + phone.slice(-4);
 }

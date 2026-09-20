@@ -95,7 +95,7 @@ export function MessengerApp() {
       setUsername(s.user.username || "");
       setBio(s.user.bio || "");
     }
-    const stored = localStorage.getItem("samal.lang");
+    const stored = localStorage.getItem("tooapp.lang") || localStorage.getItem("samal.lang");
     if (stored === "ru" || stored === "ky") setLang(stored);
     setReady(true);
   }, []);
@@ -129,8 +129,8 @@ export function MessengerApp() {
       setMessages([]);
       setActiveId(null);
     };
-    window.addEventListener("samal:auth-lost", onLost);
-    return () => window.removeEventListener("samal:auth-lost", onLost);
+    window.addEventListener("tooapp:auth-lost", onLost);
+    return () => window.removeEventListener("tooapp:auth-lost", onLost);
   }, []);
 
   useEffect(() => {
@@ -494,7 +494,7 @@ export function MessengerApp() {
                     type="button"
                     onClick={() => {
                       setLang(l);
-                      localStorage.setItem("samal.lang", l);
+                      localStorage.setItem("tooapp.lang", l);
                     }}
                     className={`rounded-full px-3 py-1 text-sm font-semibold ${lang === l ? "bg-accent text-ink" : "text-muted"}`}
                   >
@@ -689,7 +689,7 @@ export function MessengerApp() {
   return (
     <div className="flex h-[100dvh] bg-bg text-ink">
       <aside className="hidden w-16 flex-col items-center gap-2 border-r border-line bg-elevated py-4 md:flex">
-        <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-2xl bg-accent text-sm font-bold">S</div>
+        <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-2xl bg-accent text-sm font-bold">T</div>
         {navBtn("chats", <MessageSquare size={20} />, t.tabChats)}
         {navBtn("calls", <Phone size={20} />, t.tabCalls)}
         {navBtn("contacts", <Users size={20} />, t.tabContacts)}
