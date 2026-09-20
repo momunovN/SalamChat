@@ -29,11 +29,11 @@
 
 | Ключ | Значение |
 |---|---|
-| `SAMAL_PUBLIC_URL` | `https://<имя>.relaxdev.ru` |
-| `SAMAL_JWT_SECRET` | длинный случайный секрет |
-| `SAMAL_OTP_DEV` | `false` в проде |
+| `TOOAPP_PUBLIC_URL` | `https://<имя>.relaxdev.ru` |
+| `TOOAPP_JWT_SECRET` | длинный случайный секрет |
+| `TOOAPP_OTP_DEV` | `false` в проде |
 | `DATABASE_URL` | строка Postgres |
-| `SAMAL_DATABASE_URL` | та же строка |
+| `TOOAPP_DATABASE_URL` | та же строка |
 
 База: либо **База данных** в RelaxDev (тогда `DATABASE_URL` появится сам), либо ваш Neon.
 

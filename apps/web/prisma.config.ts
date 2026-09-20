@@ -17,8 +17,9 @@ for (let i = 0; i < 6; i++) {
 
 const url =
   process.env.DATABASE_URL ||
+  process.env.TOOAPP_DATABASE_URL ||
   process.env.SAMAL_DATABASE_URL ||
-  "postgres://samal:samal@localhost:5432/samal?sslmode=disable";
+  "postgres://tooapp:tooapp@localhost:5432/tooapp?sslmode=disable";
 
 export default defineConfig({
   schema: "prisma/schema.prisma",

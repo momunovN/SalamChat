@@ -20,11 +20,11 @@ go mod tidy
 go run ./cmd/api
 ```
 
-Postgres: Neon (`SAMAL_DATABASE_URL`, direct host without `-pooler`). Redis is not used — presence/OTP live in the API process + Postgres. MinIO is optional (uploads skip if it is down). Docker is only needed if you want local Postgres/MinIO instead of Neon.
+Postgres: Neon (`TOOAPP_DATABASE_URL` or `DATABASE_URL`, direct host without `-pooler`). Redis is not used — presence/OTP live in the API process + Postgres. MinIO is optional (uploads skip if it is down). Docker is only needed if you want local Postgres/MinIO instead of Neon.
 
 Health: `GET http://localhost:8080/healthz`
 
-OTP in dev returns `dev_code` (`SAMAL_OTP_DEV=true`). SMS is stub until you set a key — then `sms.ru` or `smsc.ru` (RU + KG). See `.env.example`.
+OTP in dev returns `dev_code` (`TOOAPP_OTP_DEV=true`). SMS is stub until you set a key — then `sms.ru` or `smsc.ru` (RU + KG). See `.env.example`.
 
 ## Clients
 

@@ -24,7 +24,7 @@ paths:
                 phone: { type: string, example: "+996700000001" }
       responses:
         "200":
-          description: OTP sent. `dev_code` only when SAMAL_OTP_DEV=true
+          description: OTP sent. `dev_code` only when TOOAPP_OTP_DEV=true
   /v1/auth/otp/verify:
     post:
       requestBody:

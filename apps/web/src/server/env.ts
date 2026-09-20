@@ -47,12 +47,13 @@ export function envBool(key: string, fallback: boolean) {
 }
 
 export function jwtSecret() {
-  return env("SAMAL_JWT_SECRET", "dev-change-me-32-bytes-minimum-secret");
+  return envFirst("dev-change-me-32-bytes-minimum-secret", "TOOAPP_JWT_SECRET", "SAMAL_JWT_SECRET");
 }
 
 function rawDatabaseURL() {
   return envFirst(
-    "postgres://samal:samal@localhost:5432/samal?sslmode=disable",
+    "postgres://tooapp:tooapp@localhost:5432/tooapp?sslmode=disable",
+    "TOOAPP_DATABASE_URL",
     "SAMAL_DATABASE_URL",
     "DATABASE_URL",
   );
@@ -68,11 +69,13 @@ export function databaseURLDirect() {
 }
 
 export function otpDev() {
-  return envBool("SAMAL_OTP_DEV", true);
+  const v = envFirst("", "TOOAPP_OTP_DEV", "SAMAL_OTP_DEV");
+  if (!v) return true;
+  return v === "1" || v.toLowerCase() === "true" || v.toLowerCase() === "yes";
 }
 
 export function publicBase(req?: Request) {
-  const fromEnv = env("SAMAL_PUBLIC_URL", "");
+  const fromEnv = envFirst("", "TOOAPP_PUBLIC_URL", "SAMAL_PUBLIC_URL");
   if (fromEnv) return fromEnv.replace(/\/$/, "");
   if (req) {
     const host = req.headers.get("x-forwarded-host") || req.headers.get("host") || "localhost:3000";

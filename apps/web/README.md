@@ -9,7 +9,7 @@
 
 ## Запуск
 
-Из корня репозитория уже должен быть `.env` с `SAMAL_DATABASE_URL` (Neon, direct host без `-pooler`).
+Из корня репозитория уже должен быть `.env` с `TOOAPP_DATABASE_URL` (Neon, direct host без `-pooler`).
 
 ```
 cd apps/web
@@ -25,7 +25,7 @@ npm run dev
 
 OTP в dev приходит в ответе (`dev_code`). SMS никуда не уходит, ключ не нужен.
 
-Реальная SMS на РФ и Кыргызстан: `SMS_PROVIDER=smsru` и `SMS_API_KEY` с [sms.ru](https://sms.ru/?panel=api), либо `SMS_PROVIDER=smsc` + `SMS_LOGIN` + `SMS_API_KEY` с [smsc.ru](https://smsc.ru/api/). В проде `SAMAL_OTP_DEV=false`.
+Реальная SMS на РФ и Кыргызстан: `SMS_PROVIDER=smsru` и `SMS_API_KEY` с [sms.ru](https://sms.ru/?panel=api), либо `SMS_PROVIDER=smsc` + `SMS_LOGIN` + `SMS_API_KEY` с [smsc.ru](https://smsc.ru/api/). В проде `TOOAPP_OTP_DEV=false`.
 
 ## Приложения
 

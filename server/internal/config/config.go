@@ -38,24 +38,24 @@ type Config struct {
 func Load() Config {
 	loadDotEnv()
 	return Config{
-		HTTPAddr: env("SAMAL_HTTP_ADDR", ":8080"),
+		HTTPAddr: envFirst(":8080", "TOOAPP_HTTP_ADDR", "SAMAL_HTTP_ADDR"),
 		// Neon: paste the DIRECT connection string (host without "-pooler").
-		// Dashboard copies it as DATABASE_URL; both names work.
 		DatabaseURL: envFirst(
-			"postgres://samal:samal@localhost:5432/samal?sslmode=disable",
+			"postgres://tooapp:tooapp@localhost:5432/tooapp?sslmode=disable",
+			"TOOAPP_DATABASE_URL",
 			"SAMAL_DATABASE_URL",
 			"DATABASE_URL",
 		),
-		JWTSecret: []byte(env("SAMAL_JWT_SECRET", "dev-change-me-32-bytes-minimum-secret")),
-		OTPDev:        envBool("SAMAL_OTP_DEV", true),
+		JWTSecret: []byte(envFirst("dev-change-me-32-bytes-minimum-secret", "TOOAPP_JWT_SECRET", "SAMAL_JWT_SECRET")),
+		OTPDev:        envBoolFirst(true, "TOOAPP_OTP_DEV", "SAMAL_OTP_DEV"),
 		AccessTTL:     30 * time.Minute,
 		RefreshTTL:    60 * 24 * time.Hour,
-		S3Endpoint:    env("SAMAL_S3_ENDPOINT", "localhost:9000"),
-		S3AccessKey:   env("SAMAL_S3_ACCESS_KEY", "samal"),
-		S3SecretKey:   env("SAMAL_S3_SECRET_KEY", "samalsecret"),
-		S3Bucket:      env("SAMAL_S3_BUCKET", "samal"),
-		S3UseSSL:      envBool("SAMAL_S3_USE_SSL", false),
-		S3PublicURL:   strings.TrimRight(env("SAMAL_S3_PUBLIC_URL", "http://localhost:9000/samal"), "/"),
+		S3Endpoint:    envFirst("localhost:9000", "TOOAPP_S3_ENDPOINT", "SAMAL_S3_ENDPOINT"),
+		S3AccessKey:   envFirst("tooapp", "TOOAPP_S3_ACCESS_KEY", "SAMAL_S3_ACCESS_KEY"),
+		S3SecretKey:   envFirst("tooappsecret", "TOOAPP_S3_SECRET_KEY", "SAMAL_S3_SECRET_KEY"),
+		S3Bucket:      envFirst("tooapp", "TOOAPP_S3_BUCKET", "SAMAL_S3_BUCKET"),
+		S3UseSSL:      envBoolFirst(false, "TOOAPP_S3_USE_SSL", "SAMAL_S3_USE_SSL"),
+		S3PublicURL:   strings.TrimRight(envFirst("http://localhost:9000/tooapp", "TOOAPP_S3_PUBLIC_URL", "SAMAL_S3_PUBLIC_URL"), "/"),
 		LiveKitURL:    env("LIVEKIT_URL", ""),
 		LiveKitKey:    env("LIVEKIT_API_KEY", ""),
 		LiveKitSecret: env("LIVEKIT_API_SECRET", ""),
@@ -99,13 +99,20 @@ func envFirst(fallback string, keys ...string) string {
 }
 
 func envBool(key string, fallback bool) bool {
-	v := os.Getenv(key)
-	if v == "" {
-		return fallback
+	return envBoolFirst(fallback, key)
+}
+
+func envBoolFirst(fallback bool, keys ...string) bool {
+	for _, key := range keys {
+		v := os.Getenv(key)
+		if v == "" {
+			continue
+		}
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return fallback
+		}
+		return b
 	}
-	b, err := strconv.ParseBool(v)
-	if err != nil {
-		return fallback
-	}
-	return b
+	return fallback
 }
