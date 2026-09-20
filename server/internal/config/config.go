@@ -61,7 +61,7 @@ func Load() Config {
 		LiveKitSecret: env("LIVEKIT_API_SECRET", ""),
 		SMSProvider:   env("SMS_PROVIDER", "stub"),
 		SMSAPIKey:     env("SMS_API_KEY", ""),
-		SMSSender:     env("SMS_SENDER", "TooApp"),
+		SMSSender:     env("SMS_SENDER", ""),
 		SMSLogin:      env("SMS_LOGIN", ""),
 	}
 }

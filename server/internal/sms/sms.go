@@ -44,8 +44,8 @@ func New(cfg config.Config, log *slog.Logger) Sender {
 					"msg":    {"TooApp: " + code},
 					"json":   {"1"},
 				}
-				if cfg.SMSSender != "" {
-					q.Set("from", cfg.SMSSender)
+				if sender := strings.TrimSpace(cfg.SMSSender); sender != "" && !strings.EqualFold(sender, "TooApp") && !strings.EqualFold(sender, "SAMAL") {
+					q.Set("from", sender)
 				}
 				return "https://sms.ru/sms/send?" + q.Encode()
 			},
@@ -73,8 +73,8 @@ func New(cfg config.Config, log *slog.Logger) Sender {
 					"mes":    {"TooApp: " + code},
 					"fmt":    {"3"},
 				}
-				if cfg.SMSSender != "" {
-					q.Set("sender", cfg.SMSSender)
+				if sender := strings.TrimSpace(cfg.SMSSender); sender != "" && !strings.EqualFold(sender, "TooApp") && !strings.EqualFold(sender, "SAMAL") {
+					q.Set("sender", sender)
 				}
 				return "https://smsc.ru/sys/send.php?" + q.Encode()
 			},
