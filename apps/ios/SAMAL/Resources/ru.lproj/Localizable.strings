@@ -30,3 +30,11 @@
 "auth.otp_title" = "Код из SMS";
 "auth.otp_subtitle" = "Введите 6 цифр";
 "chats.empty" = "Пока нет чатов";
+"auth.name_title" = "Как вас зовут?";
+"auth.name_subtitle" = "Имя увидят в чатах и при поиске";
+"auth.name_placeholder" = "Ваше имя";
+"auth.nick_optional" = "Ник (необязательно)";
+"auth.nick_hint" = "По нему можно найти вас: @nickname";
+"auth.sync_contacts" = "Синхронизировать контакты";
+"contacts.sync_hint" = "Включите синхронизацию контактов — друзья из TooApp появятся здесь и на сайте.";
+"auth.err_name" = "Введите имя — не меньше двух букв";

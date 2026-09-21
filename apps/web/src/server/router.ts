@@ -27,6 +27,7 @@ import { migrate } from "./db";
 import { envelope, hub, presence } from "./hub";
 import { bearer, corsHeaders, errorResponse, HttpError, json, readJSON } from "./http";
 import { listMessages, receipts, sendMessage } from "./messages";
+import { listContacts, syncContacts } from "./contacts";
 import { getUserPublic, lookupPhones, searchUsers } from "./users";
 import { completeUpload, createIntent, putUpload, readMedia } from "./uploads";
 import { sseResponse } from "./stream";
@@ -200,6 +201,13 @@ async function dispatch(method: string, parts: string[], req: Request, url: URL)
   if (method === "POST" && p("receipts")) {
     const body = await readJSON<{ message_ids?: string[]; status?: string }>(req);
     return json(200, await receipts(auth.userId, body.message_ids || [], body.status || ""));
+  }
+  if (method === "GET" && p("contacts")) {
+    return json(200, await listContacts(auth.userId));
+  }
+  if (method === "POST" && p("contacts/sync")) {
+    const body = await readJSON<{ enabled?: boolean; items?: { phone?: string; name?: string }[] }>(req);
+    return json(200, await syncContacts(auth.userId, body.enabled !== false, body.items || []));
   }
   if (method === "GET" && p("users")) {
     return json(200, await searchUsers(url.searchParams.get("q") || ""));

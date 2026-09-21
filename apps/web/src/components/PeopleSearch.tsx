@@ -55,13 +55,17 @@ export function PersonRow({
   onClick: () => void;
   trailing?: ReactNode;
 }) {
-  const sub = user.username ? `@${user.username}` : formatPhone(user.phone);
+  const title = user.book_name || user.display_name;
+  const bits = [
+    user.username ? `@${user.username}` : "",
+    formatPhone(user.phone),
+  ].filter(Boolean);
   return (
-    <button type="button" onClick={onClick} className="flex w-full items-center gap-3 py-2 text-left hover:bg-elevated/60">
-      <Avatar name={user.display_name} src={user.avatar_url} size={40} online={user.online} />
+    <button type="button" onClick={onClick} className="flex w-full items-center gap-3 px-1 py-2 text-left hover:bg-elevated/60">
+      <Avatar name={title} src={user.avatar_url} size={40} online={user.online} />
       <div className="min-w-0 flex-1">
-        <p className="truncate font-semibold text-ink">{user.display_name}</p>
-        <p className="truncate text-xs text-muted">{sub}</p>
+        <p className="truncate font-semibold text-ink">{title}</p>
+        <p className="truncate text-xs text-muted">{bits.join(" · ")}</p>
       </div>
       {trailing}
     </button>

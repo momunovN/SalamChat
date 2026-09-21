@@ -30,3 +30,11 @@
 "auth.otp_title" = "SMS коду";
 "auth.otp_subtitle" = "6 санды жазыңыз";
 "chats.empty" = "Чаттар жок";
+"auth.name_title" = "Атыңыз ким?";
+"auth.name_subtitle" = "Атыңыз чаттарда жана издөөдө көрүнөт";
+"auth.name_placeholder" = "Атыңыз";
+"auth.nick_optional" = "Ник (милдеттүү эмес)";
+"auth.nick_hint" = "Сизди @nickname менен табышат";
+"auth.sync_contacts" = "Контакттарды синхрондоо";
+"contacts.sync_hint" = "Синхрондоону күйгүзүңүз — TooApp’тагы достор ушул жерде жана сайтта чыгат.";
+"auth.err_name" = "Атын жазыңыз — эки тамгадан кем эмес";

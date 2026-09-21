@@ -33,6 +33,14 @@ enum L10n {
     static var otpTitle: String { t("auth.otp_title") }
     static var otpSubtitle: String { t("auth.otp_subtitle") }
     static var emptyChats: String { t("chats.empty") }
+    static var nameTitle: String { t("auth.name_title") }
+    static var nameSubtitle: String { t("auth.name_subtitle") }
+    static var namePlaceholder: String { t("auth.name_placeholder") }
+    static var nickOptional: String { t("auth.nick_optional") }
+    static var nickHint: String { t("auth.nick_hint") }
+    static var syncContacts: String { t("auth.sync_contacts") }
+    static var syncHint: String { t("contacts.sync_hint") }
+    static var errName: String { t("auth.err_name") }
 
     static func t(_ key: String) -> String {
         NSLocalizedString(key, comment: "")

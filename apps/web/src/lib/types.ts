@@ -9,6 +9,8 @@ export type User = {
   updated_at?: string;
   last_seen_at?: string | null;
   online?: boolean;
+  contacts_sync?: boolean;
+  book_name?: string | null;
 };
 
 export type Session = {

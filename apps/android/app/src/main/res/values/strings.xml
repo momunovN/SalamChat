@@ -25,4 +25,12 @@
     <string name="auth_continue">Продолжить</string>
     <string name="auth_otp_title">Код из SMS</string>
     <string name="auth_otp_subtitle">Введите 6 цифр</string>
+    <string name="name_title">Как вас зовут?</string>
+    <string name="name_subtitle">Имя увидят в чатах и при поиске</string>
+    <string name="nick_optional">Ник (необязательно)</string>
+    <string name="nick_hint">По нему можно найти вас: @nickname</string>
+    <string name="sync_contacts">Синхронизировать контакты</string>
+    <string name="sync_hint">Включите синхронизацию контактов — друзья из TooApp появятся здесь и на сайте.</string>
+    <string name="err_name">Введите имя — не меньше двух букв</string>
+    <string name="err_nick">Ник: латиница, 3–24 символа, начать с буквы</string>
 </resources>

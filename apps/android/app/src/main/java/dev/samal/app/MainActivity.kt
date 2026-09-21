@@ -28,9 +28,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import dev.samal.app.data.db.ChatEntity
+import dev.samal.app.data.contacts.needsDisplayName
 import dev.samal.app.ui.auth.PhoneAuthScreen
+import dev.samal.app.ui.auth.ProfileOnboardingScreen
 import dev.samal.app.ui.chat.ChatScreen
 import dev.samal.app.ui.chats.ChatListScreen
+import dev.samal.app.ui.contacts.ContactsScreen
 import dev.samal.app.ui.theme.Accent
 import dev.samal.app.ui.theme.Bg
 import dev.samal.app.ui.theme.Elevated
@@ -44,8 +47,11 @@ class MainActivity : ComponentActivity() {
         val app = application as SamalApp
         setContent {
             SamalTheme {
-                if (app.session.user == null) {
+                val user = app.session.user
+                if (user == null) {
                     PhoneAuthScreen(app.session)
+                } else if (needsDisplayName(user.displayName)) {
+                    ProfileOnboardingScreen(app.session)
                 } else {
                     MainShell(app)
                 }
@@ -66,6 +72,7 @@ private fun MainShell(app: SamalApp) {
                 ChatScreen(chat, app.db.dao(), me = me, onBack = { open = null })
             } else when (tab) {
                 0 -> ChatListScreen(app.db.dao()) { open = it }
+                2 -> ContactsScreen(app.api) { /* open chat by user id later */ }
                 else -> Text(
                     listOf(
                         stringResource(R.string.tab_calls),

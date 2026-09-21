@@ -6,6 +6,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import dev.samal.app.data.api.SamalApi
+import dev.samal.app.data.contacts.BookContact
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -49,6 +50,25 @@ class SessionStore(
             api.verifyOtp(phone, code, Build.MODEL.ifBlank { "Android" })
         }
         apply(sess)
+    }
+
+    suspend fun patchProfile(displayName: String, username: String?) {
+        val raw = withContext(Dispatchers.IO) { api.patchMe(displayName, username) }
+        val current = prefs.getString(KEY, null) ?: return
+        val sess = Session.from(JSONObject(current))
+        val nextUser = Session.from(
+            JSONObject()
+                .put("access_token", sess.accessToken)
+                .put("refresh_token", sess.refreshToken)
+                .put("expires_at", sess.expiresAt)
+                .put("device_id", sess.deviceId)
+                .put("user", raw),
+        )
+        apply(nextUser)
+    }
+
+    suspend fun syncContacts(enabled: Boolean, items: List<BookContact>) {
+        withContext(Dispatchers.IO) { api.syncContacts(enabled, items) }
     }
 
     companion object {

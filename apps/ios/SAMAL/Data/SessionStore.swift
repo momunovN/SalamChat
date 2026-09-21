@@ -43,6 +43,27 @@ final class SessionStore: ObservableObject {
         apply(sess)
     }
 
+    func updateUser(_ user: APIUser) {
+        self.user = user
+        if let data = UserDefaults.standard.data(forKey: "samal.session"),
+           var sess = try? JSONDecoder().decode(APISession.self, from: data) {
+            sess.user = user
+            apply(sess)
+        }
+    }
+
+    func completeProfile(name: String, nick: String, syncContacts: Bool) async throws {
+        let nickClean = nick.trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingPrefix("@")
+            .lowercased()
+        let user = try await api.patchMe(displayName: name, username: nickClean.isEmpty ? nil : String(nickClean))
+        updateUser(user)
+        if syncContacts {
+            let book = await ContactSync.load()
+            try? await api.syncContacts(enabled: true, items: book)
+        }
+    }
+
     private func startWorkers() {
         outboxTask?.cancel()
         outboxTask = Task { [weak self] in
@@ -53,7 +74,11 @@ final class SessionStore: ObservableObject {
         }
         ws?.stop()
         if let token = api.accessToken {
-            let client = RealtimeClient(url: URL(string: "ws://127.0.0.1:8080/v1/ws?token=\(token)")!)
+            let root = api.baseURL.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            let wsRoot = root
+                .replacingOccurrences(of: "https://", with: "wss://")
+                .replacingOccurrences(of: "http://", with: "ws://")
+            let client = RealtimeClient(url: URL(string: "\(wsRoot)/v1/ws?token=\(token)")!)
             client.onEvent = { [weak self] type, body in
                 Task { @MainActor in
                     self?.handle(type: type, body: body)

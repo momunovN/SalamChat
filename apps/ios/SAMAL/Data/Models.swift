@@ -9,12 +9,14 @@ struct APIUser: Codable, Hashable, Identifiable {
     var bio: String
     var lastSeenAt: Date?
     var online: Bool?
+    var bookName: String?
 
     enum CodingKeys: String, CodingKey {
         case id, phone, username, bio, online
         case displayName = "display_name"
         case avatarURL = "avatar_url"
         case lastSeenAt = "last_seen_at"
+        case bookName = "book_name"
     }
 }
 

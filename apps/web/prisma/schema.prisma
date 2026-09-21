@@ -15,16 +15,18 @@ model User {
   bio         String    @default("")
   createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
-  lastSeenAt  DateTime? @map("last_seen_at") @db.Timestamptz(6)
+  lastSeenAt    DateTime? @map("last_seen_at") @db.Timestamptz(6)
+  contactsSync  Boolean   @default(false) @map("contacts_sync")
 
-  devices       Device[]
-  chatsCreated  Chat[]       @relation("ChatCreator")
-  memberships   ChatMember[]
-  messages      Message[]
-  receipts      Receipt[]
-  uploads       Upload[]
-  callsStarted  Call[]       @relation("CallInitiator")
-  callEvents    CallEvent[]
+  devices        Device[]
+  chatsCreated   Chat[]       @relation("ChatCreator")
+  memberships    ChatMember[]
+  messages       Message[]
+  receipts       Receipt[]
+  uploads        Upload[]
+  callsStarted   Call[]       @relation("CallInitiator")
+  callEvents     CallEvent[]
+  ownedContacts  Contact[]
 
   @@map("users")
 }
@@ -43,6 +45,20 @@ model Device {
 
   @@index([userId], map: "devices_user_id_idx")
   @@map("devices")
+}
+
+model Contact {
+  ownerId   String   @map("owner_id") @db.Uuid
+  phone     String
+  bookName  String   @default("") @map("book_name")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  owner User @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@id([ownerId, phone])
+  @@index([phone], map: "contacts_phone_idx")
+  @@index([ownerId], map: "contacts_owner_idx")
+  @@map("contacts")
 }
 
 model OtpChallenge {

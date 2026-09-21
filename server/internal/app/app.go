@@ -94,6 +94,8 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger) (http.Handler
 			if store != nil {
 				r.Mount("/uploads", upload.NewHandler(store).Routes())
 			}
+			r.Get("/contacts", usersH.ListContacts)
+			r.Post("/contacts/sync", usersH.SyncContacts)
 			r.Mount("/users", usersH.Routes())
 			r.Handle("/ws", &realtime.WSHandler{Hub: hub, Pres: pres, Chats: chatsSvc})
 		})

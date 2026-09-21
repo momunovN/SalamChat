@@ -23,12 +23,12 @@ import {
 } from "lucide-react";
 import { api, loadSession, saveSession } from "@/lib/api";
 import { dict, type Lang } from "@/lib/i18n";
-import { needsDisplayName, sanitizeDisplayName } from "@/lib/name";
+import { needsDisplayName, sanitizeDisplayName, sanitizeUsername } from "@/lib/name";
 import { formatPhone } from "@/lib/phone";
-import type { Call, Chat, Envelope, Message, Session } from "@/lib/types";
+import type { Call, Chat, Envelope, Message, Session, User } from "@/lib/types";
 import { Avatar } from "./Avatar";
 import { NameOnboarding } from "./NameOnboarding";
-import { PeopleResults, useUserSearch } from "./PeopleSearch";
+import { PeopleResults, PersonRow, useUserSearch } from "./PeopleSearch";
 import { PhoneAuth } from "./PhoneAuth";
 
 type Tab = "chats" | "calls" | "contacts" | "more";
@@ -69,6 +69,9 @@ export function MessengerApp() {
   const [calls, setCalls] = useState<Call[]>([]);
   const [contactQ, setContactQ] = useState("");
   const [pickerQ, setPickerQ] = useState("");
+  const [syncedPeople, setSyncedPeople] = useState<User[]>([]);
+  const [contactsSynced, setContactsSynced] = useState(false);
+  const [profileError, setProfileError] = useState<string | null>(null);
   const [incoming, setIncoming] = useState<Call | null>(null);
   const [activeCall, setActiveCall] = useState<Call | null>(null);
   const [typing, setTyping] = useState<Record<string, number>>({});
@@ -201,6 +204,17 @@ export function MessengerApp() {
     void api.calls().then((r) => setCalls(r.items));
   }, [session, tab]);
 
+  useEffect(() => {
+    if (!session || tab !== "contacts") return;
+    void api
+      .contacts()
+      .then((r) => {
+        setSyncedPeople((r.items ?? []).filter((u) => u.id !== me));
+        setContactsSynced(!!r.synced);
+      })
+      .catch(() => undefined);
+  }, [session, tab, me]);
+
   const contactsSearch = useUserSearch(tab === "contacts" ? contactQ : "", me);
   const pickerSearch = useUserSearch(newOpen ? pickerQ : "", me);
 
@@ -277,11 +291,22 @@ export function MessengerApp() {
   async function saveProfile() {
     const nextName = sanitizeDisplayName(name);
     if (!nextName) return;
-    const user = await api.patchMe({ display_name: nextName, username: username || undefined, bio });
-    if (session) {
-      const next = { ...session, user };
-      saveSession(next);
-      setSession(next);
+    const nick = sanitizeUsername(username);
+    if (username.trim() && nick === null) {
+      setProfileError(t.errNick);
+      return;
+    }
+    setProfileError(null);
+    try {
+      const user = await api.patchMe({ display_name: nextName, ...(nick ? { username: nick } : {}), bio });
+      if (session) {
+        const next = { ...session, user };
+        saveSession(next);
+        setSession(next);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "";
+      setProfileError(/username taken|conflict/i.test(msg) ? t.errNickTaken : t.errLogin);
     }
   }
 
@@ -444,14 +469,25 @@ export function MessengerApp() {
 
         {tab === "contacts" ? (
           <div className="px-3">
-            <PeopleResults
-              t={t}
-              query={contactQ}
-              items={contactsSearch.items}
-              status={contactsSearch.status}
-              error={contactsSearch.error}
-              onPick={(u) => void openDirect(u.id)}
-            />
+            {contactQ.trim() ? (
+              <PeopleResults
+                t={t}
+                query={contactQ}
+                items={contactsSearch.items}
+                status={contactsSearch.status}
+                error={contactsSearch.error}
+                onPick={(u) => void openDirect(u.id)}
+              />
+            ) : syncedPeople.length > 0 ? (
+              syncedPeople.map((u) => (
+                <PersonRow key={u.id} user={u} onClick={() => void openDirect(u.id)} />
+              ))
+            ) : (
+              <div className="px-1 py-10 text-center">
+                <p className="text-sm text-muted">{contactsSynced ? t.emptySynced : t.emptyContacts}</p>
+                <p className="mt-3 text-xs leading-5 text-muted">{t.syncHint}</p>
+              </div>
+            )}
           </div>
         ) : null}
 
@@ -461,7 +497,10 @@ export function MessengerApp() {
               <Avatar name={session.user.display_name} src={session.user.avatar_url} size={56} />
               <div>
                 <p className="font-semibold text-ink">{session.user.display_name}</p>
-                <p className="text-sm text-muted">{formatPhone(session.user.phone)}</p>
+                <p className="text-sm text-muted">
+                  {session.user.username ? `@${session.user.username} · ` : ""}
+                  {formatPhone(session.user.phone)}
+                </p>
               </div>
             </div>
             <label className="mt-5 block text-xs font-medium text-muted">{t.name}</label>
@@ -470,12 +509,20 @@ export function MessengerApp() {
               onChange={(e) => setName(e.target.value)}
               className="mt-1 h-11 w-full rounded-xl bg-elevated px-3 text-ink outline-none"
             />
-            <label className="mt-3 block text-xs font-medium text-muted">{t.username}</label>
-            <input
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              className="mt-1 h-11 w-full rounded-xl bg-elevated px-3 text-ink outline-none"
-            />
+            <label className="mt-3 block text-xs font-medium text-muted">{t.nick}</label>
+            <div className="mt-1 flex h-11 items-center rounded-xl bg-elevated px-3">
+              <span className="text-muted">@</span>
+              <input
+                value={username}
+                onChange={(e) => {
+                  setUsername(e.target.value.replace(/^@/, ""));
+                  setProfileError(null);
+                }}
+                placeholder="nickname"
+                className="h-full w-full bg-transparent text-ink outline-none"
+              />
+            </div>
+            <p className="mt-1 text-xs text-muted">{t.nickHint}</p>
             <label className="mt-3 block text-xs font-medium text-muted">{t.bio}</label>
             <textarea
               value={bio}
@@ -483,6 +530,7 @@ export function MessengerApp() {
               rows={3}
               className="mt-1 w-full resize-none rounded-xl bg-elevated px-3 py-2 text-ink outline-none"
             />
+            {profileError ? <p className="mt-2 text-xs font-medium text-danger">{profileError}</p> : null}
             <button
               type="button"
               onClick={() => void saveProfile()}

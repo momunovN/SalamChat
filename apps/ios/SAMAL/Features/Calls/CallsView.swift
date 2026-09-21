@@ -61,14 +61,50 @@ struct IncomingCallView: View {
 }
 
 struct ContactsView: View {
+    @EnvironmentObject var session: SessionStore
+    @State private var items: [APIUser] = []
+
     var body: some View {
-        VStack(alignment: .leading) {
-            Text(L10n.tabContacts).font(SamalFont.title()).foregroundStyle(SamalColor.text)
+        VStack(alignment: .leading, spacing: 0) {
+            Text(L10n.tabContacts)
+                .font(SamalFont.title())
+                .foregroundStyle(SamalColor.text)
                 .padding(16)
-            Spacer()
+            if items.isEmpty {
+                Text(L10n.syncHint)
+                    .font(SamalFont.subhead())
+                    .foregroundStyle(SamalColor.muted)
+                    .padding(.horizontal, 16)
+                Spacer()
+            } else {
+                ScrollView {
+                    ForEach(items) { u in
+                        HStack(spacing: 12) {
+                            Circle().fill(SamalColor.elevated).frame(width: 44, height: 44)
+                                .overlay(
+                                    Text(String((u.bookName ?? u.displayName).prefix(1)).uppercased())
+                                        .font(.system(size: 18, weight: .semibold))
+                                        .foregroundStyle(SamalColor.text)
+                                )
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(u.bookName ?? u.displayName)
+                                    .font(SamalFont.headline())
+                                    .foregroundStyle(SamalColor.text)
+                                Text(u.username.map { "@\($0)" } ?? u.phone)
+                                    .font(SamalFont.caption())
+                                    .foregroundStyle(SamalColor.muted)
+                            }
+                            Spacer()
+                        }
+                        .padding(.horizontal, 16)
+                        .frame(height: 64)
+                    }
+                }
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(SamalColor.bg)
+        .task { items = (try? await session.api.contacts()) ?? [] }
     }
 }
 

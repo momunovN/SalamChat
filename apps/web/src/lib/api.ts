@@ -121,6 +121,16 @@ export const api = {
     request<Chat>("/v1/chats/groups", { method: "POST", body: JSON.stringify({ title, member_ids: memberIds }) }),
   users: (q: string) =>
     request<{ items: User[] }>(`/v1/users?q=${encodeURIComponent(q)}`).then((r) => ({ items: r.items ?? [] })),
+  contacts: () =>
+    request<{ items: User[]; synced?: boolean }>("/v1/contacts").then((r) => ({
+      items: r.items ?? [],
+      synced: !!r.synced,
+    })),
+  syncContacts: (enabled: boolean, items: { phone: string; name?: string }[]) =>
+    request<{ ok: boolean; count?: number }>("/v1/contacts/sync", {
+      method: "POST",
+      body: JSON.stringify({ enabled, items }),
+    }),
   calls: () => request<{ items: Call[] }>("/v1/calls").then((r) => ({ items: r.items ?? [] })),
   startCall: (chatId: string, kind: "audio" | "video") =>
     request<Call>(`/v1/chats/${chatId}/calls`, { method: "POST", body: JSON.stringify({ kind }) }),

@@ -59,7 +59,30 @@ class SamalApi(
         return post("/v1/chats/$chatId/messages", body, true)
     }
 
+    fun patchMe(displayName: String, username: String?): JSONObject {
+        val body = JSONObject().put("display_name", displayName)
+        if (!username.isNullOrBlank()) body.put("username", username)
+        return patch("/v1/me", body)
+    }
+
+    fun syncContacts(enabled: Boolean, items: List<dev.samal.app.data.contacts.BookContact>): JSONObject {
+        val arr = JSONArray()
+        for (it in items) {
+            arr.put(JSONObject().put("phone", it.phone).put("name", it.name))
+        }
+        return post("/v1/contacts/sync", JSONObject().put("enabled", enabled).put("items", arr), true)
+    }
+
+    fun contacts(): JSONArray = get("/v1/contacts").optJSONArray("items") ?: JSONArray()
+
     private fun get(path: String): JSONObject = exec(Request.Builder().url(base + path).get())
+
+    private fun patch(path: String, body: JSONObject): JSONObject {
+        val b = Request.Builder()
+            .url(base + path)
+            .patch(body.toString().toRequestBody(json))
+        return exec(b, true)
+    }
 
     private fun post(path: String, body: JSONObject, authed: Boolean): JSONObject {
         val b = Request.Builder()
@@ -95,7 +118,7 @@ class SamalApi(
                 || Build.HARDWARE.contains("goldfish")
                 || Build.PRODUCT.contains("sdk")
             // Physical USB device: adb reverse tcp:8080 tcp:8080
-            return if (emulator) "http://10.0.2.2:8080" else "http://127.0.0.1:8080"
+            return if (emulator) "http://10.0.2.2:3000" else "https://too-app.ru"
         }
     }
 }

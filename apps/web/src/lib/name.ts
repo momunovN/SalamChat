@@ -16,3 +16,14 @@ export function sanitizeDisplayName(raw: string): string | null {
   if (needsDisplayName(n)) return null;
   return n;
 }
+
+const reservedNicks = new Set(["tooapp", "samal", "admin", "support", "help", "api", "www", "root"]);
+
+/** Empty string = not set. null = invalid. */
+export function sanitizeUsername(raw: string): string | null {
+  const s = raw.trim().replace(/^@+/, "").toLowerCase();
+  if (!s) return "";
+  if (!/^[a-z][a-z0-9_]{2,23}$/.test(s)) return null;
+  if (reservedNicks.has(s)) return null;
+  return s;
+}

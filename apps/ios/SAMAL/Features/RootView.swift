@@ -7,7 +7,11 @@ struct RootView: View {
         ZStack {
             SamalColor.bg.ignoresSafeArea()
             if session.isLoggedIn {
-                MainTabs()
+                if needsDisplayName(session.user?.displayName) {
+                    ProfileOnboardingView()
+                } else {
+                    MainTabs()
+                }
             } else {
                 PhoneAuthView()
             }

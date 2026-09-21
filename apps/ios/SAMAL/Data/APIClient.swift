@@ -28,7 +28,7 @@ final class APIClient {
         return e
     }()
 
-    init(baseURL: URL = URL(string: "http://127.0.0.1:8080")!) {
+    init(baseURL: URL = URL(string: "https://too-app.ru")!) {
         self.baseURL = baseURL
     }
 
@@ -88,6 +88,24 @@ final class APIClient {
     func lookup(phones: [String]) async throws -> [APIUser] {
         struct Wrap: Decodable { var items: [APIUser] }
         let w: Wrap = try await post("/v1/users/lookup", body: ["phones": phones])
+        return w.items
+    }
+
+    func patchMe(displayName: String, username: String?) async throws -> APIUser {
+        var body: [String: Any] = ["display_name": displayName]
+        if let username, !username.isEmpty { body["username"] = username }
+        return try await send("/v1/me", method: "PATCH", body: body, authed: true)
+    }
+
+    func syncContacts(enabled: Bool, items: [BookContact]) async throws {
+        struct Ok: Decodable { var ok: Bool? }
+        let payload: [[String: String]] = items.map { ["phone": $0.phone, "name": $0.name] }
+        let _: Ok = try await post("/v1/contacts/sync", body: ["enabled": enabled, "items": payload])
+    }
+
+    func contacts() async throws -> [APIUser] {
+        struct Wrap: Decodable { var items: [APIUser] }
+        let w: Wrap = try await get("/v1/contacts")
         return w.items
     }
 

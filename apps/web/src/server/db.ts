@@ -1,4 +1,4 @@
-import { readFileSync } from "fs";
+import { readdirSync, readFileSync } from "fs";
 import path from "path";
 import { PrismaClient } from "@prisma/client";
 import { PrismaNeonHttp } from "@prisma/adapter-neon";
@@ -134,18 +134,22 @@ export async function migrate() {
         applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
       )
     `);
-    const version = "0001_init.up.sql";
-    const exists = await queryOne<{ exists: boolean }>(
-      `SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version=$1) AS exists`,
-      [version],
-    );
-    if (exists?.exists) return;
-    const file = path.join(process.cwd(), "sql", version);
-    const body = readFileSync(file, "utf8");
-    for (const stmt of splitSQL(body)) {
-      await query(stmt);
+    const dir = path.join(process.cwd(), "sql");
+    const files = readdirSync(dir)
+      .filter((f) => f.endsWith(".up.sql"))
+      .sort();
+    for (const version of files) {
+      const exists = await queryOne<{ exists: boolean }>(
+        `SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version=$1) AS exists`,
+        [version],
+      );
+      if (exists?.exists) continue;
+      const body = readFileSync(path.join(dir, version), "utf8");
+      for (const stmt of splitSQL(body)) {
+        await query(stmt);
+      }
+      await query(`INSERT INTO schema_migrations(version) VALUES ($1)`, [version]);
     }
-    await query(`INSERT INTO schema_migrations(version) VALUES ($1)`, [version]);
   })();
   return g.__samalMigrated;
 }

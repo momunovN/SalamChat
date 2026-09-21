@@ -3,6 +3,7 @@ package users
 import (
 	"context"
 	"net/http"
+	"regexp"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -45,20 +46,27 @@ func (h *Handler) search(w http.ResponseWriter, r *http.Request) {
 	if len(digits) < 3 {
 		digits = ""
 	}
+	nick := strings.ToLower(q)
+	nickQ := ""
+	if nickRe.MatchString(nick) {
+		nickQ = nick
+	}
 	rows, err := h.pool.Query(r.Context(), `
 		SELECT id, phone, display_name, username, avatar_url, bio, created_at, updated_at, last_seen_at
 		FROM users
 		WHERE ($1 <> '' AND (display_name ILIKE '%'||$1||'%' OR username ILIKE '%'||$1||'%'))
 		   OR ($2 <> '' AND regexp_replace(phone, '[^0-9]', '', 'g') LIKE '%'||$2||'%')
+		   OR ($4 <> '' AND lower(username) = $4)
 		ORDER BY
 		  CASE
-		    WHEN $3 <> '' AND phone = $3 THEN 0
-		    WHEN $2 <> '' AND regexp_replace(phone, '[^0-9]', '', 'g') LIKE $2||'%' THEN 1
-		    WHEN $2 <> '' AND regexp_replace(phone, '[^0-9]', '', 'g') LIKE '%'||$2 THEN 2
-		    ELSE 3
+		    WHEN $4 <> '' AND lower(username) = $4 THEN 0
+		    WHEN $3 <> '' AND phone = $3 THEN 1
+		    WHEN $2 <> '' AND regexp_replace(phone, '[^0-9]', '', 'g') LIKE $2||'%' THEN 2
+		    WHEN $2 <> '' AND regexp_replace(phone, '[^0-9]', '', 'g') LIKE '%'||$2 THEN 3
+		    ELSE 4
 		  END,
 		  display_name
-		LIMIT 30`, like, digits, exact)
+		LIMIT 30`, like, digits, exact, nickQ)
 	if err != nil {
 		auth.WriteErr(w, err)
 		return
@@ -138,6 +146,8 @@ func scanUsers(ctx context.Context, rows rowIter, pres *presence.Store) []models
 	}
 	return items
 }
+
+var nickRe = regexp.MustCompile(`^[a-z][a-z0-9_]{1,23}$`)
 
 func authNormalize(raw string) (string, bool) {
 	return normalizePhone(raw)

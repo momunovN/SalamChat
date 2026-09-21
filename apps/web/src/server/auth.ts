@@ -3,7 +3,7 @@ import { SignJWT, jwtVerify } from "jose";
 import { query, queryOne } from "./db";
 import { jwtSecret, otpDev } from "./env";
 import { HttpError } from "./http";
-import { sanitizeDisplayName } from "@/lib/name";
+import { sanitizeDisplayName, sanitizeUsername } from "@/lib/name";
 import { defaultDisplayName, normalizePhone } from "./phone";
 
 export type User = {
@@ -17,6 +17,7 @@ export type User = {
   updated_at: string;
   last_seen_at?: string | null;
   online?: boolean;
+  contacts_sync?: boolean;
 };
 
 type UserRow = {
@@ -29,6 +30,7 @@ type UserRow = {
   created_at: Date | string;
   updated_at: Date | string;
   last_seen_at: Date | string | null;
+  contacts_sync?: boolean;
 };
 
 function asIso(d: Date | string | null | undefined) {
@@ -71,6 +73,7 @@ function mapUser(r: UserRow, online?: boolean): User {
     updated_at: asIso(r.updated_at) || new Date().toISOString(),
     last_seen_at: asIso(r.last_seen_at),
     online,
+    contacts_sync: r.contacts_sync,
   };
 }
 
@@ -215,7 +218,7 @@ export async function parseAccess(token: string) {
 
 export async function getUser(id: string): Promise<User> {
   const row = await queryOne<UserRow>(
-    `SELECT id, phone, display_name, username, avatar_url, bio, created_at, updated_at, last_seen_at FROM users WHERE id=$1`,
+    `SELECT id, phone, display_name, username, avatar_url, bio, created_at, updated_at, last_seen_at, contacts_sync FROM users WHERE id=$1`,
     [id],
   );
   if (!row) throw new HttpError(404, "not_found", "not found");
@@ -232,19 +235,43 @@ export async function updateMe(
     if (!displayName) throw new HttpError(400, "bad_request", "invalid name");
   }
   let username = patch.username ?? null;
-  if (typeof username === "string") {
-    username = username.trim().replace(/^@/, "").slice(0, 32) || null;
+  if (patch.username !== undefined) {
+    const nick = sanitizeUsername(patch.username);
+    if (nick === null) throw new HttpError(400, "bad_request", "invalid username");
+    if (nick) {
+      const taken = await queryOne<{ id: string }>(
+        `SELECT id FROM users WHERE lower(username)=lower($1) AND id<>$2`,
+        [nick, id],
+      );
+      if (taken) throw new HttpError(409, "conflict", "username taken");
+      username = nick;
+    } else {
+      username = null;
+    }
   }
-  await query(
-    `UPDATE users SET
-      display_name = COALESCE($2, display_name),
-      username = COALESCE($3, username),
-      bio = COALESCE($4, bio),
-      avatar_url = COALESCE($5, avatar_url),
-      updated_at = now()
-     WHERE id=$1`,
-    [id, displayName, username, patch.bio ?? null, patch.avatar_url ?? null],
-  );
+  try {
+    await query(
+      `UPDATE users SET
+        display_name = COALESCE($2, display_name),
+        username = CASE WHEN $6 THEN $3 ELSE COALESCE($3, username) END,
+        bio = COALESCE($4, bio),
+        avatar_url = COALESCE($5, avatar_url),
+        updated_at = now()
+       WHERE id=$1`,
+      [
+        id,
+        displayName,
+        username,
+        patch.bio ?? null,
+        patch.avatar_url ?? null,
+        patch.username !== undefined,
+      ],
+    );
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "";
+    if (/users_username|duplicate key/i.test(msg)) throw new HttpError(409, "conflict", "username taken");
+    throw err;
+  }
   return getUser(id);
 }
 

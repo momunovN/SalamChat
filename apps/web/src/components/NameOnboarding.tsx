@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { api, loadSession, saveSession } from "@/lib/api";
 import type { Dict } from "@/lib/i18n";
-import { sanitizeDisplayName } from "@/lib/name";
+import { sanitizeDisplayName, sanitizeUsername } from "@/lib/name";
 import type { Session, User } from "@/lib/types";
 
 export function NameOnboarding({
@@ -14,6 +14,7 @@ export function NameOnboarding({
   onDone: (user: User) => void;
 }) {
   const [name, setName] = useState("");
+  const [nick, setNick] = useState("");
   const [busy, setBusy] = useState(false);
   const [waited, setWaited] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -34,10 +35,18 @@ export function NameOnboarding({
       setError(t.errName);
       return;
     }
+    const username = sanitizeUsername(nick);
+    if (nick.trim() && username === null) {
+      setError(t.errNick);
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
-      const user = await api.patchMe({ display_name: next });
+      const user = await api.patchMe({
+        display_name: next,
+        ...(username ? { username } : {}),
+      });
       const session = loadSession();
       if (session) {
         const updated: Session = { ...session, user };
@@ -46,7 +55,8 @@ export function NameOnboarding({
       onDone(user);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "";
-      setError(/timed out|timeout|fetch|unavailable|network|HTTP 5/i.test(msg) ? t.dbWake : t.errLogin);
+      if (/username taken|conflict/i.test(msg)) setError(t.errNickTaken);
+      else setError(/timed out|timeout|fetch|unavailable|network|HTTP 5/i.test(msg) ? t.dbWake : t.errLogin);
     } finally {
       setBusy(false);
     }
@@ -76,6 +86,27 @@ export function NameOnboarding({
           placeholder={t.namePlaceholder}
           className="h-[52px] w-full rounded-[14px] bg-elevated px-3.5 text-base text-ink outline-none ring-accent/0 focus:ring-2 focus:ring-accent"
         />
+        <label className="mt-4 block text-xs font-medium text-muted">
+          {t.nick} · {t.nickOptional}
+        </label>
+        <div className="mt-1 flex h-[52px] items-center rounded-[14px] bg-elevated px-3.5 focus-within:ring-2 focus-within:ring-accent">
+          <span className="pr-0.5 text-base text-muted">@</span>
+          <input
+            value={nick}
+            onChange={(e) => {
+              setNick(e.target.value.replace(/^@/, ""));
+              if (error) setError(null);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void save();
+            }}
+            autoComplete="username"
+            maxLength={24}
+            placeholder="nickname"
+            className="h-full w-full bg-transparent text-base text-ink outline-none"
+          />
+        </div>
+        <p className="mt-2 text-xs text-muted">{t.nickHint}</p>
         {busy && waited ? <p className="mt-3 text-xs font-medium text-muted">{t.connecting}</p> : null}
         {error ? <p className="mt-2 text-xs font-medium text-danger">{error}</p> : null}
         <button
