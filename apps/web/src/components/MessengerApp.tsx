@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   ArrowLeft,
   ArrowUp,
@@ -23,8 +23,12 @@ import {
 } from "lucide-react";
 import { api, loadSession, saveSession } from "@/lib/api";
 import { dict, type Lang } from "@/lib/i18n";
-import type { Call, Chat, Envelope, Message, Session, User } from "@/lib/types";
+import { needsDisplayName, sanitizeDisplayName } from "@/lib/name";
+import { formatPhone } from "@/lib/phone";
+import type { Call, Chat, Envelope, Message, Session } from "@/lib/types";
 import { Avatar } from "./Avatar";
+import { NameOnboarding } from "./NameOnboarding";
+import { PeopleResults, useUserSearch } from "./PeopleSearch";
 import { PhoneAuth } from "./PhoneAuth";
 
 type Tab = "chats" | "calls" | "contacts" | "more";
@@ -63,8 +67,8 @@ export function MessengerApp() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [text, setText] = useState("");
   const [calls, setCalls] = useState<Call[]>([]);
-  const [people, setPeople] = useState<User[]>([]);
   const [contactQ, setContactQ] = useState("");
+  const [pickerQ, setPickerQ] = useState("");
   const [incoming, setIncoming] = useState<Call | null>(null);
   const [activeCall, setActiveCall] = useState<Call | null>(null);
   const [typing, setTyping] = useState<Record<string, number>>({});
@@ -197,18 +201,8 @@ export function MessengerApp() {
     void api.calls().then((r) => setCalls(r.items));
   }, [session, tab]);
 
-  useEffect(() => {
-    if (!session || tab !== "contacts") return;
-    const q = contactQ.trim();
-    if (!q) {
-      setPeople([]);
-      return;
-    }
-    const id = setTimeout(() => {
-      void api.users(q).then((r) => setPeople((r.items ?? []).filter((u) => u.id !== me)));
-    }, 200);
-    return () => clearTimeout(id);
-  }, [session, tab, contactQ, me]);
+  const contactsSearch = useUserSearch(tab === "contacts" ? contactQ : "", me);
+  const pickerSearch = useUserSearch(newOpen ? pickerQ : "", me);
 
   async function send() {
     const trimmed = text.trim();
@@ -281,7 +275,9 @@ export function MessengerApp() {
   }
 
   async function saveProfile() {
-    const user = await api.patchMe({ display_name: name, username: username || undefined, bio });
+    const nextName = sanitizeDisplayName(name);
+    if (!nextName) return;
+    const user = await api.patchMe({ display_name: nextName, username: username || undefined, bio });
     if (session) {
       const next = { ...session, user };
       saveSession(next);
@@ -289,7 +285,6 @@ export function MessengerApp() {
     }
   }
 
-  const filteredPeople = useMemo(() => people, [people]);
   const isTyping = activeId ? Date.now() - (typing[activeId] || 0) < 3000 : false;
 
   if (!ready) return <div className="min-h-full bg-bg" />;
@@ -303,6 +298,21 @@ export function MessengerApp() {
             setName(s.user.display_name);
             setUsername(s.user.username || "");
             setBio(s.user.bio || "");
+          }}
+        />
+      </div>
+    );
+  }
+  if (needsDisplayName(session.user.display_name)) {
+    return (
+      <div className="min-h-full bg-bg">
+        <NameOnboarding
+          t={t}
+          onDone={(user) => {
+            const next = { ...session, user };
+            saveSession(next);
+            setSession(next);
+            setName(user.display_name);
           }}
         />
       </div>
@@ -334,7 +344,11 @@ export function MessengerApp() {
         {tab === "chats" ? (
           <button
             type="button"
-            onClick={() => setNewOpen("direct")}
+            onClick={() => {
+              setPickerQ("");
+              setPicked([]);
+              setNewOpen("direct");
+            }}
             className="flex h-9 w-9 items-center justify-center rounded-full text-ink hover:bg-elevated"
             aria-label={t.newChat}
           >
@@ -350,7 +364,7 @@ export function MessengerApp() {
             <input
               value={tab === "chats" ? query : contactQ}
               onChange={(e) => (tab === "chats" ? setQuery(e.target.value) : setContactQ(e.target.value))}
-              placeholder={t.search}
+              placeholder={tab === "contacts" ? t.searchPeople : t.search}
               className="w-full bg-transparent text-sm text-ink outline-none placeholder:text-muted"
             />
           </label>
@@ -428,25 +442,18 @@ export function MessengerApp() {
             ))
           : null}
 
-        {tab === "contacts" && !contactQ ? (
-          <p className="px-4 pt-16 text-center text-base text-muted">{t.emptyContacts}</p>
+        {tab === "contacts" ? (
+          <div className="px-3">
+            <PeopleResults
+              t={t}
+              query={contactQ}
+              items={contactsSearch.items}
+              status={contactsSearch.status}
+              error={contactsSearch.error}
+              onPick={(u) => void openDirect(u.id)}
+            />
+          </div>
         ) : null}
-        {tab === "contacts"
-          ? filteredPeople.map((u) => (
-              <button
-                key={u.id}
-                type="button"
-                onClick={() => void openDirect(u.id)}
-                className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-elevated/60"
-              >
-                <Avatar name={u.display_name} src={u.avatar_url} online={u.online} />
-                <div>
-                  <p className="font-semibold text-ink">{u.display_name}</p>
-                  <p className="text-sm text-muted">{u.phone}</p>
-                </div>
-              </button>
-            ))
-          : null}
 
         {tab === "more" ? (
           <div className="px-4 py-2">
@@ -454,7 +461,7 @@ export function MessengerApp() {
               <Avatar name={session.user.display_name} src={session.user.avatar_url} size={56} />
               <div>
                 <p className="font-semibold text-ink">{session.user.display_name}</p>
-                <p className="text-sm text-muted">{session.user.phone}</p>
+                <p className="text-sm text-muted">{formatPhone(session.user.phone)}</p>
               </div>
             </div>
             <label className="mt-5 block text-xs font-medium text-muted">{t.name}</label>
@@ -711,11 +718,17 @@ export function MessengerApp() {
       <div className={`${activeId ? "flex" : "hidden md:flex"} min-w-0 flex-1`}>{conversation}</div>
 
       {newOpen ? (
-        <div className="fixed inset-0 z-20 flex items-end justify-center bg-black/50 md:items-center">
-          <div className="w-full max-w-md rounded-t-2xl bg-elevated p-5 md:rounded-2xl">
+        <div
+          className="fixed inset-0 z-20 flex items-end justify-center bg-black/50 md:items-center"
+          onClick={() => setNewOpen(null)}
+        >
+          <div
+            className="w-full max-w-md rounded-t-2xl bg-elevated p-5 md:rounded-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="mb-4 flex items-center justify-between">
               <h2 className="text-lg font-semibold">{newOpen === "group" ? t.newGroup : t.newChat}</h2>
-              <button type="button" onClick={() => setNewOpen(null)}>
+              <button type="button" onClick={() => setNewOpen(null)} aria-label={t.cancel}>
                 <X size={18} />
               </button>
             </div>
@@ -746,41 +759,27 @@ export function MessengerApp() {
             <label className="mb-3 flex h-10 items-center gap-2 rounded-xl bg-bg px-3">
               <Search size={16} className="text-muted" />
               <input
-                value={contactQ}
-                onChange={(e) => {
-                  setContactQ(e.target.value);
-                  if (e.target.value.trim()) {
-                    void api.users(e.target.value).then((r) => setPeople(r.items.filter((u) => u.id !== me)));
-                  } else setPeople([]);
-                }}
-                placeholder={t.search}
+                value={pickerQ}
+                onChange={(e) => setPickerQ(e.target.value)}
+                placeholder={t.searchPeople}
+                autoFocus
                 className="w-full bg-transparent text-sm outline-none"
               />
             </label>
             <div className="max-h-64 overflow-y-auto">
-              {people.map((u) => {
-                const on = picked.includes(u.id);
-                return (
-                  <button
-                    key={u.id}
-                    type="button"
-                    onClick={() => {
-                      if (newOpen === "direct") void openDirect(u.id);
-                      else setPicked((prev) => (on ? prev.filter((id) => id !== u.id) : [...prev, u.id]));
-                    }}
-                    className="flex w-full items-center gap-3 py-2"
-                  >
-                    <Avatar name={u.display_name} src={u.avatar_url} size={40} />
-                    <div className="min-w-0 flex-1 text-left">
-                      <p className="truncate font-semibold">{u.display_name}</p>
-                      <p className="text-xs text-muted">{u.phone}</p>
-                    </div>
-                    {newOpen === "group" ? (
-                      <span className={`h-5 w-5 rounded-full border ${on ? "border-accent bg-accent" : "border-muted"}`} />
-                    ) : null}
-                  </button>
-                );
-              })}
+              <PeopleResults
+                t={t}
+                query={pickerQ}
+                items={pickerSearch.items}
+                status={pickerSearch.status}
+                error={pickerSearch.error}
+                picked={picked}
+                selectable={newOpen === "group"}
+                onPick={(u) => {
+                  if (newOpen === "direct") void openDirect(u.id);
+                  else setPicked((prev) => (prev.includes(u.id) ? prev.filter((id) => id !== u.id) : [...prev, u.id]));
+                }}
+              />
             </div>
             {newOpen === "group" ? (
               <button

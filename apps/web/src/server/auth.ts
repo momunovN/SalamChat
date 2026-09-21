@@ -3,6 +3,7 @@ import { SignJWT, jwtVerify } from "jose";
 import { query, queryOne } from "./db";
 import { jwtSecret, otpDev } from "./env";
 import { HttpError } from "./http";
+import { sanitizeDisplayName } from "@/lib/name";
 import { defaultDisplayName, normalizePhone } from "./phone";
 
 export type User = {
@@ -225,6 +226,15 @@ export async function updateMe(
   id: string,
   patch: { display_name?: string; username?: string; bio?: string; avatar_url?: string },
 ) {
+  let displayName = patch.display_name ?? null;
+  if (patch.display_name !== undefined) {
+    displayName = sanitizeDisplayName(patch.display_name);
+    if (!displayName) throw new HttpError(400, "bad_request", "invalid name");
+  }
+  let username = patch.username ?? null;
+  if (typeof username === "string") {
+    username = username.trim().replace(/^@/, "").slice(0, 32) || null;
+  }
   await query(
     `UPDATE users SET
       display_name = COALESCE($2, display_name),
@@ -233,7 +243,7 @@ export async function updateMe(
       avatar_url = COALESCE($5, avatar_url),
       updated_at = now()
      WHERE id=$1`,
-    [id, patch.display_name ?? null, patch.username ?? null, patch.bio ?? null, patch.avatar_url ?? null],
+    [id, displayName, username, patch.bio ?? null, patch.avatar_url ?? null],
   );
   return getUser(id);
 }

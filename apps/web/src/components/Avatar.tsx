@@ -11,7 +11,7 @@ export function Avatar({
   size?: number;
   online?: boolean;
 }) {
-  const letter = (name || "?").trim().slice(0, 1).toUpperCase();
+  const letter = ([...(name || "")].find((c) => /\p{L}|\p{N}/u.test(c)) || "?").toUpperCase();
   return (
     <div className="relative shrink-0" style={{ width: size, height: size }}>
       {src ? (

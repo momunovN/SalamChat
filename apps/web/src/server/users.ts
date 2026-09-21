@@ -2,21 +2,30 @@ import { mapUser, type UserRow } from "./auth";
 import { query, queryOne } from "./db";
 import { presence } from "./hub";
 import { HttpError } from "./http";
-import { normalizePhone } from "./phone";
+import { escapeLike, normalizePhone, phoneDigits } from "./phone";
 
 export async function searchUsers(q: string) {
-  q = q.trim();
+  q = q.trim().replace(/^@/, "");
   if (!q) return { items: [] as ReturnType<typeof mapUser>[] };
-  const phone = normalizePhone(q);
+  const exact = normalizePhone(q) || "";
+  const digits = phoneDigits(q);
+  const digitQ = digits.length >= 3 ? digits : "";
+  const like = escapeLike(q);
   const rows = await query<UserRow>(
     `SELECT id, phone, display_name, username, avatar_url, bio, created_at, updated_at, last_seen_at
      FROM users
-     WHERE ($2 AND phone=$3)
-        OR display_name ILIKE '%'||$1||'%'
-        OR username ILIKE '%'||$1||'%'
-     ORDER BY display_name
+     WHERE ($1 <> '' AND (display_name ILIKE '%'||$1||'%' OR username ILIKE '%'||$1||'%'))
+        OR ($2 <> '' AND regexp_replace(phone, '[^0-9]', '', 'g') LIKE '%'||$2||'%')
+     ORDER BY
+       CASE
+         WHEN $3 <> '' AND phone = $3 THEN 0
+         WHEN $2 <> '' AND regexp_replace(phone, '[^0-9]', '', 'g') LIKE $2||'%' THEN 1
+         WHEN $2 <> '' AND regexp_replace(phone, '[^0-9]', '', 'g') LIKE '%'||$2 THEN 2
+         ELSE 3
+       END,
+       display_name
      LIMIT 30`,
-    [q, !!phone, phone || ""],
+    [like, digitQ, exact],
   );
   return {
     items: rows.map((r) => mapUser(r, presence.online(r.id))),

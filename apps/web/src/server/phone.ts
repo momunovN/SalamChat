@@ -24,3 +24,11 @@ export function defaultDisplayName(phone: string) {
   if (phone.length < 4) return "TooApp";
   return "• " + phone.slice(-4);
 }
+
+export function phoneDigits(raw: string) {
+  return raw.replace(/\D/g, "");
+}
+
+export function escapeLike(s: string) {
+  return s.replace(/[\\%_]/g, " ").replace(/\s+/g, " ").trim();
+}

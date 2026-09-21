@@ -34,19 +34,31 @@ func (h *Handler) Routes() chi.Router {
 
 func (h *Handler) search(w http.ResponseWriter, r *http.Request) {
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	q = strings.TrimPrefix(q, "@")
 	if q == "" {
 		httpx.JSON(w, 200, map[string]any{"items": []models.User{}})
 		return
 	}
-	phone, ok := authNormalize(q)
+	exact, _ := authNormalize(q)
+	like := escapeLike(q)
+	digits := digitsOnly(q)
+	if len(digits) < 3 {
+		digits = ""
+	}
 	rows, err := h.pool.Query(r.Context(), `
 		SELECT id, phone, display_name, username, avatar_url, bio, created_at, updated_at, last_seen_at
 		FROM users
-		WHERE ($2 AND phone=$3)
-		   OR display_name ILIKE '%'||$1||'%'
-		   OR username ILIKE '%'||$1||'%'
-		ORDER BY display_name
-		LIMIT 30`, q, ok, phone)
+		WHERE ($1 <> '' AND (display_name ILIKE '%'||$1||'%' OR username ILIKE '%'||$1||'%'))
+		   OR ($2 <> '' AND regexp_replace(phone, '[^0-9]', '', 'g') LIKE '%'||$2||'%')
+		ORDER BY
+		  CASE
+		    WHEN $3 <> '' AND phone = $3 THEN 0
+		    WHEN $2 <> '' AND regexp_replace(phone, '[^0-9]', '', 'g') LIKE $2||'%' THEN 1
+		    WHEN $2 <> '' AND regexp_replace(phone, '[^0-9]', '', 'g') LIKE '%'||$2 THEN 2
+		    ELSE 3
+		  END,
+		  display_name
+		LIMIT 30`, like, digits, exact)
 	if err != nil {
 		auth.WriteErr(w, err)
 		return
@@ -129,4 +141,21 @@ func scanUsers(ctx context.Context, rows rowIter, pres *presence.Store) []models
 
 func authNormalize(raw string) (string, bool) {
 	return normalizePhone(raw)
+}
+
+func digitsOnly(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if r >= '0' && r <= '9' {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+func escapeLike(s string) string {
+	s = strings.ReplaceAll(s, `\`, " ")
+	s = strings.ReplaceAll(s, `%`, " ")
+	s = strings.ReplaceAll(s, `_`, " ")
+	return strings.Join(strings.Fields(s), " ")
 }
