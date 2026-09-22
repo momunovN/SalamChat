@@ -81,8 +81,18 @@ export async function listCalls(userId: string) {
   return { items: rows.map(mapCall) };
 }
 
-async function transit(userId: string, id: string, event: string, status: string, tsCol: "answered_at" | "ended_at") {
+const closed = new Set(["ended", "missed", "declined"]);
+
+async function transit(
+  userId: string,
+  id: string,
+  event: string,
+  status: string,
+  tsCol: "answered_at" | "ended_at",
+  allowed: string[],
+) {
   const call = await getCall(userId, id);
+  if (!allowed.includes(call.status)) return call;
   await query(`UPDATE calls SET status=$2, ${tsCol}=now() WHERE id=$1`, [id, status]);
   await query(`INSERT INTO call_events (call_id, user_id, event) VALUES ($1,$2,$3)`, [id, userId, event]);
   const next = await getCall(userId, id);
@@ -91,20 +101,25 @@ async function transit(userId: string, id: string, event: string, status: string
 }
 
 export async function answerCall(userId: string, id: string) {
-  return transit(userId, id, "join", "active", "answered_at");
+  return transit(userId, id, "join", "active", "answered_at", ["ringing"]);
 }
 
 export async function rejectCall(userId: string, id: string) {
-  return transit(userId, id, "reject", "declined", "ended_at");
+  return transit(userId, id, "reject", "declined", "ended_at", ["ringing"]);
 }
 
 export async function hangupCall(userId: string, id: string) {
   const call = await getCall(userId, id);
+  const members = await memberIds(call.chat_id);
+  if (closed.has(call.status)) {
+    hub.publishMany(members, envelope("call.updated", call));
+    return call;
+  }
   const status = call.status === "ringing" ? "missed" : "ended";
   await query(`UPDATE calls SET status=$2, ended_at=now() WHERE id=$1`, [id, status]);
   await query(`INSERT INTO call_events (call_id, user_id, event) VALUES ($1,$2,'end')`, [id, userId]);
   const next = await getCall(userId, id);
-  hub.publishMany(await memberIds(call.chat_id), envelope("call.updated", next));
+  hub.publishMany(members, envelope("call.updated", next));
   return next;
 }
 

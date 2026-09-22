@@ -15,6 +15,8 @@ export function sseResponse(userId: string) {
         }
       };
       unsub = hub.subscribe(userId, send);
+      // Fill proxy buffers so later call events are not held until the next ping.
+      controller.enqueue(encoder.encode(`: ${" ".repeat(2048)}\n\n`));
       send(envelope("pong", {}));
       ping = setInterval(() => {
         presence.heartbeat(userId);
@@ -31,6 +33,7 @@ export function sseResponse(userId: string) {
       "Content-Type": "text/event-stream; charset=utf-8",
       "Cache-Control": "no-cache, no-transform",
       Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
       "Access-Control-Allow-Origin": "*",
     },
   });

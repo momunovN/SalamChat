@@ -150,6 +150,7 @@ export const api = {
       body: JSON.stringify({ enabled, items }),
     }),
   calls: () => request<{ items: Call[] }>("/v1/calls").then((r) => ({ items: r.items ?? [] })),
+  call: (id: string) => request<Call>(`/v1/calls/${id}`),
   startCall: (chatId: string, kind: "audio" | "video") =>
     request<Call>(`/v1/chats/${chatId}/calls`, { method: "POST", body: JSON.stringify({ kind }) }),
   answerCall: (id: string) => request<Call>(`/v1/calls/${id}/answer`, { method: "POST" }),

@@ -15,6 +15,7 @@ import {
   X,
 } from "lucide-react";
 import { api, loadSession, saveSession } from "@/lib/api";
+import { acquireCallMedia, stopCallMedia, warmCallConnection, type CallMedia } from "@/lib/callMedia";
 import { lastPreview } from "@/lib/chat";
 import { dict, type Lang } from "@/lib/i18n";
 import { needsDisplayName, sanitizeDisplayName, sanitizeUsername } from "@/lib/name";
@@ -61,6 +62,10 @@ export function MessengerApp() {
   const [profileError, setProfileError] = useState<string | null>(null);
   const [incoming, setIncoming] = useState<Call | null>(null);
   const [activeCall, setActiveCall] = useState<Call | null>(null);
+  const [callMedia, setCallMedia] = useState<CallMedia | null>(null);
+  const [callCreds, setCallCreds] = useState<Promise<{ url: string; token: string; room: string }> | null>(null);
+  const [arming, setArming] = useState<"mic" | "camera" | null>(null);
+  const [callError, setCallError] = useState<string | null>(null);
   const [typing, setTyping] = useState<Record<string, number>>({});
   const [typingNow, setTypingNow] = useState(0);
   const [newOpen, setNewOpen] = useState<"direct" | "group" | null>(null);
@@ -71,6 +76,12 @@ export function MessengerApp() {
   const [bio, setBio] = useState("");
   const activeIdRef = useRef<string | null>(null);
   const meRef = useRef<string | undefined>(undefined);
+  const activeCallIdRef = useRef<string | null>(null);
+  const incomingIdRef = useRef<string | null>(null);
+  const closedCalls = useRef(new Set<string>());
+  const attemptRef = useRef(0);
+  const armingRef = useRef(false);
+  const errorTimer = useRef<number | null>(null);
 
   const active = chats.find((c) => c.id === activeId) || null;
   const me = session?.user.id;
@@ -78,7 +89,9 @@ export function MessengerApp() {
   useEffect(() => {
     activeIdRef.current = activeId;
     meRef.current = me;
-  }, [activeId, me]);
+    activeCallIdRef.current = activeCall?.id ?? null;
+    incomingIdRef.current = incoming?.id ?? null;
+  }, [activeId, me, activeCall, incoming]);
 
   useEffect(() => {
     const s = loadSession();
@@ -140,6 +153,42 @@ export function MessengerApp() {
     };
   }, [session, activeId, me]);
 
+  const applyRemoteCall = useCallback((call: Call) => {
+    const myId = meRef.current;
+    const terminal = call.status === "ended" || call.status === "missed" || call.status === "declined";
+    if (terminal) {
+      const watched = activeCallIdRef.current === call.id || incomingIdRef.current === call.id;
+      if (watched && !closedCalls.current.has(call.id)) {
+        closedCalls.current.add(call.id);
+        attemptRef.current += 1;
+        armingRef.current = false;
+        setArming(null);
+      }
+      setIncoming((c) => (c?.id === call.id ? null : c));
+      if (activeCallIdRef.current === call.id) {
+        setCallMedia(null);
+        setCallCreds(null);
+        setActiveCall(null);
+      }
+      return;
+    }
+    if (call.status === "ringing" && call.initiator_id !== myId) {
+      setIncoming((c) => (c?.id === call.id ? c : call));
+      return;
+    }
+    if (call.status === "active") {
+      setIncoming((c) => {
+        if (c?.id !== call.id || armingRef.current) return c;
+        return null;
+      });
+      setActiveCall((c) => {
+        if (!c || c.id !== call.id) return c;
+        if (c.status === "active") return c;
+        return { ...c, ...call, status: "active" };
+      });
+    }
+  }, []);
+
   useEffect(() => {
     if (!session) return;
     const es = new EventSource(`/v1/stream?token=${encodeURIComponent(session.access_token)}`);
@@ -193,25 +242,55 @@ export function MessengerApp() {
           setTypingNow(until - 3000);
         }
         if (env.type === "call.updated") {
-          const call = env.body as Call;
+          applyRemoteCall(env.body as Call);
           void api.calls().then((r) => setCalls(r.items ?? []));
-          if (call.status === "ringing" && call.initiator_id !== myId) setIncoming(call);
-          if (call.status === "ringing" && call.initiator_id === myId) setActiveCall(call);
-          if (call.status === "active") {
-            setIncoming(null);
-            setActiveCall(call);
-          }
-          if (["ended", "missed", "declined"].includes(call.status)) {
-            setIncoming(null);
-            setActiveCall((c) => (c?.id === call.id ? null : c));
-          }
         }
       } catch {
         /* ignore */
       }
     };
     return () => es.close();
-  }, [session, refreshChats]);
+  }, [session, refreshChats, applyRemoteCall]);
+
+  useEffect(() => {
+    if (!session) return;
+    const id = activeCall?.id || incoming?.id;
+    if (!id) return;
+    let stop = false;
+    let busy = false;
+    const timer = window.setInterval(() => {
+      if (busy) return;
+      busy = true;
+      void api
+        .call(id)
+        .then((call) => {
+          if (!stop) applyRemoteCall(call);
+        })
+        .catch(() => undefined)
+        .finally(() => {
+          busy = false;
+        });
+    }, 1000);
+    return () => {
+      stop = true;
+      window.clearInterval(timer);
+    };
+  }, [session, activeCall?.id, incoming?.id, applyRemoteCall]);
+
+  useEffect(() => {
+    const id = incoming?.id;
+    if (!id) return;
+    let cancel = false;
+    void api
+      .callToken(id)
+      .then((creds) => {
+        if (!cancel) return warmCallConnection(creds.url, creds.token);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancel = true;
+    };
+  }, [incoming?.id]);
 
   useEffect(() => {
     if (!session || tab !== "calls") return;
@@ -232,14 +311,70 @@ export function MessengerApp() {
   const contactsSearch = useUserSearch(tab === "contacts" ? contactQ : "", me);
   const pickerSearch = useUserSearch(newOpen ? pickerQ : "", me);
 
-  async function beginCall(chatId: string, kind: "audio" | "video") {
+  function showCallError(text: string) {
+    setCallError(text);
+    if (errorTimer.current) window.clearTimeout(errorTimer.current);
+    errorTimer.current = window.setTimeout(() => setCallError(null), 5000);
+  }
+
+  function closeCall(id: string) {
+    void api.hangupCall(id).catch(() => undefined);
+    setCallMedia(null);
+    setCallCreds(null);
+    setActiveCall((c) => (c?.id === id ? null : c));
+    setIncoming((c) => (c?.id === id ? null : c));
+  }
+
+  async function placeCall(kind: "audio" | "video", start: () => Promise<Call>) {
+    if (armingRef.current || activeCall) return;
+    const attempt = ++attemptRef.current;
+    armingRef.current = true;
+    setCallError(null);
+    setArming("mic");
+    let media: CallMedia | null = null;
     try {
-      const call = await api.startCall(chatId, kind);
+      media = await acquireCallMedia(kind, (step) => {
+        if (attempt === attemptRef.current) setArming(step);
+      });
+      if (attempt !== attemptRef.current) {
+        stopCallMedia(media);
+        return;
+      }
+      const call = await start();
+      if (attempt !== attemptRef.current || (call.status !== "ringing" && call.status !== "active")) {
+        stopCallMedia(media);
+        if (call.status === "ringing" || call.status === "active") void api.hangupCall(call.id);
+        if (attempt === attemptRef.current) showCallError(t.callFailed);
+        return;
+      }
+      setCallCreds(api.callToken(call.id));
+      setCallMedia(media);
       setIncoming(null);
       setActiveCall(call);
-    } catch {
-      /* ignore */
+      media = null;
+    } catch (err) {
+      stopCallMedia(media);
+      if (attempt !== attemptRef.current) return;
+      const code = err instanceof Error ? err.message : "";
+      showCallError(code === "camera" ? t.camDenied : code === "mic" ? t.micDenied : t.callFailed);
+    } finally {
+      if (attempt === attemptRef.current) {
+        armingRef.current = false;
+        setArming(null);
+      }
     }
+  }
+
+  function beginCall(chatId: string, kind: "audio" | "video") {
+    if (incoming) return;
+    void placeCall(kind, () => api.startCall(chatId, kind));
+  }
+
+  function acceptIncoming() {
+    if (!incoming) return;
+    const id = incoming.id;
+    const kind = incoming.kind === "video" ? "video" : "audio";
+    void placeCall(kind, () => api.answerCall(id));
   }
 
   function selectChat(id: string) {
@@ -699,14 +834,25 @@ export function MessengerApp() {
         </div>
       ) : null}
 
+      {arming || callError ? (
+        <div className="pointer-events-none fixed inset-x-0 top-0 z-50 flex justify-center px-4 pt-4">
+          <p className="rounded-2xl bg-elevated px-4 py-3 text-center text-sm text-ink shadow-lg">
+            {callError ?? (arming === "camera" ? t.allowCam : t.allowMic)}
+          </p>
+        </div>
+      ) : null}
+
       {incoming ? (
         <div className="fixed inset-0 z-30 flex flex-col items-center justify-center bg-bg/95">
           <p className="text-[28px] font-bold">{incoming.kind === "video" ? t.incomingVideo : t.incomingAudio}</p>
-          <p className="mt-2 text-muted">{t.inCall}</p>
+          <p className="mt-2 text-muted">{incoming.kind === "video" ? t.video : t.audio}</p>
           <div className="mt-10 flex gap-12">
             <button
               type="button"
               onClick={() => {
+                attemptRef.current += 1;
+                armingRef.current = false;
+                setArming(null);
                 void api.rejectCall(incoming.id);
                 setIncoming(null);
               }}
@@ -719,13 +865,9 @@ export function MessengerApp() {
             </button>
             <button
               type="button"
-              onClick={() => {
-                void api.answerCall(incoming.id).then((call) => {
-                  setIncoming(null);
-                  setActiveCall(call);
-                });
-              }}
-              className="flex flex-col items-center gap-2"
+              onClick={() => acceptIncoming()}
+              disabled={arming !== null}
+              className="flex flex-col items-center gap-2 disabled:opacity-50"
             >
               <span className="flex h-[72px] w-[72px] items-center justify-center rounded-full bg-success text-white">
                 <Phone size={28} />
@@ -736,15 +878,18 @@ export function MessengerApp() {
         </div>
       ) : null}
 
-      {activeCall ? (
+      {activeCall && callMedia ? (
         <CallRoom
           key={activeCall.id}
           call={activeCall}
+          media={callMedia}
+          creds={callCreds}
           title={chats.find((c) => c.id === activeCall.chat_id)?.title || t.inCall}
           t={t}
-          onHangup={() => {
-            void api.hangupCall(activeCall.id);
-            setActiveCall(null);
+          onHangup={() => closeCall(activeCall.id)}
+          onConnectFailed={() => {
+            showCallError(t.callFailed);
+            closeCall(activeCall.id);
           }}
         />
       ) : null}

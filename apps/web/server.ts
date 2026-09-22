@@ -38,6 +38,8 @@ async function main() {
     const response = await handleRequest(toFetch(req, Buffer.concat(chunks)));
     res.statusCode = response.status;
     response.headers.forEach((v, k) => res.setHeader(k, v));
+    const sse = (response.headers.get("content-type") || "").includes("text/event-stream");
+    if (sse) res.socket?.setNoDelay(true);
     if (typeof (res as { flushHeaders?: () => void }).flushHeaders === "function") {
       (res as { flushHeaders: () => void }).flushHeaders();
     }
@@ -53,6 +55,10 @@ async function main() {
       const { done, value } = await reader.read();
       if (done) break;
       res.write(Buffer.from(value));
+      if (sse) {
+        const flushable = res as ServerResponse & { flush?: () => void };
+        flushable.flush?.();
+      }
     }
     res.end();
   }
