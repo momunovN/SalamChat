@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { Mic, MicOff, PhoneOff, Video, VideoOff } from "lucide-react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Mic, MicOff, Phone, PhoneOff, Video, VideoOff } from "lucide-react";
 import {
   AudioPresets,
   Room,
@@ -14,6 +14,7 @@ import { api, loadSession } from "@/lib/api";
 import type { CallMedia } from "@/lib/callMedia";
 import type { Dict } from "@/lib/i18n";
 import type { Call } from "@/lib/types";
+import { Avatar } from "./Avatar";
 
 const HANGUP = "hangup";
 const HANGUP_TOPIC = "tooapp.call";
@@ -56,6 +57,7 @@ function mountRemote(box: HTMLDivElement, track: RemoteTrack) {
 export function CallRoom({
   call,
   title,
+  avatarUrl,
   t,
   media,
   creds,
@@ -64,6 +66,7 @@ export function CallRoom({
 }: {
   call: Call;
   title: string;
+  avatarUrl?: string | null;
   t: Dict;
   media: CallMedia;
   creds?: Promise<Creds> | null;
@@ -84,8 +87,10 @@ export function CallRoom({
   const [phase, setPhase] = useState<"connecting" | "live" | "error">("connecting");
   const [error, setError] = useState<string | null>(null);
   const [peerJoined, setPeerJoined] = useState(false);
+  const [remoteOn, setRemoteOn] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
   const video = call.kind === "video";
-  const waiting = call.status === "ringing" && !peerJoined;
+  const talking = phase === "live" && peerJoined;
 
   useEffect(() => {
     onHangupRef.current = onHangup;
@@ -164,15 +169,18 @@ export function CallRoom({
     endRef.current = finish;
 
     const place = (track: RemoteTrack) => {
+      if (cancelled) return;
       const box = track.kind === Track.Kind.Video ? remoteVideo.current : remoteAudio.current;
       if (!box) return;
       mountRemote(box, track);
       setPeerJoined(true);
+      if (track.kind === Track.Kind.Video) setRemoteOn(true);
     };
 
     room.on(RoomEvent.TrackSubscribed, (track) => place(track));
     room.on(RoomEvent.TrackUnsubscribed, (track) => {
       track.detach().forEach((el) => el.remove());
+      if (!cancelled && track.kind === Track.Kind.Video) setRemoteOn(false);
     });
     room.on(RoomEvent.ParticipantConnected, () => {
       if (leaveTimer) window.clearTimeout(leaveTimer);
@@ -250,6 +258,18 @@ export function CallRoom({
   }, [call.id, creds, media, media.audio, media.video, video]);
 
   useEffect(() => {
+    if (!talking) return;
+    const started = Date.now();
+    const tick = () => setElapsed(Math.max(0, Math.floor((Date.now() - started) / 1000)));
+    const kick = window.setTimeout(tick, 0);
+    const timer = window.setInterval(tick, 1000);
+    return () => {
+      window.clearTimeout(kick);
+      window.clearInterval(timer);
+    };
+  }, [talking]);
+
+  useEffect(() => {
     const hangupKeepalive = () => {
       const token = loadSession()?.access_token;
       if (!token) return;
@@ -275,44 +295,42 @@ export function CallRoom({
     setCam(next);
   }
 
-  const status = phase === "error" ? error : waiting || phase === "connecting" ? t.calling : t.inCall;
+  const status =
+    phase === "error" ? error : talking ? formatDuration(elapsed) : call.status === "ringing" && !peerJoined ? t.callDialing : t.callLinking;
 
   return (
-    <div className="fixed inset-0 z-30 flex flex-col bg-bg text-ink">
-      <div className="relative min-h-0 flex-1">
-        <div ref={remoteVideo} className="h-full w-full bg-black" />
-        <div ref={remoteAudio} className="hidden" />
-        <div className="pointer-events-none absolute inset-x-0 top-0 p-6 text-center">
-          <p className="text-[28px] font-bold">{title}</p>
-          <p className="mt-1 text-sm text-muted">{status}</p>
-        </div>
-        {video ? (
-          <div ref={localVideo} className="absolute bottom-4 right-4 h-40 w-28 overflow-hidden rounded-2xl bg-elevated" />
-        ) : null}
-      </div>
-      <div className="flex items-center justify-center gap-8 px-6 py-8">
-        <button type="button" onClick={() => void toggleMic()} className="flex flex-col items-center gap-2">
-          <span className="flex h-14 w-14 items-center justify-center rounded-full bg-elevated">
+    <CallStage
+      title={title}
+      avatarUrl={avatarUrl}
+      status={status}
+      live={talking}
+      showAvatar={!remoteOn}
+      footer={
+        <>
+          <CallButton label={t.mic} tone="bg-white/15" onClick={() => void toggleMic()}>
             {mic ? <Mic size={22} /> : <MicOff size={22} />}
-          </span>
-          <span className="text-xs text-muted">{t.mic}</span>
-        </button>
-        {video ? (
-          <button type="button" onClick={() => void toggleCam()} className="flex flex-col items-center gap-2">
-            <span className="flex h-14 w-14 items-center justify-center rounded-full bg-elevated">
+          </CallButton>
+          {video ? (
+            <CallButton label={t.camera} tone="bg-white/15" onClick={() => void toggleCam()}>
               {cam ? <Video size={22} /> : <VideoOff size={22} />}
-            </span>
-            <span className="text-xs text-muted">{t.camera}</span>
-          </button>
-        ) : null}
-        <button type="button" onClick={() => endRef.current(true)} className="flex flex-col items-center gap-2">
-          <span className="flex h-[72px] w-[72px] items-center justify-center rounded-full bg-danger text-white">
+            </CallButton>
+          ) : null}
+          <CallButton label={t.hangup} big tone="bg-danger text-white" onClick={() => endRef.current(true)}>
             <PhoneOff size={28} />
-          </span>
-          <span className="text-xs text-muted">{t.hangup}</span>
-        </button>
-      </div>
-    </div>
+          </CallButton>
+        </>
+      }
+    >
+      <div ref={remoteVideo} className={`absolute inset-0 bg-black ${remoteOn ? "" : "invisible"}`} />
+      <div ref={remoteAudio} className="hidden" />
+      {video ? (
+        <div
+          ref={localVideo}
+          className="absolute right-4 h-40 w-28 overflow-hidden rounded-2xl bg-white/10 shadow-lg"
+          style={{ bottom: "calc(7.5rem + env(safe-area-inset-bottom))" }}
+        />
+      ) : null}
+    </CallStage>
   );
 }
 
@@ -325,4 +343,132 @@ async function loadCreds(pending: Promise<Creds> | null | undefined, callId: str
     }
   }
   return api.callToken(callId);
+}
+
+function formatDuration(total: number) {
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const seconds = total % 60;
+  const mm = String(minutes).padStart(2, "0");
+  const ss = String(seconds).padStart(2, "0");
+  if (hours > 0) return `${hours}:${mm}:${ss}`;
+  return `${mm}:${ss}`;
+}
+
+export function IncomingCall({
+  title,
+  avatarUrl,
+  kind,
+  t,
+  busy,
+  onDecline,
+  onAnswer,
+}: {
+  title: string;
+  avatarUrl?: string | null;
+  kind: "audio" | "video";
+  t: Dict;
+  busy: boolean;
+  onDecline: () => void;
+  onAnswer: () => void;
+}) {
+  return (
+    <CallStage
+      title={title}
+      avatarUrl={avatarUrl}
+      label={kind === "video" ? t.incomingVideo : t.incomingAudio}
+      status={t.callDialing}
+      live={false}
+      showAvatar
+      footer={
+        <>
+          <CallButton label={t.decline} big tone="bg-danger text-white" onClick={onDecline}>
+            <PhoneOff size={28} />
+          </CallButton>
+          <CallButton label={t.answer} big tone="bg-success text-white" disabled={busy} onClick={onAnswer}>
+            <Phone size={28} />
+          </CallButton>
+        </>
+      }
+    />
+  );
+}
+
+function CallStage({
+  title,
+  avatarUrl,
+  label,
+  status,
+  live,
+  showAvatar,
+  footer,
+  children,
+}: {
+  title: string;
+  avatarUrl?: string | null;
+  label?: string;
+  status: string | null;
+  live: boolean;
+  showAvatar: boolean;
+  footer: ReactNode;
+  children?: ReactNode;
+}) {
+  return (
+    <div className="fixed inset-0 z-40 bg-black text-white">
+      <div className="relative flex h-full w-full flex-col">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_40%,#243044_0%,#05070a_70%)]" />
+        {children}
+        <div
+          className="pointer-events-none absolute inset-x-0 top-0 z-10 bg-gradient-to-b from-black/70 to-transparent px-6 pb-16 text-center"
+          style={{ paddingTop: "max(1.5rem, env(safe-area-inset-top))" }}
+        >
+          {label ? <p className="mb-2 text-xs font-medium tracking-wide text-white/60">{label}</p> : null}
+          <p className="truncate text-[32px] font-bold leading-tight">{title}</p>
+          <p className={`mt-2 text-[15px] ${live ? "font-medium tabular-nums text-white" : "text-white/70"}`}>{status}</p>
+        </div>
+        {showAvatar ? (
+          <div className="absolute inset-0 z-[1] flex items-center justify-center pb-28">
+            <div className="relative h-[132px] w-[132px]">
+              {live ? null : (
+                <>
+                  <span className="call-ring absolute inset-0 rounded-full border border-white/50" />
+                  <span className="call-ring absolute inset-0 rounded-full border border-white/30" style={{ animationDelay: "0.7s" }} />
+                </>
+              )}
+              <Avatar name={title} src={avatarUrl} size={132} />
+            </div>
+          </div>
+        ) : null}
+        <div
+          className="relative z-10 mt-auto flex items-end justify-center gap-8 px-6"
+          style={{ paddingBottom: "max(1.75rem, env(safe-area-inset-bottom))" }}
+        >
+          {footer}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CallButton({
+  label,
+  tone,
+  big,
+  disabled,
+  onClick,
+  children,
+}: {
+  label: string;
+  tone: string;
+  big?: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button type="button" disabled={disabled} onClick={onClick} className="flex flex-col items-center gap-2 disabled:opacity-50">
+      <span className={`flex items-center justify-center rounded-full ${big ? "h-[72px] w-[72px]" : "h-16 w-16"} ${tone}`}>{children}</span>
+      <span className="text-[11px] text-white/70">{label}</span>
+    </button>
+  );
 }

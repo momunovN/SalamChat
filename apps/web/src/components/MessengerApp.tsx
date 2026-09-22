@@ -7,7 +7,6 @@ import {
   MessageSquare,
   Pencil,
   Phone,
-  PhoneOff,
   Search,
   Settings,
   Users,
@@ -22,7 +21,7 @@ import { needsDisplayName, sanitizeDisplayName, sanitizeUsername } from "@/lib/n
 import { formatPhone } from "@/lib/phone";
 import type { Call, Chat, Envelope, Message, Session, User } from "@/lib/types";
 import { Avatar } from "./Avatar";
-import { CallRoom } from "./CallRoom";
+import { CallRoom, IncomingCall } from "./CallRoom";
 import { ChatPane } from "./ChatPane";
 import { NameOnboarding } from "./NameOnboarding";
 import { PeopleResults, PersonRow, useUserSearch } from "./PeopleSearch";
@@ -733,8 +732,14 @@ export function MessengerApp() {
     </div>
   );
 
+  const incomingChat = incoming ? chats.find((c) => c.id === incoming.chat_id) : null;
+  const activeChat = activeCall ? chats.find((c) => c.id === activeCall.chat_id) : null;
+
   return (
-    <div className="flex h-[100dvh] bg-bg text-ink">
+    <div
+      className="flex h-[100dvh] bg-bg text-ink"
+      style={{ paddingTop: "env(safe-area-inset-top)", paddingBottom: "env(safe-area-inset-bottom)" }}
+    >
       <aside className="hidden w-16 flex-col items-center gap-2 border-r border-line bg-elevated py-4 md:flex">
         <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-2xl bg-accent text-sm font-bold">T</div>
         {navBtn("chats", <MessageSquare size={20} />, t.tabChats)}
@@ -843,39 +848,21 @@ export function MessengerApp() {
       ) : null}
 
       {incoming ? (
-        <div className="fixed inset-0 z-30 flex flex-col items-center justify-center bg-bg/95">
-          <p className="text-[28px] font-bold">{incoming.kind === "video" ? t.incomingVideo : t.incomingAudio}</p>
-          <p className="mt-2 text-muted">{incoming.kind === "video" ? t.video : t.audio}</p>
-          <div className="mt-10 flex gap-12">
-            <button
-              type="button"
-              onClick={() => {
-                attemptRef.current += 1;
-                armingRef.current = false;
-                setArming(null);
-                void api.rejectCall(incoming.id);
-                setIncoming(null);
-              }}
-              className="flex flex-col items-center gap-2"
-            >
-              <span className="flex h-[72px] w-[72px] items-center justify-center rounded-full bg-danger text-white">
-                <PhoneOff size={28} />
-              </span>
-              <span className="text-xs text-muted">{t.decline}</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => acceptIncoming()}
-              disabled={arming !== null}
-              className="flex flex-col items-center gap-2 disabled:opacity-50"
-            >
-              <span className="flex h-[72px] w-[72px] items-center justify-center rounded-full bg-success text-white">
-                <Phone size={28} />
-              </span>
-              <span className="text-xs text-muted">{t.answer}</span>
-            </button>
-          </div>
-        </div>
+        <IncomingCall
+          title={incomingChat?.title || (incoming.kind === "video" ? t.incomingVideo : t.incomingAudio)}
+          avatarUrl={incomingChat?.avatar_url}
+          kind={incoming.kind === "video" ? "video" : "audio"}
+          t={t}
+          busy={arming !== null}
+          onDecline={() => {
+            attemptRef.current += 1;
+            armingRef.current = false;
+            setArming(null);
+            void api.rejectCall(incoming.id);
+            setIncoming(null);
+          }}
+          onAnswer={() => acceptIncoming()}
+        />
       ) : null}
 
       {activeCall && callMedia ? (
@@ -884,7 +871,8 @@ export function MessengerApp() {
           call={activeCall}
           media={callMedia}
           creds={callCreds}
-          title={chats.find((c) => c.id === activeCall.chat_id)?.title || t.inCall}
+          title={activeChat?.title || t.inCall}
+          avatarUrl={activeChat?.avatar_url}
           t={t}
           onHangup={() => closeCall(activeCall.id)}
           onConnectFailed={() => {
