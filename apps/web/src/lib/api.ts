@@ -155,6 +155,8 @@ export const api = {
   answerCall: (id: string) => request<Call>(`/v1/calls/${id}/answer`, { method: "POST" }),
   rejectCall: (id: string) => request<Call>(`/v1/calls/${id}/reject`, { method: "POST" }),
   hangupCall: (id: string) => request<Call>(`/v1/calls/${id}/hangup`, { method: "POST" }),
+  callToken: (id: string) =>
+    request<{ url: string; token: string; room: string }>(`/v1/calls/${id}/token`),
   typing: (chatId: string) => request<{ ok: boolean }>("/v1/typing", { method: "POST", body: JSON.stringify({ chat_id: chatId }) }),
   upload: async (file: File, kind: "photo" | "file" | "voice") => {
     const intent = await request<{ id: string; put_url: string }>("/v1/uploads/intent", {

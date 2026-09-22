@@ -21,6 +21,7 @@ import { needsDisplayName, sanitizeDisplayName, sanitizeUsername } from "@/lib/n
 import { formatPhone } from "@/lib/phone";
 import type { Call, Chat, Envelope, Message, Session, User } from "@/lib/types";
 import { Avatar } from "./Avatar";
+import { CallRoom } from "./CallRoom";
 import { ChatPane } from "./ChatPane";
 import { NameOnboarding } from "./NameOnboarding";
 import { PeopleResults, PersonRow, useUserSearch } from "./PeopleSearch";
@@ -195,6 +196,7 @@ export function MessengerApp() {
           const call = env.body as Call;
           void api.calls().then((r) => setCalls(r.items ?? []));
           if (call.status === "ringing" && call.initiator_id !== myId) setIncoming(call);
+          if (call.status === "ringing" && call.initiator_id === myId) setActiveCall(call);
           if (call.status === "active") {
             setIncoming(null);
             setActiveCall(call);
@@ -229,6 +231,16 @@ export function MessengerApp() {
 
   const contactsSearch = useUserSearch(tab === "contacts" ? contactQ : "", me);
   const pickerSearch = useUserSearch(newOpen ? pickerQ : "", me);
+
+  async function beginCall(chatId: string, kind: "audio" | "video") {
+    try {
+      const call = await api.startCall(chatId, kind);
+      setIncoming(null);
+      setActiveCall(call);
+    } catch {
+      /* ignore */
+    }
+  }
 
   function selectChat(id: string) {
     if (id !== activeId) {
@@ -575,6 +587,7 @@ export function MessengerApp() {
       onBack={() => setActiveId(null)}
       onRefreshChats={() => void refreshChats()}
       onOpenDirect={(userId) => void openDirect(userId)}
+      onCall={(kind) => void beginCall(active.id, kind)}
     />
   ) : (
     <div className="hidden flex-1 items-center justify-center bg-bg text-muted md:flex">
@@ -707,7 +720,10 @@ export function MessengerApp() {
             <button
               type="button"
               onClick={() => {
-                void api.answerCall(incoming.id);
+                void api.answerCall(incoming.id).then((call) => {
+                  setIncoming(null);
+                  setActiveCall(call);
+                });
               }}
               className="flex flex-col items-center gap-2"
             >
@@ -721,20 +737,16 @@ export function MessengerApp() {
       ) : null}
 
       {activeCall ? (
-        <div className="fixed inset-0 z-30 flex flex-col items-center justify-center bg-bg/95">
-          <p className="text-[28px] font-bold">{t.inCall}</p>
-          <button
-            type="button"
-            onClick={() => {
-              void api.hangupCall(activeCall.id);
-              setActiveCall(null);
-            }}
-            className="mt-10 flex h-[72px] w-[72px] items-center justify-center rounded-full bg-danger text-white"
-          >
-            <PhoneOff size={28} />
-          </button>
-          <span className="mt-2 text-xs text-muted">{t.hangup}</span>
-        </div>
+        <CallRoom
+          key={activeCall.id}
+          call={activeCall}
+          title={chats.find((c) => c.id === activeCall.chat_id)?.title || t.inCall}
+          t={t}
+          onHangup={() => {
+            void api.hangupCall(activeCall.id);
+            setActiveCall(null);
+          }}
+        />
       ) : null}
     </div>
   );

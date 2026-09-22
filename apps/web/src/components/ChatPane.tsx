@@ -53,6 +53,7 @@ export function ChatPane({
   onBack,
   onRefreshChats,
   onOpenDirect,
+  onCall,
   rosterTick = 0,
 }: {
   t: Dict;
@@ -67,6 +68,7 @@ export function ChatPane({
   onBack: () => void;
   onRefreshChats: () => void;
   onOpenDirect: (userId: string) => void;
+  onCall: (kind: "audio" | "video") => void;
   rosterTick?: number;
 }) {
   const [text, setText] = useState("");
@@ -433,15 +435,17 @@ export function ChatPane({
         </button>
         <button
           type="button"
-          onClick={() => void api.startCall(chat.id, "audio")}
+          onClick={() => onCall("audio")}
           className="flex h-9 w-9 items-center justify-center text-ink"
+          aria-label={t.audio}
         >
           <Phone size={18} />
         </button>
         <button
           type="button"
-          onClick={() => void api.startCall(chat.id, "video")}
+          onClick={() => onCall("video")}
           className="flex h-9 w-9 items-center justify-center text-ink"
+          aria-label={t.video}
         >
           <Video size={18} />
         </button>

@@ -112,7 +112,7 @@ async function attachmentsFor(ids: string[], req?: Request) {
       id: a.id,
       kind: a.kind,
       object_key: a.object_key,
-      url: `${base}/media/${a.object_key}`,
+      url: /^https?:\/\//i.test(a.object_key) ? a.object_key : `${base}/media/${a.object_key}`,
       mime: a.mime,
       size_bytes: Number(a.size_bytes || 0),
       width: a.width,

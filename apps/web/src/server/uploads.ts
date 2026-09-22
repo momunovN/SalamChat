@@ -2,14 +2,14 @@ import { mkdir, readFile, writeFile } from "fs/promises";
 import os from "os";
 import path from "path";
 import { query, queryOne } from "./db";
-import { env, publicBase } from "./env";
+import { envFirst, publicBase } from "./env";
 import { HttpError } from "./http";
 
 const MAX_BYTES = 20 * 1024 * 1024;
 const CHUNK = 12 * 1024;
 
 function uploadRoots() {
-  const preferred = env("TOOAPP_UPLOAD_DIR", "") || path.join(process.cwd(), "data", "uploads");
+  const preferred = envFirst("", "TOOAPP_UPLOAD_DIR") || path.join(process.cwd(), "data", "uploads");
   const tmp = path.join(os.tmpdir(), "tooapp-uploads");
   return preferred === tmp ? [preferred] : [preferred, tmp];
 }
@@ -56,14 +56,22 @@ export async function createIntent(
 }
 
 export async function putUpload(userId: string, id: string, req: Request) {
-  const row = await queryOne<{ object_key: string; user_id: string; status: string }>(
-    `SELECT object_key, user_id, status FROM uploads WHERE id=$1`,
+  const row = await queryOne<{ object_key: string; user_id: string; status: string; kind: string; mime: string }>(
+    `SELECT object_key, user_id, status, kind, mime FROM uploads WHERE id=$1`,
     [id],
   );
   if (!row || row.user_id !== userId) throw new HttpError(404, "not_found", "upload not found");
   const buf = Buffer.from(await req.arrayBuffer());
   if (buf.length === 0) throw new HttpError(400, "bad_request", "empty upload");
   if (buf.length > MAX_BYTES) throw new HttpError(413, "too_large", "file too large");
+  const remote = await storeRemote(buf, row.mime, row.kind, row.object_key.split("/").pop() || "file");
+  if (remote) {
+    await query(
+      `UPDATE uploads SET object_key=$2, status='ready', size_bytes=$3, completed_at=now() WHERE id=$1`,
+      [id, remote, buf.length],
+    );
+    return { id, url: remote, object_key: remote };
+  }
   let onDisk = false;
   try {
     await writeAnywhere(row.object_key, buf);
@@ -76,6 +84,33 @@ export async function putUpload(userId: string, id: string, req: Request) {
   if (!onDisk) await persist;
   else persist.catch((err) => console.error("upload persist", err instanceof Error ? err.message : err));
   return { id, url: `${publicBase(req)}/media/${row.object_key}`, object_key: row.object_key };
+}
+
+async function storeRemote(buf: Buffer, mime: string, kind: string, filename: string) {
+  const key = envFirst("", "STORAGE_API_KEY", "TOOAPP_STORAGE_KEY");
+  if (!key) return null;
+  const form = new FormData();
+  form.append("file", new Blob([new Uint8Array(buf)], { type: mime || "application/octet-stream" }), filename);
+  form.append("path", `tooapp/${kind || "file"}`);
+  if (kind !== "photo") form.append("webp", "false");
+  const endpoint = envFirst("https://relaxdev.ru/api/v1/storage/upload", "STORAGE_UPLOAD_URL");
+  try {
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}` },
+      body: form,
+    });
+    const text = await res.text();
+    if (!res.ok) {
+      console.error("storage upload", res.status, text.slice(0, 180));
+      return null;
+    }
+    const data = JSON.parse(text) as { url?: string; file?: { url?: string }; data?: { url?: string } };
+    return data.url || data.file?.url || data.data?.url || null;
+  } catch (err) {
+    console.error("storage upload", err instanceof Error ? err.message : err);
+    return null;
+  }
 }
 
 async function writeAnywhere(objectKey: string, buf: Buffer) {

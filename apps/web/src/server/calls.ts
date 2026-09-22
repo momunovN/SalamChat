@@ -1,3 +1,4 @@
+import { SignJWT } from "jose";
 import { query, queryOne } from "./db";
 import { env } from "./env";
 import { envelope, hub } from "./hub";
@@ -109,10 +110,24 @@ export async function hangupCall(userId: string, id: string) {
 
 export async function callToken(userId: string, id: string) {
   const call = await getCall(userId, id);
-  return {
-    url: env("LIVEKIT_URL", ""),
-    token: env("LIVEKIT_URL") ? `stub-${userId}` : `stub-${userId}`,
-    room: call.sfu_room || "",
-    ice_servers: ["stun:stun.l.google.com:19302"],
-  };
+  const room = call.sfu_room || "";
+  const signed = await signLiveKitToken(userId, room);
+  return { ...signed, ice_servers: ["stun:stun.l.google.com:19302"] };
+}
+
+export async function signLiveKitToken(identity: string, room: string) {
+  const url = env("LIVEKIT_URL", "");
+  const key = env("LIVEKIT_API_KEY", "");
+  const secret = env("LIVEKIT_API_SECRET", "");
+  if (!url || !key || !secret) return { url, token: `stub-${identity}`, room };
+  const token = await new SignJWT({
+    video: { roomJoin: true, room, canPublish: true, canSubscribe: true },
+  })
+    .setProtectedHeader({ alg: "HS256", typ: "JWT" })
+    .setIssuer(key)
+    .setSubject(identity)
+    .setIssuedAt()
+    .setExpirationTime("2h")
+    .sign(new TextEncoder().encode(secret));
+  return { url, token, room };
 }
