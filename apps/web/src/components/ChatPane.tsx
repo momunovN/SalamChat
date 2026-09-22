@@ -281,21 +281,24 @@ export function ChatPane({
       };
       rec.onstop = () => {
         stream.getTracks().forEach((track) => track.stop());
-        const blob = new Blob(chunksRef.current, { type: (rec.mimeType || mime || "audio/webm").split(";")[0] });
         const ms = Date.now() - startedAt.current;
-        chunksRef.current = [];
+        const type = (rec.mimeType || mime || "audio/webm").split(";")[0];
         const discard = discardRef.current;
         discardRef.current = false;
         recRef.current = null;
         streamRef.current = null;
-        if (!discard) void sendVoice(blob, ms);
+        window.setTimeout(() => {
+          const blob = new Blob(chunksRef.current, { type });
+          chunksRef.current = [];
+          if (!discard) void sendVoice(blob, ms);
+        }, 0);
       };
       streamRef.current = stream;
       recRef.current = rec;
       startedAt.current = started;
       setElapsed(0);
       setRecording(true);
-      rec.start();
+      rec.start(200);
     } catch {
       streamRef.current?.getTracks().forEach((track) => track.stop());
       noteVoiceError(t.voiceDenied);
@@ -310,12 +313,17 @@ export function ChatPane({
       return;
     }
     discardRef.current = discard;
+    try {
+      if (rec.state === "recording") rec.requestData();
+    } catch {
+      /* some browsers only flush on stop */
+    }
     rec.stop();
   }
 
   async function sendVoice(blob: Blob, durationMs: number) {
     if (durationMs < 500 || blob.size < 80) {
-      noteVoiceError(t.voiceShort);
+      noteVoiceError(durationMs >= 500 ? t.voiceFail : t.voiceShort);
       return;
     }
     const clientId = crypto.randomUUID();
@@ -350,6 +358,7 @@ export function ChatPane({
       setMessages((prev) => prev.map((m) => (m.client_id === clientId ? msg : m)));
       onRefreshChats();
     } catch {
+      noteVoiceError(t.voiceFail);
       setMessages((prev) => prev.map((m) => (m.client_id === clientId ? { ...m, status: "failed" } : m)));
     } finally {
       setBusy(false);

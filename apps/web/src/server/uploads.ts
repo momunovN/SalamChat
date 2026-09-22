@@ -1,13 +1,17 @@
 import { mkdir, readFile, writeFile } from "fs/promises";
+import os from "os";
 import path from "path";
 import { query, queryOne } from "./db";
 import { env, publicBase } from "./env";
 import { HttpError } from "./http";
 
 const MAX_BYTES = 20 * 1024 * 1024;
+const CHUNK = 12 * 1024;
 
-function uploadRoot() {
-  return env("TOOAPP_UPLOAD_DIR", "") || path.join(process.cwd(), "data", "uploads");
+function uploadRoots() {
+  const preferred = env("TOOAPP_UPLOAD_DIR", "") || path.join(process.cwd(), "data", "uploads");
+  const tmp = path.join(os.tmpdir(), "tooapp-uploads");
+  return preferred === tmp ? [preferred] : [preferred, tmp];
 }
 
 function denied(err: unknown) {
@@ -60,27 +64,47 @@ export async function putUpload(userId: string, id: string, req: Request) {
   const buf = Buffer.from(await req.arrayBuffer());
   if (buf.length === 0) throw new HttpError(400, "bad_request", "empty upload");
   if (buf.length > MAX_BYTES) throw new HttpError(413, "too_large", "file too large");
-  const dest = path.join(uploadRoot(), row.object_key);
   let onDisk = false;
   try {
-    await mkdir(path.dirname(dest), { recursive: true });
-    await writeFile(dest, buf);
+    await writeAnywhere(row.object_key, buf);
     onDisk = true;
   } catch (err) {
     if (!denied(err)) throw err;
   }
-  if (onDisk) {
-    await query(`UPDATE uploads SET status='ready', size_bytes=$2, completed_at=now(), body=NULL WHERE id=$1`, [
-      id,
-      buf.length,
-    ]);
-  } else {
-    await query(
-      `UPDATE uploads SET status='ready', size_bytes=$2, completed_at=now(), body=decode($3,'hex') WHERE id=$1`,
-      [id, buf.length, buf.toString("hex")],
-    );
-  }
+  await query(`UPDATE uploads SET status='ready', size_bytes=$2, completed_at=now() WHERE id=$1`, [id, buf.length]);
+  const persist = persistChunks(id, buf);
+  if (!onDisk) await persist;
+  else persist.catch((err) => console.error("upload persist", err instanceof Error ? err.message : err));
   return { id, url: `${publicBase(req)}/media/${row.object_key}`, object_key: row.object_key };
+}
+
+async function writeAnywhere(objectKey: string, buf: Buffer) {
+  let last: unknown;
+  for (const root of uploadRoots()) {
+    try {
+      const dest = path.join(root, objectKey);
+      await mkdir(path.dirname(dest), { recursive: true });
+      await writeFile(dest, buf);
+      return;
+    } catch (err) {
+      last = err;
+      if (!denied(err)) throw err;
+    }
+  }
+  throw last instanceof Error ? last : new Error("upload dir not writable");
+}
+
+async function persistChunks(uploadId: string, buf: Buffer) {
+  let idx = 0;
+  for (let i = 0; i < buf.length; i += CHUNK) {
+    const part = buf.subarray(i, Math.min(buf.length, i + CHUNK));
+    await query(
+      `INSERT INTO upload_chunks (upload_id, idx, body) VALUES ($1,$2,decode($3,'hex'))
+       ON CONFLICT (upload_id, idx) DO UPDATE SET body = EXCLUDED.body`,
+      [uploadId, idx, Buffer.from(part).toString("hex")],
+    );
+    idx += 1;
+  }
 }
 
 export async function completeUpload(userId: string, id: string, req: Request) {
@@ -113,15 +137,24 @@ export async function mediaType(objectKey: string) {
 export async function readMedia(objectKey: string) {
   const safe = objectKey.replace(/\\/g, "/");
   if (safe.includes("..") || safe.startsWith("/")) throw new HttpError(400, "bad_request", "bad key");
-  try {
-    return await readFile(path.join(uploadRoot(), safe));
-  } catch (err) {
-    if (!denied(err) && (err as { code?: string }).code !== "ENOENT") throw err;
+  for (const root of uploadRoots()) {
+    try {
+      return await readFile(path.join(root, safe));
+    } catch (err) {
+      const code = (err as { code?: string }).code;
+      if (code !== "ENOENT" && !denied(err)) throw err;
+    }
   }
-  const row = await queryOne<{ body: string | null }>(
-    `SELECT encode(body, 'hex') AS body FROM uploads WHERE object_key=$1 AND body IS NOT NULL`,
+  const row = await queryOne<{ id: string; body: string | null }>(
+    `SELECT id, encode(body, 'hex') AS body FROM uploads WHERE object_key=$1`,
     [safe],
   );
-  if (!row?.body) throw new HttpError(404, "not_found", "not found");
-  return Buffer.from(String(row.body), "hex");
+  if (row?.body) return Buffer.from(String(row.body), "hex");
+  if (!row) throw new HttpError(404, "not_found", "not found");
+  const chunks = await query<{ body: string }>(
+    `SELECT encode(body, 'hex') AS body FROM upload_chunks WHERE upload_id=$1 ORDER BY idx`,
+    [row.id],
+  );
+  if (!chunks.length) throw new HttpError(404, "not_found", "not found");
+  return Buffer.concat(chunks.map((c) => Buffer.from(String(c.body), "hex")));
 }
