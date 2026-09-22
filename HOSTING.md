@@ -1,5 +1,7 @@
 # Деплой TooApp на RelaxDev
 
+Прод: **https://too-app.ru** (сайт и `/v1` на одном домене). Health: `GET https://too-app.ru/healthz`.
+
 Сайт и API живут вместе. После деплоя:
 
 - UI: `https://<имя>.relaxdev.ru`
