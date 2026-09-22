@@ -20,13 +20,21 @@ export function payloadText(payload: unknown): string {
   return "";
 }
 
+export function formatClock(ms: number) {
+  const s = Math.max(0, Math.round(ms / 1000));
+  return `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, "0")}`;
+}
+
 export function messageBody(m: Message | null | undefined, t: Dict): string {
   if (!m) return "";
   if (m.deleted_at) return t.deletedMsg;
   if (m.type === "text") return payloadText(m.payload);
   if (m.type === "photo") return `📷 ${t.photo}`;
   if (m.type === "file") return `📎 ${t.file}`;
-  if (m.type === "voice") return `🎤 ${t.voice}`;
+  if (m.type === "voice") {
+    const ms = m.payload?.duration_ms;
+    return ms ? `🎤 ${formatClock(ms)}` : `🎤 ${t.voice}`;
+  }
   if (m.type === "location") return `📍 ${t.location}`;
   if (m.type === "system") return payloadText(m.payload);
   return payloadText(m.payload);

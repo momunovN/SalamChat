@@ -32,7 +32,7 @@ import { bearer, corsHeaders, errorResponse, HttpError, json, readJSON } from ".
 import { deleteMessage, editMessage, listMessages, receipts, sendMessage } from "./messages";
 import { listContacts, syncContacts } from "./contacts";
 import { getUserPublic, lookupPhones, searchUsers } from "./users";
-import { completeUpload, createIntent, putUpload, readMedia } from "./uploads";
+import { completeUpload, createIntent, mediaType, putUpload, readMedia } from "./uploads";
 import { sseResponse } from "./stream";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -68,12 +68,20 @@ export async function handleRequest(req: Request): Promise<Response> {
       return json(200, { ok: true, name: "tooapp" });
     }
     if (pathname.startsWith("/media/")) {
-      const key = pathname.slice("/media/".length);
+      let key = pathname.slice("/media/".length);
+      try {
+        key = decodeURIComponent(key);
+      } catch {
+        throw new HttpError(400, "bad_request", "bad key");
+      }
       const buf = await readMedia(key);
-      return new Response(buf, {
+      const type = await mediaType(key);
+      return new Response(new Uint8Array(buf), {
         headers: {
-          "Content-Type": "application/octet-stream",
+          "Content-Type": type,
+          "Content-Length": String(buf.length),
           "Cache-Control": "public, max-age=86400",
+          "Accept-Ranges": "bytes",
           "Access-Control-Allow-Origin": "*",
         },
       });

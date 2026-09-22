@@ -22,11 +22,12 @@ import {
   X,
 } from "lucide-react";
 import { api } from "@/lib/api";
-import { dayKey, dayLabel, membersPhrase, messageBody, payloadText } from "@/lib/chat";
+import { dayKey, dayLabel, formatClock, membersPhrase, messageBody, payloadText } from "@/lib/chat";
 import type { Dict, Lang } from "@/lib/i18n";
 import type { Chat, ChatMember, Message, ReplyPreview, User } from "@/lib/types";
 import { Avatar } from "./Avatar";
 import { PeopleResults, useUserSearch } from "./PeopleSearch";
+import { VoiceNote } from "./VoiceNote";
 
 function fmtTime(iso: string) {
   const d = new Date(iso);
@@ -83,6 +84,17 @@ export function ChatPane({
   const stick = useRef(true);
   const fileRef = useRef<HTMLInputElement>(null);
   const typingAt = useRef(0);
+  const recRef = useRef<MediaRecorder | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const discardRef = useRef(false);
+  const startedAt = useRef(0);
+  const voiceBlobs = useRef(new Map<string, { blob: Blob; ms: number }>());
+  const localUrls = useRef(new Set<string>());
+  const replyRef = useRef(replyTo);
+  const [recording, setRecording] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
+  const [voiceError, setVoiceError] = useState<string | null>(null);
   const addSearch = useUserSearch(adding ? addQ : "", me);
 
   const myRole = members.find((m) => m.user.id === me)?.role || "member";
@@ -108,6 +120,36 @@ export function ChatPane({
     if (!el || !stick.current) return;
     el.scrollTop = el.scrollHeight;
   }, [messages.length, chat.id]);
+
+  useEffect(() => {
+    replyRef.current = replyTo;
+  }, [replyTo]);
+
+  useEffect(() => {
+    if (!recording) return;
+    const id = window.setInterval(() => {
+      const ms = Date.now() - startedAt.current;
+      setElapsed(ms);
+      const rec = recRef.current;
+      if (ms >= 180_000 && rec && rec.state !== "inactive") {
+        discardRef.current = false;
+        setRecording(false);
+        rec.stop();
+      }
+    }, 200);
+    return () => window.clearInterval(id);
+  }, [recording]);
+
+  useEffect(() => {
+    const urls = localUrls.current;
+    return () => {
+      discardRef.current = true;
+      if (recRef.current && recRef.current.state !== "inactive") recRef.current.stop();
+      streamRef.current?.getTracks().forEach((track) => track.stop());
+      for (const url of urls) URL.revokeObjectURL(url);
+      urls.clear();
+    };
+  }, []);
 
   async function loadOlder() {
     if (!cursor || loadingOlder) return;
@@ -188,20 +230,129 @@ export function ChatPane({
 
   async function retry(m: Message) {
     if (m.status !== "failed") return;
+    const saved = voiceBlobs.current.get(m.client_id);
     setMessages((prev) => prev.map((x) => (x.id === m.id ? { ...x, status: "sending" } : x)));
     try {
-      const msg = await api.send(
-        chat.id,
-        m.client_id,
-        m.type,
-        m.payload,
-        undefined,
-        m.reply_to_id || undefined,
-      );
-      setMessages((prev) => prev.map((x) => (x.client_id === m.client_id ? msg : x)));
+      if (m.type === "voice" && saved) {
+        const file = voiceFile(saved.blob);
+        const uploadId = await api.upload(file, "voice");
+        const msg = await api.send(chat.id, m.client_id, "voice", { duration_ms: saved.ms }, [uploadId], m.reply_to_id || undefined);
+        voiceBlobs.current.delete(m.client_id);
+        if (m.local_url) {
+          URL.revokeObjectURL(m.local_url);
+          localUrls.current.delete(m.local_url);
+        }
+        setMessages((prev) => prev.map((x) => (x.client_id === m.client_id ? msg : x)));
+      } else {
+        const msg = await api.send(chat.id, m.client_id, m.type, m.payload, undefined, m.reply_to_id || undefined);
+        setMessages((prev) => prev.map((x) => (x.client_id === m.client_id ? msg : x)));
+      }
       onRefreshChats();
     } catch {
       setMessages((prev) => prev.map((x) => (x.client_id === m.client_id ? { ...x, status: "failed" } : x)));
+    }
+  }
+
+  function noteVoiceError(msg: string) {
+    setVoiceError(msg);
+    window.setTimeout(() => setVoiceError((cur) => (cur === msg ? null : cur)), 2500);
+  }
+
+  function pickRecorderMime() {
+    if (typeof MediaRecorder === "undefined") return "";
+    const types = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"];
+    return types.find((item) => MediaRecorder.isTypeSupported(item)) || "";
+  }
+
+  async function startRec(started: number) {
+    if (recording || busy || editing) return;
+    setVoiceError(null);
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+      noteVoiceError(t.voiceUnsupported);
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mime = pickRecorderMime();
+      const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+      chunksRef.current = [];
+      rec.ondataavailable = (ev) => {
+        if (ev.data.size) chunksRef.current.push(ev.data);
+      };
+      rec.onstop = () => {
+        stream.getTracks().forEach((track) => track.stop());
+        const blob = new Blob(chunksRef.current, { type: (rec.mimeType || mime || "audio/webm").split(";")[0] });
+        const ms = Date.now() - startedAt.current;
+        chunksRef.current = [];
+        const discard = discardRef.current;
+        discardRef.current = false;
+        recRef.current = null;
+        streamRef.current = null;
+        if (!discard) void sendVoice(blob, ms);
+      };
+      streamRef.current = stream;
+      recRef.current = rec;
+      startedAt.current = started;
+      setElapsed(0);
+      setRecording(true);
+      rec.start();
+    } catch {
+      streamRef.current?.getTracks().forEach((track) => track.stop());
+      noteVoiceError(t.voiceDenied);
+    }
+  }
+
+  function stopRec(discard: boolean) {
+    const rec = recRef.current;
+    setRecording(false);
+    if (!rec || rec.state === "inactive") {
+      streamRef.current?.getTracks().forEach((track) => track.stop());
+      return;
+    }
+    discardRef.current = discard;
+    rec.stop();
+  }
+
+  async function sendVoice(blob: Blob, durationMs: number) {
+    if (durationMs < 500 || blob.size < 80) {
+      noteVoiceError(t.voiceShort);
+      return;
+    }
+    const clientId = crypto.randomUUID();
+    const localUrl = URL.createObjectURL(blob);
+    localUrls.current.add(localUrl);
+    voiceBlobs.current.set(clientId, { blob, ms: durationMs });
+    const quoted = replyRef.current;
+    const optimistic: Message = {
+      id: clientId,
+      chat_id: chat.id,
+      author_id: me,
+      author_name: t.you,
+      type: "voice",
+      payload: { duration_ms: durationMs },
+      client_id: clientId,
+      created_at: new Date().toISOString(),
+      status: "sending",
+      local_url: localUrl,
+      reply_to_id: quoted?.id,
+      reply_to: quoted,
+    };
+    setReplyTo(null);
+    stick.current = true;
+    setMessages((prev) => [...prev, optimistic]);
+    setBusy(true);
+    try {
+      const uploadId = await api.upload(voiceFile(blob), "voice");
+      const msg = await api.send(chat.id, clientId, "voice", { duration_ms: durationMs }, [uploadId], quoted?.id);
+      voiceBlobs.current.delete(clientId);
+      URL.revokeObjectURL(localUrl);
+      localUrls.current.delete(localUrl);
+      setMessages((prev) => prev.map((m) => (m.client_id === clientId ? msg : m)));
+      onRefreshChats();
+    } catch {
+      setMessages((prev) => prev.map((m) => (m.client_id === clientId ? { ...m, status: "failed" } : m)));
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -320,8 +471,7 @@ export function ChatPane({
                     {showName ? (
                       <p className="mb-0.5 px-1 text-[12px] font-semibold text-accent">{m.author_name || ""}</p>
                     ) : null}
-                    <button
-                      type="button"
+                    <div
                       onClick={(e) => {
                         e.stopPropagation();
                         setMenuId((id) => (id === m.id ? null : m.id));
@@ -347,8 +497,13 @@ export function ChatPane({
                           </p>
                         </div>
                       ) : null}
+                      {m.type === "voice" && m.local_url ? (
+                        <VoiceNote src={m.local_url} durationMs={m.payload?.duration_ms} />
+                      ) : null}
                       {m.attachments?.map((a) =>
-                        a.kind === "photo" ? (
+                        a.kind === "voice" || a.mime?.startsWith("audio/") ? (
+                          <VoiceNote key={a.id} src={a.url} durationMs={a.duration_ms || m.payload?.duration_ms} />
+                        ) : a.kind === "photo" ? (
                           // eslint-disable-next-line @next/next/no-img-element
                           <img key={a.id} src={a.url} alt="" className="mb-1 max-h-64 rounded-lg" />
                         ) : (
@@ -364,8 +519,8 @@ export function ChatPane({
                           </a>
                         ),
                       )}
-                      {m.payload?.text || (m.type !== "text" ? m.payload?.caption : "")}
-                    </button>
+                      {m.type === "voice" ? null : m.payload?.text || (m.type !== "text" ? m.payload?.caption : "")}
+                    </div>
                     {menuId === m.id ? (
                       <div
                         className="mt-1 flex flex-wrap gap-1"
@@ -481,34 +636,64 @@ export function ChatPane({
         </div>
       ) : null}
 
+      {voiceError ? <p className="px-4 pb-1 text-xs font-medium text-danger">{voiceError}</p> : null}
       <div className="flex items-end gap-2 px-3 py-2">
-        <button
-          type="button"
-          onClick={() => setAttach((v) => !v)}
-          className="flex h-10 w-10 items-center justify-center rounded-full bg-elevated text-ink"
-        >
-          <Plus size={20} />
-        </button>
-        <textarea
-          value={text}
-          onChange={(e) => {
-            setText(e.target.value);
-            if (!editing && Date.now() - typingAt.current > 800) {
-              typingAt.current = Date.now();
-              void api.typing(chat.id);
-            }
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              void send();
-            }
-          }}
-          rows={1}
-          placeholder={t.composer}
-          className="max-h-32 min-h-[40px] flex-1 resize-none rounded-[20px] bg-elevated px-3 py-2.5 text-base text-ink outline-none placeholder:text-muted"
-        />
-        {text.trim() ? (
+        {recording ? (
+          <button
+            type="button"
+            onClick={() => stopRec(true)}
+            className="flex h-10 w-10 items-center justify-center rounded-full bg-elevated text-ink"
+            aria-label={t.cancel}
+          >
+            <X size={18} />
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setAttach((v) => !v)}
+            className="flex h-10 w-10 items-center justify-center rounded-full bg-elevated text-ink"
+          >
+            <Plus size={20} />
+          </button>
+        )}
+        {recording ? (
+          <div className="flex min-h-[40px] flex-1 items-center gap-2 rounded-[20px] bg-elevated px-3">
+            <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-danger" />
+            <span className="text-sm font-medium tabular-nums text-ink">{formatClock(elapsed)}</span>
+            <span className="text-sm text-muted">{t.recording}</span>
+          </div>
+        ) : (
+          <textarea
+            value={text}
+            onChange={(e) => {
+              setText(e.target.value);
+              if (!editing && Date.now() - typingAt.current > 800) {
+                typingAt.current = Date.now();
+                void api.typing(chat.id);
+              }
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                void send();
+              }
+            }}
+            rows={1}
+            placeholder={t.composer}
+            className="max-h-32 min-h-[40px] flex-1 resize-none rounded-[20px] bg-elevated px-3 py-2.5 text-base text-ink outline-none placeholder:text-muted"
+          />
+        )}
+        {recording ? (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => stopRec(false)}
+            className="flex h-10 w-10 items-center justify-center rounded-full bg-accent text-white"
+            aria-label={t.voice}
+          >
+            <ArrowUp size={16} />
+          </button>
+        ) : text.trim() ? (
           <button
             type="button"
             disabled={busy}
@@ -518,9 +703,15 @@ export function ChatPane({
             <ArrowUp size={16} />
           </button>
         ) : (
-          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-elevated text-ink">
+          <button
+            type="button"
+            disabled={busy || !!editing}
+            onClick={() => void startRec(Date.now())}
+            className="flex h-10 w-10 items-center justify-center rounded-full bg-elevated text-ink disabled:opacity-40"
+            aria-label={t.voice}
+          >
             <Mic size={18} />
-          </div>
+          </button>
         )}
       </div>
 
@@ -657,6 +848,12 @@ export function ChatPane({
       /* ignore */
     }
   }
+}
+
+function voiceFile(blob: Blob) {
+  const mime = (blob.type || "audio/webm").split(";")[0];
+  const ext = mime.includes("mp4") ? "m4a" : mime.includes("ogg") ? "ogg" : mime.includes("wav") ? "wav" : "webm";
+  return new File([blob], `voice.${ext}`, { type: mime });
 }
 
 function Action({

@@ -36,7 +36,7 @@ export type Message = {
   author_id?: string | null;
   author_name?: string | null;
   type: string;
-  payload: { text?: string; lat?: number; lon?: number; caption?: string };
+  payload: { text?: string; lat?: number; lon?: number; caption?: string; duration_ms?: number };
   client_id: string;
   reply_to_id?: string | null;
   reply_to?: ReplyPreview | null;
@@ -49,7 +49,9 @@ export type Message = {
     url: string;
     mime: string;
     filename?: string | null;
+    duration_ms?: number | null;
   }[];
+  local_url?: string;
   status?: string;
 };
 

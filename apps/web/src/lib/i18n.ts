@@ -105,6 +105,10 @@ const ru = {
   confirmKick: "Исключить из группы?",
   confirmLeave: "Выйти из группы?",
   noMessages: "Напишите первое сообщение",
+  recording: "Запись",
+  voiceShort: "Слишком короткое",
+  voiceDenied: "Нет доступа к микрофону",
+  voiceUnsupported: "Браузер не пишет голос",
 };
 
 const ky: typeof ru = {
@@ -212,6 +216,10 @@ const ky: typeof ru = {
   confirmKick: "Топтон чыгарасызбы?",
   confirmLeave: "Топтон чыгасызбы?",
   noMessages: "Биринчи билдирүүнү жазыңыз",
+  recording: "Жаздыруу",
+  voiceShort: "Өтө кыска",
+  voiceDenied: "Микрофонго уруксат жок",
+  voiceUnsupported: "Браузер үн жазбайт",
 };
 
 export const dict = { ru, ky };

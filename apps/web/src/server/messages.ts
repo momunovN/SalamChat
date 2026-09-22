@@ -199,10 +199,17 @@ export async function sendMessage(
   }
   if (type === "system") throw new HttpError(403, "forbidden", "system messages are server-only");
   let payload = input.payload ?? {};
+  let voiceMs: number | null = null;
   if (type === "text") {
     const text = String((payload as { text?: string }).text || "").trim();
     if (!text || [...text].length > 4096) throw new HttpError(400, "bad_request", "text length");
     payload = { ...(payload as object), text };
+  }
+  if (type === "voice") {
+    const raw = Number((payload as { duration_ms?: number }).duration_ms);
+    voiceMs = Number.isFinite(raw) ? Math.max(1, Math.min(Math.round(raw), 10 * 60 * 1000)) : null;
+    const base = payload && typeof payload === "object" ? payload : {};
+    payload = { ...base, ...(voiceMs ? { duration_ms: voiceMs } : {}) };
   }
 
   if (input.reply_to_id) {
@@ -242,7 +249,7 @@ export async function sendMessage(
   }
 
   if (input.upload_ids?.length) {
-    await attachUploads(userId, id, type, input.upload_ids);
+    await attachUploads(userId, id, type, input.upload_ids, voiceMs);
   }
 
   await query(`UPDATE chats SET updated_at=now(), last_message_id=$2 WHERE id=$1`, [chatId, id]);
@@ -304,7 +311,13 @@ export async function deleteMessage(userId: string, id: string) {
   return { ok: true };
 }
 
-async function attachUploads(userId: string, messageId: string, msgType: string, uploadIds: string[]) {
+async function attachUploads(
+  userId: string,
+  messageId: string,
+  msgType: string,
+  uploadIds: string[],
+  voiceMs?: number | null,
+) {
   let kind = msgType;
   for (const uid of uploadIds) {
     const u = await queryOne<{ object_key: string; mime: string; size_bytes: string | number; kind: string; status: string }>(
@@ -316,8 +329,8 @@ async function attachUploads(userId: string, messageId: string, msgType: string,
     if (kind === "photo" && u.kind !== "photo" && u.kind !== "video") kind = u.kind;
     else if (u.kind) kind = u.kind;
     await query(
-      `INSERT INTO attachments (message_id, kind, object_key, mime, size_bytes) VALUES ($1,$2,$3,$4,$5)`,
-      [messageId, kind, u.object_key, u.mime, Number(u.size_bytes || 0)],
+      `INSERT INTO attachments (message_id, kind, object_key, mime, size_bytes, duration_ms) VALUES ($1,$2,$3,$4,$5,$6)`,
+      [messageId, kind, u.object_key, u.mime, Number(u.size_bytes || 0), kind === "voice" ? voiceMs ?? null : null],
     );
   }
 }

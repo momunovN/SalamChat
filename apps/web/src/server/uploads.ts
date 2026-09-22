@@ -6,6 +6,14 @@ import { HttpError } from "./http";
 
 const root = path.join(process.cwd(), "data", "uploads");
 
+function uploadExt(mime: string) {
+  const sub = (mime.split("/")[1] || "bin").split(";")[0].trim().toLowerCase();
+  if (sub === "mpeg") return "mp3";
+  if (sub === "mp4" || sub === "m4a" || sub === "x-m4a") return "m4a";
+  const clean = sub.replace(/[^a-z0-9]/g, "").slice(0, 8);
+  return clean || "bin";
+}
+
 export async function createIntent(
   userId: string,
   mime: string,
@@ -17,8 +25,7 @@ export async function createIntent(
     throw new HttpError(400, "bad_request", "bad kind");
   }
   const id = crypto.randomUUID();
-  const ext = (mime.split("/")[1] || "bin").replace(/[^a-z0-9]/gi, "").slice(0, 8);
-  const objectKey = `${userId}/${id}.${ext || "bin"}`;
+  const objectKey = `${userId}/${id}.${uploadExt(mime)}`;
   await query(
     `INSERT INTO uploads (id, user_id, object_key, mime, size_bytes, kind, status)
      VALUES ($1,$2,$3,$4,$5,$6,'pending')
@@ -57,6 +64,23 @@ export async function completeUpload(userId: string, id: string, req: Request) {
   if (!row || row.user_id !== userId) throw new HttpError(404, "not_found", "upload not found");
   if (row.status !== "ready") throw new HttpError(400, "bad_request", "upload not ready");
   return { id, url: `${publicBase(req)}/media/${row.object_key}` };
+}
+
+export async function mediaType(objectKey: string) {
+  const row = await queryOne<{ mime: string }>(`SELECT mime FROM uploads WHERE object_key=$1`, [objectKey]);
+  const mime = (row?.mime || "").split(";")[0].trim().toLowerCase();
+  if (mime) return mime;
+  const ext = objectKey.split(".").pop()?.toLowerCase();
+  if (ext === "webm") return "audio/webm";
+  if (ext === "m4a" || ext === "mp4") return "audio/mp4";
+  if (ext === "ogg") return "audio/ogg";
+  if (ext === "mp3") return "audio/mpeg";
+  if (ext === "wav") return "audio/wav";
+  if (ext === "jpg" || ext === "jpeg") return "image/jpeg";
+  if (ext === "png") return "image/png";
+  if (ext === "webp") return "image/webp";
+  if (ext === "gif") return "image/gif";
+  return "application/octet-stream";
 }
 
 export async function readMedia(objectKey: string) {
