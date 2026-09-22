@@ -1,10 +1,19 @@
 import { mkdir, readFile, writeFile } from "fs/promises";
 import path from "path";
 import { query, queryOne } from "./db";
-import { publicBase } from "./env";
+import { env, publicBase } from "./env";
 import { HttpError } from "./http";
 
-const root = path.join(process.cwd(), "data", "uploads");
+const MAX_BYTES = 20 * 1024 * 1024;
+
+function uploadRoot() {
+  return env("TOOAPP_UPLOAD_DIR", "") || path.join(process.cwd(), "data", "uploads");
+}
+
+function denied(err: unknown) {
+  const code = (err as { code?: string }).code;
+  return code === "EACCES" || code === "EPERM" || code === "EROFS" || code === "ENOTDIR";
+}
 
 function uploadExt(mime: string) {
   const sub = (mime.split("/")[1] || "bin").split(";")[0].trim().toLowerCase();
@@ -49,10 +58,28 @@ export async function putUpload(userId: string, id: string, req: Request) {
   );
   if (!row || row.user_id !== userId) throw new HttpError(404, "not_found", "upload not found");
   const buf = Buffer.from(await req.arrayBuffer());
-  const dest = path.join(root, row.object_key);
-  await mkdir(path.dirname(dest), { recursive: true });
-  await writeFile(dest, buf);
-  await query(`UPDATE uploads SET status='ready', size_bytes=$2, completed_at=now() WHERE id=$1`, [id, buf.length]);
+  if (buf.length === 0) throw new HttpError(400, "bad_request", "empty upload");
+  if (buf.length > MAX_BYTES) throw new HttpError(413, "too_large", "file too large");
+  const dest = path.join(uploadRoot(), row.object_key);
+  let onDisk = false;
+  try {
+    await mkdir(path.dirname(dest), { recursive: true });
+    await writeFile(dest, buf);
+    onDisk = true;
+  } catch (err) {
+    if (!denied(err)) throw err;
+  }
+  if (onDisk) {
+    await query(`UPDATE uploads SET status='ready', size_bytes=$2, completed_at=now(), body=NULL WHERE id=$1`, [
+      id,
+      buf.length,
+    ]);
+  } else {
+    await query(
+      `UPDATE uploads SET status='ready', size_bytes=$2, completed_at=now(), body=decode($3,'hex') WHERE id=$1`,
+      [id, buf.length, buf.toString("hex")],
+    );
+  }
   return { id, url: `${publicBase(req)}/media/${row.object_key}`, object_key: row.object_key };
 }
 
@@ -87,9 +114,14 @@ export async function readMedia(objectKey: string) {
   const safe = objectKey.replace(/\\/g, "/");
   if (safe.includes("..") || safe.startsWith("/")) throw new HttpError(400, "bad_request", "bad key");
   try {
-    const buf = await readFile(path.join(root, safe));
-    return buf;
-  } catch {
-    throw new HttpError(404, "not_found", "not found");
+    return await readFile(path.join(uploadRoot(), safe));
+  } catch (err) {
+    if (!denied(err) && (err as { code?: string }).code !== "ENOENT") throw err;
   }
+  const row = await queryOne<{ body: string | null }>(
+    `SELECT encode(body, 'hex') AS body FROM uploads WHERE object_key=$1 AND body IS NOT NULL`,
+    [safe],
+  );
+  if (!row?.body) throw new HttpError(404, "not_found", "not found");
+  return Buffer.from(String(row.body), "hex");
 }
