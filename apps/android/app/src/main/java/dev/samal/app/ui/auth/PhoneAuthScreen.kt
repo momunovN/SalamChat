@@ -184,7 +184,7 @@ private fun CountryChip(label: String, selected: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-private fun AuthField(
+internal fun AuthField(
     value: String,
     onValueChange: (String) -> Unit,
     keyboard: KeyboardType,
