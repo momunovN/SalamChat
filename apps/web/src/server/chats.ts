@@ -1,22 +1,54 @@
 import { query, queryOne } from "./db";
 import { presence } from "./hub";
 import { HttpError, iso } from "./http";
-import { mapUser, type User } from "./auth";
+import { mapUser, type User, type UserRow } from "./auth";
+
+export type ReplyPreview = {
+  id: string;
+  author_id?: string | null;
+  author_name?: string | null;
+  type: string;
+  text?: string;
+  deleted?: boolean;
+};
 
 export type Message = {
   id: string;
   chat_id: string;
   author_id?: string | null;
+  author_name?: string | null;
   type: string;
   payload: unknown;
   client_id: string;
   reply_to_id?: string | null;
+  reply_to?: ReplyPreview | null;
   created_at: string;
   edited_at?: string | null;
   deleted_at?: string | null;
   attachments?: Attachment[];
   status?: string;
 };
+
+export type ChatMember = {
+  user: User;
+  role: string;
+  joined_at: string;
+};
+
+export function parsePayload(p: unknown): Record<string, unknown> {
+  if (p == null) return {};
+  if (typeof p === "string") {
+    try {
+      const v = JSON.parse(p) as unknown;
+      if (v && typeof v === "object") return v as Record<string, unknown>;
+      return { text: String(v) };
+    } catch {
+      return { text: p };
+    }
+  }
+  if (typeof p === "object") return p as Record<string, unknown>;
+  return {};
+}
 
 export type Attachment = {
   id: string;
@@ -75,6 +107,7 @@ type ChatRow = {
   lm_created_at: Date | null;
   lm_edited_at: Date | null;
   lm_deleted_at: Date | null;
+  lm_author_name: string | null;
 };
 
 function mapChat(r: ChatRow): Chat {
@@ -113,8 +146,9 @@ function mapChat(r: ChatRow): Chat {
       id: r.lm_id,
       chat_id: r.lm_chat_id,
       author_id: r.lm_author_id,
+      author_name: r.lm_author_name || undefined,
       type: r.lm_type,
-      payload: r.lm_payload ?? {},
+      payload: parsePayload(r.lm_payload),
       client_id: r.lm_client_id || "",
       reply_to_id: r.lm_reply_to_id,
       created_at: iso(r.lm_created_at) || new Date().toISOString(),
@@ -144,7 +178,8 @@ export async function listChats(userId: string, q = "", kind = "") {
       peer.created_at AS peer_created_at, peer.updated_at AS peer_updated_at, peer.last_seen_at AS peer_last_seen_at,
       lm.id AS lm_id, lm.chat_id AS lm_chat_id, lm.author_id AS lm_author_id, lm.type AS lm_type,
       lm.payload AS lm_payload, lm.client_id AS lm_client_id, lm.reply_to_id AS lm_reply_to_id,
-      lm.created_at AS lm_created_at, lm.edited_at AS lm_edited_at, lm.deleted_at AS lm_deleted_at
+      lm.created_at AS lm_created_at, lm.edited_at AS lm_edited_at, lm.deleted_at AS lm_deleted_at,
+      lma.display_name AS lm_author_name
     FROM chat_members cm
     JOIN chats c ON c.id = cm.chat_id
     LEFT JOIN LATERAL (
@@ -153,7 +188,14 @@ export async function listChats(userId: string, q = "", kind = "") {
       WHERE cm2.chat_id = c.id AND cm2.user_id <> $1
       LIMIT 1
     ) peer ON c.type = 'direct'
-    LEFT JOIN messages lm ON lm.id = c.last_message_id
+    LEFT JOIN LATERAL (
+      SELECT id, chat_id, author_id, type, payload, client_id, reply_to_id, created_at, edited_at, deleted_at
+      FROM messages
+      WHERE chat_id = c.id AND deleted_at IS NULL
+      ORDER BY created_at DESC
+      LIMIT 1
+    ) lm ON true
+    LEFT JOIN users lma ON lma.id = lm.author_id
     WHERE cm.user_id = $1
       AND ($2 = '' OR c.type = $2)
       AND (
@@ -236,5 +278,88 @@ export async function markRead(chatId: string, userId: string, messageId: string
     `UPDATE chat_members SET last_read_at=now(), last_read_message_id=$3 WHERE chat_id=$1 AND user_id=$2`,
     [chatId, userId, messageId],
   );
+  return { ok: true };
+}
+
+export async function memberRole(chatId: string, userId: string) {
+  const row = await queryOne<{ role: string }>(
+    `SELECT role FROM chat_members WHERE chat_id=$1 AND user_id=$2`,
+    [chatId, userId],
+  );
+  if (!row) throw new HttpError(403, "forbidden", "forbidden");
+  return row.role;
+}
+
+export function canManageMembers(role: string) {
+  return role === "owner" || role === "admin";
+}
+
+export async function listMembers(userId: string, chatId: string) {
+  await mustMember(chatId, userId);
+  const rows = await query<UserRow & { role: string; joined_at: Date | string }>(
+    `SELECT u.id, u.phone, u.display_name, u.username, u.avatar_url, u.bio, u.created_at, u.updated_at, u.last_seen_at,
+            cm.role, cm.joined_at
+     FROM chat_members cm
+     JOIN users u ON u.id = cm.user_id
+     WHERE cm.chat_id=$1
+     ORDER BY CASE cm.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END, u.display_name`,
+    [chatId],
+  );
+  const items: ChatMember[] = rows.map((r) => ({
+    user: mapUser(r, presence.online(r.id)),
+    role: r.role,
+    joined_at: iso(r.joined_at) || new Date().toISOString(),
+  }));
+  return { items };
+}
+
+export async function addMembers(me: string, chatId: string, userIds: string[]) {
+  const chat = await getChat(me, chatId);
+  if (chat.type !== "group") throw new HttpError(400, "bad_request", "not a group");
+  const role = await memberRole(chatId, me);
+  if (!canManageMembers(role)) throw new HttpError(403, "forbidden", "forbidden");
+  const ids = [...new Set((userIds || []).filter((id) => id && id !== me))];
+  for (const uid of ids) {
+    const exists = await queryOne<{ id: string }>(`SELECT id FROM users WHERE id=$1`, [uid]);
+    if (!exists) continue;
+    await query(
+      `INSERT INTO chat_members (chat_id, user_id, role) VALUES ($1,$2,'member')
+       ON CONFLICT (chat_id, user_id) DO NOTHING`,
+      [chatId, uid],
+    );
+  }
+  await query(`UPDATE chats SET updated_at=now() WHERE id=$1`, [chatId]);
+  return listMembers(me, chatId);
+}
+
+export async function removeMember(me: string, chatId: string, targetId: string) {
+  const chat = await getChat(me, chatId);
+  if (chat.type !== "group") throw new HttpError(400, "bad_request", "not a group");
+  const myRole = await memberRole(chatId, me);
+  const target = await queryOne<{ role: string }>(
+    `SELECT role FROM chat_members WHERE chat_id=$1 AND user_id=$2`,
+    [chatId, targetId],
+  );
+  if (!target) throw new HttpError(404, "not_found", "not found");
+  const self = me === targetId;
+  if (!self && !canManageMembers(myRole)) throw new HttpError(403, "forbidden", "forbidden");
+  if (!self && myRole === "admin" && (target.role === "admin" || target.role === "owner")) {
+    throw new HttpError(403, "forbidden", "forbidden");
+  }
+  if (target.role === "owner" && !self) throw new HttpError(403, "forbidden", "cannot remove owner");
+  if (self && target.role === "owner") {
+    const next = await queryOne<{ user_id: string }>(
+      `SELECT user_id FROM chat_members
+       WHERE chat_id=$1 AND user_id<>$2
+       ORDER BY CASE role WHEN 'admin' THEN 0 ELSE 1 END, joined_at
+       LIMIT 1`,
+      [chatId, me],
+    );
+    if (next) {
+      await query(`UPDATE chat_members SET role='owner' WHERE chat_id=$1 AND user_id=$2`, [chatId, next.user_id]);
+    }
+  }
+  await query(`DELETE FROM chat_members WHERE chat_id=$1 AND user_id=$2`, [chatId, targetId]);
+  await query(`UPDATE chats SET updated_at=now() WHERE id=$1`, [chatId]);
   return { ok: true };
 }

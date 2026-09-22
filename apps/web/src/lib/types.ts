@@ -21,14 +21,25 @@ export type Session = {
   device_id: string;
 };
 
+export type ReplyPreview = {
+  id: string;
+  author_id?: string | null;
+  author_name?: string | null;
+  type: string;
+  text?: string;
+  deleted?: boolean;
+};
+
 export type Message = {
   id: string;
   chat_id: string;
   author_id?: string | null;
+  author_name?: string | null;
   type: string;
   payload: { text?: string; lat?: number; lon?: number; caption?: string };
   client_id: string;
   reply_to_id?: string | null;
+  reply_to?: ReplyPreview | null;
   created_at: string;
   edited_at?: string | null;
   deleted_at?: string | null;
@@ -40,6 +51,12 @@ export type Message = {
     filename?: string | null;
   }[];
   status?: string;
+};
+
+export type ChatMember = {
+  user: User;
+  role: "owner" | "admin" | "member" | string;
+  joined_at: string;
 };
 
 export type Chat = {

@@ -8,11 +8,14 @@ import {
   verifyOTP,
 } from "./auth";
 import {
+  addMembers,
   createGroup,
   directChat,
   getChat,
   listChats,
+  listMembers,
   markRead,
+  removeMember,
 } from "./chats";
 import {
   answerCall,
@@ -26,7 +29,7 @@ import {
 import { migrate } from "./db";
 import { envelope, hub, presence } from "./hub";
 import { bearer, corsHeaders, errorResponse, HttpError, json, readJSON } from "./http";
-import { listMessages, receipts, sendMessage } from "./messages";
+import { deleteMessage, editMessage, listMessages, receipts, sendMessage } from "./messages";
 import { listContacts, syncContacts } from "./contacts";
 import { getUserPublic, lookupPhones, searchUsers } from "./users";
 import { completeUpload, createIntent, putUpload, readMedia } from "./uploads";
@@ -152,6 +155,34 @@ async function dispatch(method: string, parts: string[], req: Request, url: URL)
     }
   }
   {
+    const m = p("chats/:chatID/members/:userID");
+    if (method === "DELETE" && m) {
+      if (!UUID.test(m.chatID) || !UUID.test(m.userID)) throw new HttpError(400, "bad_id", "invalid id");
+      const out = await removeMember(auth.userId, m.chatID, m.userID);
+      try {
+        const ids = await (await import("./chats")).memberIds(m.chatID);
+        hub.publishMany([...ids, m.userID], envelope("chat.updated", { chat_id: m.chatID }));
+      } catch {
+        /* group may be empty */
+      }
+      return json(200, out);
+    }
+  }
+  {
+    const m = p("chats/:chatID/members");
+    if (m && !UUID.test(m.chatID)) throw new HttpError(400, "bad_id", "invalid chat id");
+    if (method === "GET" && m) {
+      return json(200, await listMembers(auth.userId, m.chatID));
+    }
+    if (method === "POST" && m) {
+      const body = await readJSON<{ user_ids?: string[] }>(req);
+      const added = await addMembers(auth.userId, m.chatID, body.user_ids || []);
+      const ids = await (await import("./chats")).memberIds(m.chatID);
+      hub.publishMany(ids, envelope("chat.updated", { chat_id: m.chatID }));
+      return json(200, added);
+    }
+  }
+  {
     const m = p("chats/:chatID/messages");
     if (m && !UUID.test(m.chatID)) throw new HttpError(400, "bad_id", "invalid chat id");
     if (method === "GET" && m) {
@@ -196,6 +227,17 @@ async function dispatch(method: string, parts: string[], req: Request, url: URL)
     if (method === "POST" && m) {
       const body = await readJSON<{ kind?: string }>(req);
       return json(201, await startCall(auth.userId, m.chatID, body.kind || "audio"));
+    }
+  }
+  {
+    const m = p("messages/:id");
+    if (m && !UUID.test(m.id)) throw new HttpError(400, "bad_id", "invalid id");
+    if (method === "PATCH" && m) {
+      const body = await readJSON<{ text?: string }>(req);
+      return json(200, await editMessage(auth.userId, m.id, body.text || "", req));
+    }
+    if (method === "DELETE" && m) {
+      return json(200, await deleteMessage(auth.userId, m.id));
     }
   }
   if (method === "POST" && p("receipts")) {

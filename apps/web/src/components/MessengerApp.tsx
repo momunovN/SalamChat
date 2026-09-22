@@ -2,19 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
-  ArrowLeft,
-  ArrowUp,
-  Check,
-  CheckCheck,
   Languages,
   LogOut,
   MessageSquare,
-  Mic,
-  Paperclip,
   Pencil,
   Phone,
   PhoneOff,
-  Plus,
   Search,
   Settings,
   Users,
@@ -22,27 +15,19 @@ import {
   X,
 } from "lucide-react";
 import { api, loadSession, saveSession } from "@/lib/api";
+import { lastPreview } from "@/lib/chat";
 import { dict, type Lang } from "@/lib/i18n";
 import { needsDisplayName, sanitizeDisplayName, sanitizeUsername } from "@/lib/name";
 import { formatPhone } from "@/lib/phone";
 import type { Call, Chat, Envelope, Message, Session, User } from "@/lib/types";
 import { Avatar } from "./Avatar";
+import { ChatPane } from "./ChatPane";
 import { NameOnboarding } from "./NameOnboarding";
 import { PeopleResults, PersonRow, useUserSearch } from "./PeopleSearch";
 import { PhoneAuth } from "./PhoneAuth";
 
 type Tab = "chats" | "calls" | "contacts" | "more";
 type Seg = "all" | "direct" | "group";
-
-function lastText(m?: Message | null) {
-  if (!m) return "";
-  if (m.type === "text") return m.payload?.text || "";
-  if (m.type === "photo") return "📷";
-  if (m.type === "file") return "📎";
-  if (m.type === "voice") return "🎤";
-  if (m.type === "location") return "📍";
-  return "";
-}
 
 function fmtTime(iso: string) {
   const d = new Date(iso);
@@ -65,7 +50,8 @@ export function MessengerApp() {
   const [chats, setChats] = useState<Chat[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
-  const [text, setText] = useState("");
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [rosterTick, setRosterTick] = useState(0);
   const [calls, setCalls] = useState<Call[]>([]);
   const [contactQ, setContactQ] = useState("");
   const [pickerQ, setPickerQ] = useState("");
@@ -75,36 +61,37 @@ export function MessengerApp() {
   const [incoming, setIncoming] = useState<Call | null>(null);
   const [activeCall, setActiveCall] = useState<Call | null>(null);
   const [typing, setTyping] = useState<Record<string, number>>({});
-  const [composerBusy, setComposerBusy] = useState(false);
+  const [typingNow, setTypingNow] = useState(0);
   const [newOpen, setNewOpen] = useState<"direct" | "group" | null>(null);
   const [groupTitle, setGroupTitle] = useState("");
   const [picked, setPicked] = useState<string[]>([]);
-  const [attach, setAttach] = useState(false);
   const [name, setName] = useState("");
   const [username, setUsername] = useState("");
   const [bio, setBio] = useState("");
-  const bottomRef = useRef<HTMLDivElement>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
   const activeIdRef = useRef<string | null>(null);
   const meRef = useRef<string | undefined>(undefined);
-  const typingAt = useRef(0);
 
   const active = chats.find((c) => c.id === activeId) || null;
   const me = session?.user.id;
-  activeIdRef.current = activeId;
-  meRef.current = me;
+
+  useEffect(() => {
+    activeIdRef.current = activeId;
+    meRef.current = me;
+  }, [activeId, me]);
 
   useEffect(() => {
     const s = loadSession();
-    setSession(s);
-    if (s?.user) {
-      setName(s.user.display_name);
-      setUsername(s.user.username || "");
-      setBio(s.user.bio || "");
-    }
     const stored = localStorage.getItem("tooapp.lang") || localStorage.getItem("samal.lang");
-    if (stored === "ru" || stored === "ky") setLang(stored);
-    setReady(true);
+    queueMicrotask(() => {
+      setSession(s);
+      if (s?.user) {
+        setName(s.user.display_name);
+        setUsername(s.user.username || "");
+        setBio(s.user.bio || "");
+      }
+      if (stored === "ru" || stored === "ky") setLang(stored);
+      setReady(true);
+    });
   }, []);
 
   const refreshChats = useCallback(async () => {
@@ -112,14 +99,6 @@ export function MessengerApp() {
     const r = await api.chats(query, type);
     setChats(r.items);
   }, [query, seg]);
-
-  const refreshMessages = useCallback(async (chatId: string) => {
-    const r = await api.messages(chatId);
-    const items = [...r.items].reverse();
-    setMessages(items);
-    const incomingIds = items.filter((m) => m.author_id && m.author_id !== me).map((m) => m.id);
-    if (incomingIds.length) void api.receipts(incomingIds, "read");
-  }, [me]);
 
   useEffect(() => {
     if (!session) return;
@@ -142,12 +121,23 @@ export function MessengerApp() {
 
   useEffect(() => {
     if (!session || !activeId) return;
-    void refreshMessages(activeId).catch(() => undefined);
-  }, [session, activeId, refreshMessages]);
-
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages.length, activeId]);
+    const chatId = activeId;
+    let cancelled = false;
+    void api
+      .messages(chatId)
+      .then((r) => {
+        if (cancelled) return;
+        const items = [...(r.items ?? [])].reverse();
+        setMessages(items);
+        setCursor(r.cursor ?? null);
+        const incomingIds = items.filter((m) => m.author_id && m.author_id !== me).map((m) => m.id);
+        if (incomingIds.length) void api.receipts(incomingIds, "read");
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [session, activeId, me]);
 
   useEffect(() => {
     if (!session) return;
@@ -171,13 +161,35 @@ export function MessengerApp() {
             void api.receipts([msg.id], "read");
           }
         }
+        if (env.type === "message.updated") {
+          const msg = env.body as Message;
+          setMessages((prev) => {
+            if (!openId || msg.chat_id !== openId) return prev;
+            return prev.map((m) => (m.id === msg.id ? { ...m, ...msg } : m));
+          });
+          void refreshChats();
+        }
+        if (env.type === "message.deleted") {
+          const body = env.body as { id: string; chat_id: string };
+          setMessages((prev) => {
+            if (!openId || body.chat_id !== openId) return prev;
+            return prev.filter((m) => m.id !== body.id);
+          });
+          void refreshChats();
+        }
+        if (env.type === "chat.updated") {
+          setRosterTick((n) => n + 1);
+          void refreshChats();
+        }
         if (env.type === "receipt.upserted") {
           const body = env.body as { message_id: string; status: string };
           setMessages((prev) => prev.map((m) => (m.id === body.message_id ? { ...m, status: body.status } : m)));
         }
         if (env.type === "typing") {
           const body = env.body as { chat_id: string };
-          setTyping((prev) => ({ ...prev, [body.chat_id]: Date.now() }));
+          const until = Date.now() + 3000;
+          setTyping((prev) => ({ ...prev, [body.chat_id]: until }));
+          setTypingNow(until - 3000);
         }
         if (env.type === "call.updated") {
           const call = env.body as Call;
@@ -218,53 +230,19 @@ export function MessengerApp() {
   const contactsSearch = useUserSearch(tab === "contacts" ? contactQ : "", me);
   const pickerSearch = useUserSearch(newOpen ? pickerQ : "", me);
 
-  async function send() {
-    const trimmed = text.trim();
-    if (!trimmed || !activeId || !me) return;
-    const clientId = crypto.randomUUID();
-    const optimistic: Message = {
-      id: clientId,
-      chat_id: activeId,
-      author_id: me,
-      type: "text",
-      payload: { text: trimmed },
-      client_id: clientId,
-      created_at: new Date().toISOString(),
-      status: "sending",
-    };
-    setText("");
-    setMessages((prev) => [...prev, optimistic]);
-    try {
-      const msg = await api.send(activeId, clientId, "text", { text: trimmed });
-      setMessages((prev) => prev.map((m) => (m.client_id === clientId ? msg : m)));
-      void refreshChats();
-    } catch {
-      setMessages((prev) => prev.map((m) => (m.client_id === clientId ? { ...m, status: "failed" } : m)));
+  function selectChat(id: string) {
+    if (id !== activeId) {
+      setMessages([]);
+      setCursor(null);
     }
-  }
-
-  async function sendFile(file: File, kind: "photo" | "file") {
-    if (!activeId || !me) return;
-    setAttach(false);
-    setComposerBusy(true);
-    try {
-      const uploadId = await api.upload(file, kind);
-      const clientId = crypto.randomUUID();
-      const msg = await api.send(activeId, clientId, kind, { caption: file.name }, [uploadId]);
-      setMessages((prev) => [...prev, msg]);
-      void refreshChats();
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setComposerBusy(false);
-    }
+    setActiveId(id);
+    setTab("chats");
   }
 
   async function openDirect(userId: string) {
     const chat = await api.direct(userId);
     await refreshChats();
-    setActiveId(chat.id);
-    setTab("chats");
+    selectChat(chat.id);
     setNewOpen(null);
   }
 
@@ -272,8 +250,7 @@ export function MessengerApp() {
     if (!groupTitle.trim()) return;
     const chat = await api.group(groupTitle.trim(), picked);
     await refreshChats();
-    setActiveId(chat.id);
-    setTab("chats");
+    selectChat(chat.id);
     setNewOpen(null);
     setGroupTitle("");
     setPicked([]);
@@ -310,7 +287,15 @@ export function MessengerApp() {
     }
   }
 
-  const isTyping = activeId ? Date.now() - (typing[activeId] || 0) < 3000 : false;
+  const isTyping = !!(activeId && (typing[activeId] || 0) > typingNow);
+
+  useEffect(() => {
+    const pending = Object.values(typing).filter((until) => until > typingNow);
+    if (pending.length === 0) return;
+    const nextAt = Math.min(...pending);
+    const id = window.setTimeout(() => setTypingNow(Date.now()), Math.max(0, nextAt - Date.now()) + 20);
+    return () => window.clearTimeout(id);
+  }, [typing, typingNow]);
 
   if (!ready) return <div className="min-h-full bg-bg" />;
   if (!session) {
@@ -422,7 +407,7 @@ export function MessengerApp() {
               <button
                 key={c.id}
                 type="button"
-                onClick={() => setActiveId(c.id)}
+                onClick={() => selectChat(c.id)}
                 className={`flex w-full items-center gap-3 px-4 py-[10px] text-left transition-colors ${
                   activeId === c.id ? "bg-elevated" : "hover:bg-elevated/60"
                 }`}
@@ -435,7 +420,9 @@ export function MessengerApp() {
                   </div>
                   <div className="mt-0.5 flex items-center gap-2">
                     <p className="min-w-0 flex-1 truncate text-sm text-muted">
-                      {Date.now() - (typing[c.id] || 0) < 3000 ? t.typing : lastText(c.last_message)}
+                      {(typing[c.id] || 0) > typingNow
+                        ? t.typing
+                        : lastPreview(c.last_message, t, me, c.type === "group")}
                     </p>
                     {c.unread_count > 0 ? (
                       <span className="min-w-5 rounded-full bg-accent px-1.5 text-center text-[12px] font-medium text-ink">
@@ -572,171 +559,28 @@ export function MessengerApp() {
     </div>
   );
 
-  const conversation = active ? (
-    <div className="flex h-full min-w-0 flex-1 flex-col bg-bg">
-      <div className="flex h-14 items-center gap-2.5 border-b border-line px-2">
-        <button
-          type="button"
-          className="flex h-9 w-9 items-center justify-center rounded-full text-ink md:hidden"
-          onClick={() => setActiveId(null)}
-        >
-          <ArrowLeft size={18} />
-        </button>
-        <Avatar name={active.title} src={active.avatar_url} size={36} online={active.peer?.online} />
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-[17px] font-semibold text-ink">{active.title}</p>
-          <p className="text-[12px] font-medium text-success">
-            {isTyping ? t.typing : active.peer?.online ? t.online : active.type === "group" ? `${active.member_count} ${t.members}` : t.lastSeen}
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={() => void api.startCall(active.id, "audio")}
-          className="flex h-9 w-9 items-center justify-center text-ink"
-        >
-          <Phone size={18} />
-        </button>
-        <button
-          type="button"
-          onClick={() => void api.startCall(active.id, "video")}
-          className="flex h-9 w-9 items-center justify-center text-ink"
-        >
-          <Video size={18} />
-        </button>
-      </div>
-      <div className="min-h-0 flex-1 overflow-y-auto px-3 py-2">
-        {messages.map((m) => {
-          const mine = m.author_id === me;
-          return (
-            <div key={m.id} className={`mb-1 flex ${mine ? "justify-end" : "justify-start"}`}>
-              <div className={`max-w-[78%] ${mine ? "items-end" : "items-start"} flex flex-col`}>
-                <div
-                  className={`px-3 py-2 text-base text-ink ${
-                    mine
-                      ? "rounded-[16px] rounded-br-sm bg-outgoing"
-                      : "rounded-[16px] rounded-bl-sm bg-incoming"
-                  }`}
-                >
-                  {m.attachments?.map((a) =>
-                    a.kind === "photo" ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img key={a.id} src={a.url} alt="" className="mb-1 max-h-64 rounded-lg" />
-                    ) : (
-                      <a key={a.id} href={a.url} className="mb-1 block text-sm underline" target="_blank" rel="noreferrer">
-                        {a.filename || a.kind}
-                      </a>
-                    ),
-                  )}
-                  {m.payload?.text}
-                </div>
-                <div className="mt-0.5 flex items-center gap-1 px-1 text-[12px] font-medium text-muted">
-                  <span>{fmtTime(m.created_at)}</span>
-                  {mine ? (
-                    m.status === "read" ? (
-                      <CheckCheck size={12} className="text-success" />
-                    ) : m.status === "delivered" ? (
-                      <CheckCheck size={12} />
-                    ) : (
-                      <Check size={12} />
-                    )
-                  ) : null}
-                </div>
-              </div>
-            </div>
-          );
-        })}
-        <div ref={bottomRef} />
-      </div>
-      {attach ? (
-        <div className="flex gap-4 bg-elevated px-6 py-4">
-          <button
-            type="button"
-            onClick={() => {
-              fileRef.current?.setAttribute("accept", "image/*");
-              fileRef.current?.click();
-            }}
-            className="flex flex-1 flex-col items-center gap-2 text-xs text-muted"
-          >
-            <span className="flex h-14 w-14 items-center justify-center rounded-full bg-accent/20 text-accent">
-              <Paperclip size={20} />
-            </span>
-            {t.attachPhoto}
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              fileRef.current?.setAttribute("accept", "*/*");
-              fileRef.current?.click();
-            }}
-            className="flex flex-1 flex-col items-center gap-2 text-xs text-muted"
-          >
-            <span className="flex h-14 w-14 items-center justify-center rounded-full bg-accent/20 text-accent">
-              <Paperclip size={20} />
-            </span>
-            {t.attachFile}
-          </button>
-        </div>
-      ) : null}
-      <input
-        ref={fileRef}
-        type="file"
-        className="hidden"
-        onChange={(e) => {
-          const f = e.target.files?.[0];
-          e.target.value = "";
-          if (!f) return;
-          void sendFile(f, f.type.startsWith("image/") ? "photo" : "file");
-        }}
-      />
-      <div className="flex items-end gap-2 px-3 py-2">
-        <button
-          type="button"
-          onClick={() => setAttach((v) => !v)}
-          className="flex h-10 w-10 items-center justify-center rounded-full bg-elevated text-ink"
-        >
-          <Plus size={20} />
-        </button>
-        <textarea
-          value={text}
-          onChange={(e) => {
-            setText(e.target.value);
-            if (activeId && Date.now() - typingAt.current > 800) {
-              typingAt.current = Date.now();
-              void api.typing(activeId);
-            }
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              void send();
-            }
-          }}
-          rows={1}
-          placeholder={t.composer}
-          className="max-h-32 min-h-[40px] flex-1 resize-none rounded-[20px] bg-elevated px-3 py-2.5 text-base text-ink outline-none placeholder:text-muted"
-        />
-        {text.trim() ? (
-          <button
-            type="button"
-            disabled={composerBusy}
-            onClick={() => void send()}
-            className="flex h-10 w-10 items-center justify-center rounded-full bg-accent text-white"
-          >
-            <ArrowUp size={16} />
-          </button>
-        ) : (
-          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-elevated text-ink">
-            <Mic size={18} />
-          </div>
-        )}
-      </div>
-    </div>
+  const conversation = active && me ? (
+    <ChatPane
+      key={active.id}
+      t={t}
+      lang={lang}
+      me={me}
+      chat={active}
+      messages={messages}
+      setMessages={setMessages}
+      cursor={cursor}
+      setCursor={setCursor}
+      isTyping={isTyping}
+      rosterTick={rosterTick}
+      onBack={() => setActiveId(null)}
+      onRefreshChats={() => void refreshChats()}
+      onOpenDirect={(userId) => void openDirect(userId)}
+    />
   ) : (
     <div className="hidden flex-1 items-center justify-center bg-bg text-muted md:flex">
       <div className="text-center">
         <MessageSquare className="mx-auto mb-3 text-accent" size={36} />
-        <p className="text-lg font-semibold text-ink">{t.app}</p>
-        <p className="mt-1 text-sm">{t.emptyChats}</p>
+        <p className="text-lg font-semibold text-ink">{t.pickChat}</p>
       </div>
     </div>
   );

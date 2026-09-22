@@ -2,12 +2,22 @@ import { query, queryOne } from "./db";
 import { envelope, hub } from "./hub";
 import { HttpError, iso } from "./http";
 import { publicBase } from "./env";
-import { memberIds, mustMember, type Attachment, type Message } from "./chats";
+import {
+  canManageMembers,
+  memberIds,
+  memberRole,
+  mustMember,
+  parsePayload,
+  type Attachment,
+  type Message,
+  type ReplyPreview,
+} from "./chats";
 
 type MsgRow = {
   id: string;
   chat_id: string;
   author_id: string | null;
+  author_name?: string | null;
   type: string;
   payload: unknown;
   client_id: string;
@@ -17,23 +27,14 @@ type MsgRow = {
   deleted_at: Date | string | null;
 };
 
-function parsePayload(p: unknown) {
-  if (p == null) return {};
-  if (typeof p === "string") {
-    try {
-      return JSON.parse(p) as Record<string, unknown>;
-    } catch {
-      return { text: p };
-    }
-  }
-  return p;
-}
+const MSG_COLS = `m.id, m.chat_id, m.author_id, m.type, m.payload, m.client_id, m.reply_to_id, m.created_at, m.edited_at, m.deleted_at, u.display_name AS author_name`;
 
 function mapMsg(r: MsgRow): Message {
   return {
     id: r.id,
     chat_id: r.chat_id,
     author_id: r.author_id,
+    author_name: r.author_name || undefined,
     type: r.type,
     payload: parsePayload(r.payload),
     client_id: r.client_id,
@@ -42,6 +43,34 @@ function mapMsg(r: MsgRow): Message {
     edited_at: iso(r.edited_at),
     deleted_at: iso(r.deleted_at),
   };
+}
+
+function previewFrom(m: Message): ReplyPreview {
+  const payload = parsePayload(m.payload);
+  return {
+    id: m.id,
+    author_id: m.author_id,
+    author_name: m.author_name,
+    type: m.type,
+    text: String(payload.text || payload.caption || ""),
+    deleted: !!m.deleted_at,
+  };
+}
+
+async function attachReplies(items: Message[]) {
+  const ids = [...new Set(items.map((m) => m.reply_to_id).filter((id): id is string => !!id))];
+  if (ids.length === 0) return;
+  const rows = await query<MsgRow>(
+    `SELECT ${MSG_COLS}
+     FROM messages m
+     LEFT JOIN users u ON u.id = m.author_id
+     WHERE m.id = ANY($1::uuid[])`,
+    [ids],
+  );
+  const map = new Map(rows.map((r) => [r.id, previewFrom(mapMsg(r))]));
+  for (const m of items) {
+    if (m.reply_to_id) m.reply_to = map.get(m.reply_to_id) || { id: m.reply_to_id, type: "text", deleted: true };
+  }
 }
 
 async function statusFor(messageId: string) {
@@ -101,7 +130,10 @@ async function attachmentsFor(ids: string[], req?: Request) {
 
 export async function getMessage(userId: string, id: string, req?: Request) {
   const row = await queryOne<MsgRow>(
-    `SELECT id, chat_id, author_id, type, payload, client_id, reply_to_id, created_at, edited_at, deleted_at FROM messages WHERE id=$1`,
+    `SELECT ${MSG_COLS}
+     FROM messages m
+     LEFT JOIN users u ON u.id = m.author_id
+     WHERE m.id=$1`,
     [id],
   );
   if (!row) throw new HttpError(404, "not_found", "not found");
@@ -109,6 +141,7 @@ export async function getMessage(userId: string, id: string, req?: Request) {
   const msg = mapMsg(row);
   const atts = await attachmentsFor([msg.id], req);
   msg.attachments = atts.get(msg.id) || [];
+  await attachReplies([msg]);
   return msg;
 }
 
@@ -119,11 +152,12 @@ export async function listMessages(userId: string, chatId: string, q = "", curso
   const before = cursor ? new Date(cursor) : new Date(Date.now() + 60 * 60 * 1000);
   if (Number.isNaN(before.getTime())) throw new HttpError(400, "bad_request", "bad cursor");
   const rows = await query<MsgRow>(
-    `SELECT id, chat_id, author_id, type, payload, client_id, reply_to_id, created_at, edited_at, deleted_at
-     FROM messages
-     WHERE chat_id=$1 AND created_at < $2 AND deleted_at IS NULL
-       AND ($3 = '' OR (payload->>'text') ILIKE '%'||$3||'%')
-     ORDER BY created_at DESC
+    `SELECT ${MSG_COLS}
+     FROM messages m
+     LEFT JOIN users u ON u.id = m.author_id
+     WHERE m.chat_id=$1 AND m.created_at < $2 AND m.deleted_at IS NULL
+       AND ($3 = '' OR (m.payload->>'text') ILIKE '%'||$3||'%')
+     ORDER BY m.created_at DESC
      LIMIT $4`,
     [chatId, before.toISOString(), q, limit + 1],
   );
@@ -141,6 +175,7 @@ export async function listMessages(userId: string, chatId: string, q = "", curso
     m.attachments = atts.get(m.id) || [];
     if (m.author_id === userId) m.status = await statusFor(m.id);
   }
+  await attachReplies(items);
   return { items, cursor: next ?? null };
 }
 
@@ -170,8 +205,16 @@ export async function sendMessage(
     payload = { ...(payload as object), text };
   }
 
+  if (input.reply_to_id) {
+    const reply = await queryOne<{ chat_id: string }>(`SELECT chat_id FROM messages WHERE id=$1`, [input.reply_to_id]);
+    if (!reply || reply.chat_id !== chatId) throw new HttpError(400, "bad_request", "bad reply_to");
+  }
+
   const existing = await queryOne<MsgRow>(
-    `SELECT id, chat_id, author_id, type, payload, client_id, reply_to_id, created_at, edited_at, deleted_at FROM messages WHERE client_id=$1`,
+    `SELECT ${MSG_COLS}
+     FROM messages m
+     LEFT JOIN users u ON u.id = m.author_id
+     WHERE m.client_id=$1`,
     [input.client_id],
   );
   if (existing) {
@@ -202,11 +245,63 @@ export async function sendMessage(
     await attachUploads(userId, id, type, input.upload_ids);
   }
 
+  await query(`UPDATE chats SET updated_at=now(), last_message_id=$2 WHERE id=$1`, [chatId, id]);
+
   const msg = await getMessage(userId, id, req);
   msg.status = "sent";
   const members = await memberIds(chatId);
   hub.publishMany(members, envelope("message.created", msg));
   return msg;
+}
+
+export async function editMessage(userId: string, id: string, text: string, req?: Request) {
+  const row = await queryOne<MsgRow>(
+    `SELECT ${MSG_COLS}
+     FROM messages m
+     LEFT JOIN users u ON u.id = m.author_id
+     WHERE m.id=$1`,
+    [id],
+  );
+  if (!row || row.deleted_at) throw new HttpError(404, "not_found", "not found");
+  await mustMember(row.chat_id, userId);
+  if (row.author_id !== userId) throw new HttpError(403, "forbidden", "forbidden");
+  if (row.type !== "text") throw new HttpError(400, "bad_request", "only text");
+  const next = String(text || "").trim();
+  if (!next || [...next].length > 4096) throw new HttpError(400, "bad_request", "text length");
+  const payload = { ...parsePayload(row.payload), text: next };
+  await query(`UPDATE messages SET payload=$2::jsonb, edited_at=now() WHERE id=$1`, [id, JSON.stringify(payload)]);
+  const msg = await getMessage(userId, id, req);
+  const members = await memberIds(row.chat_id);
+  hub.publishMany(members, envelope("message.updated", msg));
+  return msg;
+}
+
+export async function deleteMessage(userId: string, id: string) {
+  const row = await queryOne<MsgRow>(
+    `SELECT ${MSG_COLS}
+     FROM messages m
+     LEFT JOIN users u ON u.id = m.author_id
+     WHERE m.id=$1`,
+    [id],
+  );
+  if (!row || row.deleted_at) throw new HttpError(404, "not_found", "not found");
+  await mustMember(row.chat_id, userId);
+  if (row.author_id !== userId) {
+    const role = await memberRole(row.chat_id, userId);
+    const chat = await queryOne<{ type: string }>(`SELECT type FROM chats WHERE id=$1`, [row.chat_id]);
+    if (chat?.type !== "group" || !canManageMembers(role)) throw new HttpError(403, "forbidden", "forbidden");
+  }
+  await query(`UPDATE messages SET deleted_at=now() WHERE id=$1 AND deleted_at IS NULL`, [id]);
+  await query(
+    `UPDATE chats SET last_message_id = (
+       SELECT id FROM messages WHERE chat_id=$1 AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 1
+     ), updated_at=now()
+     WHERE id=$1 AND last_message_id=$2`,
+    [row.chat_id, id],
+  );
+  const members = await memberIds(row.chat_id);
+  hub.publishMany(members, envelope("message.deleted", { id, chat_id: row.chat_id }));
+  return { ok: true };
 }
 
 async function attachUploads(userId: string, messageId: string, msgType: string, uploadIds: string[]) {

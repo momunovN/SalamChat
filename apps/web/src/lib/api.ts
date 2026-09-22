@@ -1,4 +1,4 @@
-import type { Call, Chat, Message, Session, User } from "./types";
+import type { Call, Chat, ChatMember, Message, Session, User } from "./types";
 
 const SESSION_KEY = "tooapp.session";
 
@@ -108,11 +108,29 @@ export const api = {
     if (cursor) p.set("cursor", cursor);
     return request<{ items: Message[]; cursor?: string | null }>(`/v1/chats/${chatId}/messages?${p}`);
   },
-  send: (chatId: string, clientId: string, type: string, payload: unknown, uploadIds?: string[]) =>
+  send: (chatId: string, clientId: string, type: string, payload: unknown, uploadIds?: string[], replyToId?: string) =>
     request<Message>(`/v1/chats/${chatId}/messages`, {
       method: "POST",
-      body: JSON.stringify({ client_id: clientId, type, payload, upload_ids: uploadIds }),
+      body: JSON.stringify({
+        client_id: clientId,
+        type,
+        payload,
+        upload_ids: uploadIds,
+        reply_to_id: replyToId,
+      }),
     }),
+  editMessage: (id: string, text: string) =>
+    request<Message>(`/v1/messages/${id}`, { method: "PATCH", body: JSON.stringify({ text }) }),
+  deleteMessage: (id: string) => request<{ ok: boolean }>(`/v1/messages/${id}`, { method: "DELETE" }),
+  members: (chatId: string) =>
+    request<{ items: ChatMember[] }>(`/v1/chats/${chatId}/members`).then((r) => ({ items: r.items ?? [] })),
+  addMembers: (chatId: string, userIds: string[]) =>
+    request<{ items: ChatMember[] }>(`/v1/chats/${chatId}/members`, {
+      method: "POST",
+      body: JSON.stringify({ user_ids: userIds }),
+    }),
+  removeMember: (chatId: string, userId: string) =>
+    request<{ ok: boolean }>(`/v1/chats/${chatId}/members/${userId}`, { method: "DELETE" }),
   receipts: (ids: string[], status: "delivered" | "read") =>
     request<{ ok: boolean }>("/v1/receipts", { method: "POST", body: JSON.stringify({ message_ids: ids, status }) }),
   direct: (userId: string) =>
