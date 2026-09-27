@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
+import { flushSync } from "react-dom";
 import {
   ArrowLeft,
   ArrowUp,
@@ -22,7 +23,7 @@ import {
   X,
 } from "lucide-react";
 import { api } from "@/lib/api";
-import { mediaPermission } from "@/lib/callMedia";
+import { requestUserMedia } from "@/lib/callMedia";
 import { dayKey, dayLabel, formatClock, membersPhrase, messageBody, payloadText } from "@/lib/chat";
 import type { Dict, Lang } from "@/lib/i18n";
 import type { Chat, ChatMember, Message, ReplyPreview, User } from "@/lib/types";
@@ -269,17 +270,8 @@ export function ChatPane({
     return types.find((item) => MediaRecorder.isTypeSupported(item)) || "";
   }
 
-  async function askRec() {
+  function askRec() {
     if (recording || busy || editing) return;
-    const mic = await mediaPermission("microphone");
-    if (mic === "denied") {
-      noteVoiceError(t.voiceDenied);
-      return;
-    }
-    if (mic === "granted") {
-      await startRec(Date.now());
-      return;
-    }
     setMicAsk(true);
   }
 
@@ -291,7 +283,7 @@ export function ChatPane({
       return;
     }
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await requestUserMedia({ audio: true }, "mic");
       const mime = pickRecorderMime();
       const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
       chunksRef.current = [];
@@ -849,7 +841,7 @@ export function ChatPane({
           allowLabel={t.allow}
           cancelLabel={t.notNow}
           onAllow={() => {
-            setMicAsk(false);
+            flushSync(() => setMicAsk(false));
             void startRec(Date.now());
           }}
           onCancel={() => setMicAsk(false)}

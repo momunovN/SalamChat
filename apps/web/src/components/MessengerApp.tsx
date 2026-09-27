@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { flushSync } from "react-dom";
 import {
   Languages,
   LogOut,
@@ -14,7 +15,7 @@ import {
   X,
 } from "lucide-react";
 import { api, loadSession, saveSession } from "@/lib/api";
-import { captureAudio, captureVideo, mediaPermission, stopCallMedia, warmCallConnection, type CallMedia } from "@/lib/callMedia";
+import { captureAudio, captureVideo, stopCallMedia, warmCallConnection, type CallMedia } from "@/lib/callMedia";
 import { lastPreview } from "@/lib/chat";
 import { dict, type Lang } from "@/lib/i18n";
 import { needsDisplayName, sanitizeDisplayName, sanitizeUsername } from "@/lib/name";
@@ -368,10 +369,16 @@ export function MessengerApp() {
       stopCallMedia(media);
       throw err;
     }
-    if (attempt !== attemptRef.current || (call.status !== "ringing" && call.status !== "active")) {
+    if (attempt !== attemptRef.current) {
       stopCallMedia(media);
       if (call.status === "ringing" || call.status === "active") void api.hangupCall(call.id);
-      if (attempt === attemptRef.current) failCall(attempt, "failed");
+      armingRef.current = false;
+      setCallBusy(false);
+      return;
+    }
+    if (call.status !== "ringing" && call.status !== "active") {
+      stopCallMedia(media);
+      failCall(attempt, "failed");
       return;
     }
     pendingAudio.current = null;
@@ -385,101 +392,71 @@ export function MessengerApp() {
     setActiveCall(call);
   }
 
-  async function afterMic(attempt: number, kind: "audio" | "video", audio: MediaStreamTrack, start: () => Promise<Call>) {
+  function showCameraPermit(attempt: number, kind: "audio" | "video", audio: MediaStreamTrack, start: () => Promise<Call>) {
     if (attempt !== attemptRef.current) {
       audio.stop();
-      return;
-    }
-    if (kind !== "video") {
-      await openCall(attempt, { audio }, start);
-      return;
-    }
-    const cam = await mediaPermission("camera");
-    if (attempt !== attemptRef.current) {
-      audio.stop();
-      return;
-    }
-    if (cam === "denied") {
-      audio.stop();
-      failCall(attempt, "camera");
-      return;
-    }
-    if (cam === "granted") {
-      pendingAudio.current = audio;
-      try {
-        const video = await captureVideo();
-        pendingAudio.current = null;
-        await openCall(attempt, { audio, video }, start);
-      } catch (err) {
-        audio.stop();
-        pendingAudio.current = null;
-        throw err;
-      }
+      armingRef.current = false;
+      setCallBusy(false);
       return;
     }
     pendingAudio.current = audio;
     pendingStart.current = start;
+    allowingRef.current = false;
     setCallBusy(false);
     setPendingCall({ kind, step: "camera" });
   }
 
   async function placeCall(kind: "audio" | "video", start: () => Promise<Call>) {
     if (armingRef.current || activeCall) return;
-    const attempt = ++attemptRef.current;
+    attemptRef.current += 1;
     armingRef.current = true;
     setCallError(null);
-    setCallBusy(true);
-    const mic = await mediaPermission("microphone");
-    if (attempt !== attemptRef.current) return;
-    if (mic === "denied") {
-      failCall(attempt, "mic");
-      return;
-    }
-    if (mic === "granted") {
-      try {
-        const audio = await captureAudio();
-        await afterMic(attempt, kind, audio, start);
-      } catch (err) {
-        const code = err instanceof Error ? err.message : "";
-        failCall(attempt, code === "camera" ? "camera" : "mic");
-      }
-      return;
-    }
     pendingStart.current = start;
     setCallBusy(false);
     setPendingCall({ kind, step: "mic" });
   }
 
-  async function allowPending() {
+  function allowPending() {
     const pending = pendingCall;
     const start = pendingStart.current;
     if (!pending || !start || allowingRef.current) return;
     const attempt = attemptRef.current;
     allowingRef.current = true;
-    setCallBusy(true);
-    try {
-      if (pending.step === "mic") {
-        const audio = await captureAudio();
-        await afterMic(attempt, pending.kind, audio, start);
-        return;
-      }
-      const audio = pendingAudio.current;
-      if (!audio) throw new Error("mic");
+    // The browser permission bar is at the top. Unmount the toast before getUserMedia or the prompt stays hidden and the call never starts.
+    flushSync(() => {
+      setPendingCall(null);
+      setCallBusy(true);
+    });
+    void (async () => {
       try {
-        const video = await captureVideo();
+        if (pending.step === "mic") {
+          const audio = await captureAudio();
+          if (pending.kind === "video") {
+            showCameraPermit(attempt, pending.kind, audio, start);
+            return;
+          }
+          await openCall(attempt, { audio }, start);
+          return;
+        }
+        const audio = pendingAudio.current;
+        if (!audio) throw new Error("mic");
+        let video: MediaStreamTrack;
+        try {
+          video = await captureVideo();
+        } catch (err) {
+          audio.stop();
+          pendingAudio.current = null;
+          throw err;
+        }
         pendingAudio.current = null;
         await openCall(attempt, { audio, video }, start);
       } catch (err) {
-        audio.stop();
-        pendingAudio.current = null;
-        throw err;
+        const code = err instanceof Error ? err.message : "";
+        failCall(attempt, code === "camera" ? "camera" : code === "mic" ? "mic" : "failed");
+      } finally {
+        allowingRef.current = false;
       }
-    } catch (err) {
-      const code = err instanceof Error ? err.message : "";
-      failCall(attempt, code === "camera" ? "camera" : code === "mic" ? "mic" : "failed");
-    } finally {
-      allowingRef.current = false;
-    }
+    })();
   }
 
   function beginCall(chatId: string, kind: "audio" | "video") {
@@ -972,8 +949,13 @@ export function MessengerApp() {
           <p className="rounded-2xl bg-elevated px-4 py-3 text-center text-sm text-ink shadow-lg">{callError}</p>
         </div>
       ) : null}
+      {callBusy && !pendingCall && !activeCall ? (
+        <div className="pointer-events-none fixed inset-x-0 z-30 flex justify-center px-4" style={{ bottom: "max(1.5rem, env(safe-area-inset-bottom))" }}>
+          <p className="rounded-2xl bg-elevated px-4 py-3 text-center text-sm text-ink shadow-lg">{t.callDialing}</p>
+        </div>
+      ) : null}
 
-      {incoming ? (
+      {incoming && !callBusy ? (
         <IncomingCall
           title={incomingChat?.title || (incoming.kind === "video" ? t.incomingVideo : t.incomingAudio)}
           avatarUrl={incomingChat?.avatar_url}

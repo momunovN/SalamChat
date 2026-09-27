@@ -23,25 +23,31 @@ export function stopCallMedia(media: CallMedia | null | undefined) {
   media?.video?.stop();
 }
 
-export async function mediaPermission(kind: "microphone" | "camera"): Promise<"granted" | "prompt" | "denied"> {
-  try {
-    if (typeof navigator === "undefined" || !navigator.permissions?.query) return "prompt";
-    const status = await navigator.permissions.query({ name: kind as PermissionName });
-    if (status.state === "granted" || status.state === "denied") return status.state;
-  } catch {
-    /* Safari has no mic/camera permission query */
+export function requestUserMedia(constraints: MediaStreamConstraints, code: "mic" | "camera") {
+  if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
+    return Promise.reject(new Error(code));
   }
-  return "prompt";
+  const pending = navigator.mediaDevices.getUserMedia(constraints);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timed = new Promise<MediaStream>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(code)), 20000);
+  });
+  return Promise.race([pending, timed]).then(
+    (stream) => {
+      if (timer) clearTimeout(timer);
+      return stream;
+    },
+    (err: unknown) => {
+      if (timer) clearTimeout(timer);
+      void pending.then((stream) => stream.getTracks().forEach((track) => track.stop())).catch(() => undefined);
+      if (err instanceof Error && (err.message === "mic" || err.message === "camera")) throw err;
+      throw new Error(code);
+    },
+  );
 }
 
 export async function captureAudio() {
-  if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) throw new Error("mic");
-  let stream: MediaStream;
-  try {
-    stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints, video: false });
-  } catch {
-    throw new Error("mic");
-  }
+  const stream = await requestUserMedia({ audio: audioConstraints, video: false }, "mic");
   const audio = stream.getAudioTracks()[0];
   if (!audio) {
     stream.getTracks().forEach((track) => track.stop());
@@ -51,13 +57,7 @@ export async function captureAudio() {
 }
 
 export async function captureVideo() {
-  if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) throw new Error("camera");
-  let stream: MediaStream;
-  try {
-    stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: videoConstraints });
-  } catch {
-    throw new Error("camera");
-  }
+  const stream = await requestUserMedia({ audio: false, video: videoConstraints }, "camera");
   const video = stream.getVideoTracks()[0];
   if (!video) {
     stream.getTracks().forEach((track) => track.stop());
