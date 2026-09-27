@@ -23,7 +23,8 @@ import {
   X,
 } from "lucide-react";
 import { api } from "@/lib/api";
-import { requestUserMedia } from "@/lib/callMedia";
+import { forgetMedia, mediaRemembered, rememberMedia, requestUserMedia } from "@/lib/callMedia";
+import { dedupeMessages } from "@/lib/cache";
 import { dayKey, dayLabel, formatClock, membersPhrase, messageBody, payloadText } from "@/lib/chat";
 import type { Dict, Lang } from "@/lib/i18n";
 import type { Chat, ChatMember, Message, ReplyPreview, User } from "@/lib/types";
@@ -165,10 +166,7 @@ export function ChatPane({
     try {
       const r = await api.messages(chat.id, cursor);
       const older = [...(r.items ?? [])].reverse();
-      setMessages((prev) => {
-        const seen = new Set(prev.map((m) => m.id));
-        return [...older.filter((m) => !seen.has(m.id)), ...prev];
-      });
+      setMessages((prev) => dedupeMessages([...older, ...prev]));
       setCursor(r.cursor ?? null);
       requestAnimationFrame(() => {
         if (el) el.scrollTop = el.scrollHeight - prevH;
@@ -270,8 +268,12 @@ export function ChatPane({
     return types.find((item) => MediaRecorder.isTypeSupported(item)) || "";
   }
 
-  function askRec() {
+  function askRec(started: number) {
     if (recording || busy || editing) return;
+    if (mediaRemembered("mic")) {
+      void startRec(started);
+      return;
+    }
     setMicAsk(true);
   }
 
@@ -282,16 +284,19 @@ export function ChatPane({
       noteVoiceError(t.voiceUnsupported);
       return;
     }
+    let stream: MediaStream | null = null;
     try {
-      const stream = await requestUserMedia({ audio: true }, "mic");
+      stream = await requestUserMedia({ audio: true }, "mic");
+      rememberMedia("mic");
       const mime = pickRecorderMime();
       const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
       chunksRef.current = [];
       rec.ondataavailable = (ev) => {
         if (ev.data.size) chunksRef.current.push(ev.data);
       };
+      const live = stream;
       rec.onstop = () => {
-        stream.getTracks().forEach((track) => track.stop());
+        live.getTracks().forEach((track) => track.stop());
         const ms = Date.now() - startedAt.current;
         const type = (rec.mimeType || mime || "audio/webm").split(";")[0];
         const discard = discardRef.current;
@@ -311,6 +316,7 @@ export function ChatPane({
       setRecording(true);
       rec.start(200);
     } catch {
+      if (!stream) forgetMedia("mic");
       streamRef.current?.getTracks().forEach((track) => track.stop());
       noteVoiceError(t.voiceDenied);
     }
@@ -728,7 +734,7 @@ export function ChatPane({
           <button
             type="button"
             disabled={busy || !!editing}
-            onClick={() => void askRec()}
+            onClick={() => askRec(Date.now())}
             className="flex h-10 w-10 items-center justify-center rounded-full bg-elevated text-ink disabled:opacity-40"
             aria-label={t.voice}
           >

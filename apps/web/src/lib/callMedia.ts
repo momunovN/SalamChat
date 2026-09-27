@@ -83,6 +83,32 @@ async function preferSharpVideo(video: MediaStreamTrack) {
   }
 }
 
+const permKey = { mic: "tooapp.perm.mic", camera: "tooapp.perm.camera" };
+
+export function mediaRemembered(kind: "mic" | "camera") {
+  try {
+    return localStorage.getItem(permKey[kind]) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function rememberMedia(kind: "mic" | "camera") {
+  try {
+    localStorage.setItem(permKey[kind], "1");
+  } catch {
+    /* private mode */
+  }
+}
+
+export function forgetMedia(kind: "mic" | "camera") {
+  try {
+    localStorage.removeItem(permKey[kind]);
+  } catch {
+    /* ignore */
+  }
+}
+
 export function warmCallConnection(url: string, token: string) {
   if (!url || token.startsWith("stub-")) return Promise.resolve();
   return new Room().prepareConnection(url, token);

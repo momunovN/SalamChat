@@ -15,7 +15,8 @@ import {
   X,
 } from "lucide-react";
 import { api, loadSession, saveSession } from "@/lib/api";
-import { captureAudio, captureVideo, stopCallMedia, warmCallConnection, type CallMedia } from "@/lib/callMedia";
+import { dedupeMessages, mergeChats, mergeThread, readActive, readRoster, readThread, writeActive, writeRoster, writeThread } from "@/lib/cache";
+import { captureAudio, captureVideo, forgetMedia, mediaRemembered, rememberMedia, stopCallMedia, warmCallConnection, type CallMedia } from "@/lib/callMedia";
 import { lastPreview } from "@/lib/chat";
 import { dict, type Lang } from "@/lib/i18n";
 import { needsDisplayName, sanitizeDisplayName, sanitizeUsername } from "@/lib/name";
@@ -81,6 +82,7 @@ export function MessengerApp() {
   const activeCallIdRef = useRef<string | null>(null);
   const incomingIdRef = useRef<string | null>(null);
   const closedCalls = useRef(new Set<string>());
+  const fetchedThread = useRef("");
   const attemptRef = useRef(0);
   const armingRef = useRef(false);
   const allowingRef = useRef(false);
@@ -107,6 +109,13 @@ export function MessengerApp() {
         setName(s.user.display_name);
         setUsername(s.user.username || "");
         setBio(s.user.bio || "");
+        const roster = readRoster(s.user.id);
+        if (roster.length) setChats(roster);
+        const open = readActive(s.user.id);
+        if (open && roster.some((chat) => chat.id === open)) {
+          setActiveId(open);
+          setMessages(readThread(s.user.id, open));
+        }
       }
       if (stored === "ru" || stored === "ky") setLang(stored);
       setReady(true);
@@ -114,9 +123,24 @@ export function MessengerApp() {
   }, []);
 
   const refreshChats = useCallback(async () => {
+    const userId = meRef.current;
     const type = seg === "all" ? "" : seg;
-    const r = await api.chats(query, type);
-    setChats(r.items);
+    try {
+      const r = await api.chats(query, type);
+      const fresh = r.items ?? [];
+      if (!query && seg === "all") {
+        const local = userId ? readRoster(userId) : [];
+        const next = mergeChats(local, fresh);
+        if (userId && fresh.length) writeRoster(userId, next);
+        setChats(next.length ? next : local);
+        return;
+      }
+      setChats(fresh);
+    } catch {
+      if (!query && seg === "all" && userId) {
+        setChats((prev) => (prev.length ? prev : readRoster(userId)));
+      }
+    }
   }, [query, seg]);
 
   useEffect(() => {
@@ -141,15 +165,21 @@ export function MessengerApp() {
   useEffect(() => {
     if (!session || !activeId) return;
     const chatId = activeId;
+    const userId = session.user.id;
     let cancelled = false;
     void api
       .messages(chatId)
       .then((r) => {
         if (cancelled) return;
-        const items = [...(r.items ?? [])].reverse();
-        setMessages(items);
+        const fresh = [...(r.items ?? [])].reverse();
+        setMessages((prev) => {
+          const next = mergeThread(prev.length ? prev : readThread(userId, chatId), fresh);
+          writeThread(userId, chatId, next);
+          return next;
+        });
+        fetchedThread.current = chatId;
         setCursor(r.cursor ?? null);
-        const incomingIds = items.filter((m) => m.author_id && m.author_id !== me).map((m) => m.id);
+        const incomingIds = fresh.filter((m) => m.author_id && m.author_id !== me).map((m) => m.id);
         if (incomingIds.length) void api.receipts(incomingIds, "read");
       })
       .catch(() => undefined);
@@ -157,6 +187,21 @@ export function MessengerApp() {
       cancelled = true;
     };
   }, [session, activeId, me]);
+
+  useEffect(() => {
+    const userId = session?.user.id;
+    if (!userId || !activeId) return;
+    if (messages.length === 0 && fetchedThread.current !== activeId) return;
+    writeThread(userId, activeId, messages);
+    const last = [...messages].reverse().find((m) => !m.deleted_at);
+    if (!last) return;
+    const stored = readRoster(userId).map((chat) =>
+      chat.id === activeId
+        ? { ...chat, last_message: last, updated_at: last.created_at > chat.updated_at ? last.created_at : chat.updated_at }
+        : chat,
+    );
+    writeRoster(userId, stored);
+  }, [session, activeId, messages]);
 
   const applyRemoteCall = useCallback((call: Call) => {
     const myId = meRef.current;
@@ -211,10 +256,10 @@ export function MessengerApp() {
           const msg = env.body as Message;
           setMessages((prev) => {
             if (!openId || msg.chat_id !== openId) return prev;
-            if (prev.some((m) => m.id === msg.id || m.client_id === msg.client_id)) {
-              return prev.map((m) => (m.client_id === msg.client_id ? msg : m));
-            }
-            return [...prev, msg];
+            const next = prev.some((m) => m.id === msg.id || m.client_id === msg.client_id)
+              ? prev.map((m) => (m.client_id === msg.client_id || m.id === msg.id ? { ...m, ...msg, local_url: m.local_url } : m))
+              : [...prev, msg];
+            return dedupeMessages(next);
           });
           void refreshChats();
           if (msg.chat_id === openId && msg.author_id !== myId) {
@@ -352,6 +397,8 @@ export function MessengerApp() {
 
   function failCall(attempt: number, code: string) {
     stopPendingAudio();
+    if (code === "camera") forgetMedia("camera");
+    else if (code === "mic") forgetMedia("mic");
     if (attempt !== attemptRef.current) return;
     armingRef.current = false;
     allowingRef.current = false;
@@ -406,12 +453,44 @@ export function MessengerApp() {
     setPendingCall({ kind, step: "camera" });
   }
 
-  async function placeCall(kind: "audio" | "video", start: () => Promise<Call>) {
+  async function captureAndOpen(attempt: number, kind: "audio" | "video", start: () => Promise<Call>) {
+    try {
+      const audio = await captureAudio();
+      rememberMedia("mic");
+      if (attempt !== attemptRef.current) {
+        audio.stop();
+        armingRef.current = false;
+        setCallBusy(false);
+        return;
+      }
+      if (kind !== "video") {
+        await openCall(attempt, { audio }, start);
+        return;
+      }
+      if (mediaRemembered("camera")) {
+        const video = await captureVideo();
+        rememberMedia("camera");
+        await openCall(attempt, { audio, video }, start);
+        return;
+      }
+      showCameraPermit(attempt, kind, audio, start);
+    } catch (err) {
+      const code = err instanceof Error ? err.message : "";
+      failCall(attempt, code === "camera" ? "camera" : "mic");
+    }
+  }
+
+  function placeCall(kind: "audio" | "video", start: () => Promise<Call>) {
     if (armingRef.current || activeCall) return;
-    attemptRef.current += 1;
+    const attempt = ++attemptRef.current;
     armingRef.current = true;
     setCallError(null);
     pendingStart.current = start;
+    if (mediaRemembered("mic")) {
+      setCallBusy(true);
+      void captureAndOpen(attempt, kind, start);
+      return;
+    }
     setCallBusy(false);
     setPendingCall({ kind, step: "mic" });
   }
@@ -431,7 +510,14 @@ export function MessengerApp() {
       try {
         if (pending.step === "mic") {
           const audio = await captureAudio();
+          rememberMedia("mic");
           if (pending.kind === "video") {
+            if (mediaRemembered("camera")) {
+              const video = await captureVideo();
+              rememberMedia("camera");
+              await openCall(attempt, { audio, video }, start);
+              return;
+            }
             showCameraPermit(attempt, pending.kind, audio, start);
             return;
           }
@@ -443,6 +529,7 @@ export function MessengerApp() {
         let video: MediaStreamTrack;
         try {
           video = await captureVideo();
+          rememberMedia("camera");
         } catch (err) {
           audio.stop();
           pendingAudio.current = null;
@@ -473,10 +560,13 @@ export function MessengerApp() {
 
   function selectChat(id: string) {
     if (id !== activeId) {
-      setMessages([]);
+      fetchedThread.current = "";
+      const userId = meRef.current;
+      setMessages(userId ? readThread(userId, id) : []);
       setCursor(null);
     }
     setActiveId(id);
+    if (meRef.current) writeActive(meRef.current, id);
     setTab("chats");
   }
 

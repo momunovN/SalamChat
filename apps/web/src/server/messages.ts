@@ -198,6 +198,7 @@ export async function listMessages(userId: string, chatId: string, q = "", curso
         continue;
       }
       if (!msg?.id || seen.has(msg.id) || msg.deleted_at) continue;
+      if (msg.client_id && pgItems.some((item) => item.client_id === msg.client_id)) continue;
       if (new Date(msg.created_at) >= before) continue;
       if (needle) {
         const text = String(parsePayload(msg.payload).text || "").toLowerCase();
