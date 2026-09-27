@@ -22,6 +22,16 @@ import { captureAudio, captureVideo, forgetMedia, mediaRemembered, rememberMedia
 import { lastPreview } from "@/lib/chat";
 import { dict, type Lang } from "@/lib/i18n";
 import { needsDisplayName, sanitizeDisplayName, sanitizeUsername } from "@/lib/name";
+import {
+  notifyCall,
+  notifyMessage,
+  playMessageChime,
+  rememberNotify,
+  shouldAskNotify,
+  startRingtone,
+  stopRingtone,
+  unlockSounds,
+} from "@/lib/notify";
 import { formatPhone } from "@/lib/phone";
 import type { Call, Chat, Envelope, Message, Session, User } from "@/lib/types";
 import { Avatar } from "./Avatar";
@@ -71,6 +81,7 @@ export function MessengerApp() {
   const [callBusy, setCallBusy] = useState(false);
   const [pendingCall, setPendingCall] = useState<{ kind: "audio" | "video"; step: "mic" | "camera" } | null>(null);
   const [callError, setCallError] = useState<string | null>(null);
+  const [notifyAsk, setNotifyAsk] = useState(false);
   const [typing, setTyping] = useState<Record<string, number>>({});
   const [typingNow, setTypingNow] = useState(0);
   const [newOpen, setNewOpen] = useState<"direct" | "group" | null>(null);
@@ -103,6 +114,7 @@ export function MessengerApp() {
   const groupBusy = useRef(false);
   const paintRef = useRef<(chatId: string, patch: (chat: Chat) => Chat) => void>(() => undefined);
   const errorTimer = useRef<number | null>(null);
+  const chatsRef = useRef(chats);
 
   const active = chats.find((c) => c.id === activeId) || null;
   const me = session?.user.id;
@@ -133,8 +145,31 @@ export function MessengerApp() {
       }
       if (stored === "ru" || stored === "ky") setLang(stored);
       setReady(true);
+      if (s?.user && !needsDisplayName(s.user.display_name) && shouldAskNotify()) setNotifyAsk(true);
     });
   }, []);
+
+  useEffect(() => {
+    chatsRef.current = chats;
+  }, [chats]);
+
+  useEffect(() => {
+    const unlock = () => unlockSounds();
+    window.addEventListener("pointerdown", unlock, { once: true });
+    return () => window.removeEventListener("pointerdown", unlock);
+  }, []);
+
+  useEffect(() => {
+    if (incoming && !callBusy && !activeCall) {
+      startRingtone();
+      if (document.visibilityState !== "visible") {
+        const title = chatsRef.current.find((chat) => chat.id === incoming.chat_id)?.title;
+        notifyCall(title || t.incomingAudio, incoming.kind === "video" ? t.incomingVideo : t.incomingAudio);
+      }
+      return () => stopRingtone();
+    }
+    stopRingtone();
+  }, [incoming, callBusy, activeCall, t.incomingAudio, t.incomingVideo]);
 
   const refreshChats = useCallback(async () => {
     const userId = meRef.current;
@@ -334,6 +369,15 @@ export function MessengerApp() {
             return dedupeMessages(next);
           });
           void refreshChats();
+          if (!mine && msg.author_id) {
+            const looking = document.visibilityState === "visible" && openId === msg.chat_id;
+            if (!looking) {
+              playMessageChime();
+              const title = chatsRef.current.find((chat) => chat.id === msg.chat_id)?.title || "Salam";
+              const body = msg.payload?.text || msg.payload?.caption || "";
+              notifyMessage(title, body);
+            }
+          }
           if (msg.chat_id === openId && msg.author_id !== myId) {
             void api.receipts([msg.id], "read");
           }
@@ -820,6 +864,7 @@ export function MessengerApp() {
             setName(s.user.display_name);
             setUsername(s.user.username || "");
             setBio(s.user.bio || "");
+            if (!needsDisplayName(s.user.display_name) && shouldAskNotify()) setNotifyAsk(true);
           }}
         />
       </div>
@@ -835,6 +880,7 @@ export function MessengerApp() {
             saveSession(next);
             setSession(next);
             setName(user.display_name);
+            if (shouldAskNotify()) setNotifyAsk(true);
           }}
         />
       </div>
@@ -1380,6 +1426,29 @@ export function MessengerApp() {
         </div>
       ) : null}
 
+      {notifyAsk && !pendingCall ? (
+        <PermitToast
+          title={t.allowNotify}
+          body={t.needNotify}
+          allowLabel={t.allow}
+          cancelLabel={t.notNow}
+          onAllow={() => {
+            unlockSounds();
+            flushSync(() => setNotifyAsk(false));
+            if (typeof Notification === "undefined") {
+              rememberNotify("denied");
+              return;
+            }
+            void Notification.requestPermission()
+              .then((permission) => rememberNotify(permission === "granted" ? "granted" : permission === "denied" ? "denied" : "skip"))
+              .catch(() => rememberNotify("skip"));
+          }}
+          onCancel={() => {
+            rememberNotify("skip");
+            setNotifyAsk(false);
+          }}
+        />
+      ) : null}
       {pendingCall ? (
         <PermitToast
           title={pendingCall.step === "camera" ? t.allowCam : t.allowMic}
