@@ -280,9 +280,20 @@ export function ChatPane({
     return types.find((item) => MediaRecorder.isTypeSupported(item)) || "";
   }
 
+  function armMeter() {
+    if (audioCtxRef.current && audioCtxRef.current.state !== "closed") {
+      void audioCtxRef.current.resume();
+      return;
+    }
+    const ctx = new AudioContext();
+    audioCtxRef.current = ctx;
+    void ctx.resume();
+  }
+
   function askRec(started: number) {
     if (recording || busy || editing) return;
     if (mediaRemembered("mic")) {
+      armMeter();
       void startRec(started);
       return;
     }
@@ -351,12 +362,13 @@ export function ChatPane({
   }
 
   function startMeter(stream: MediaStream) {
-    const ctx = new AudioContext();
+    const ctx = audioCtxRef.current && audioCtxRef.current.state !== "closed" ? audioCtxRef.current : new AudioContext();
+    audioCtxRef.current = ctx;
+    void ctx.resume();
     const source = ctx.createMediaStreamSource(stream);
     const analyser = ctx.createAnalyser();
     analyser.fftSize = 1024;
     source.connect(analyser);
-    audioCtxRef.current = ctx;
     const bins = new Uint8Array(analyser.fftSize);
     meterRef.current = window.setInterval(() => {
       analyser.getByteTimeDomainData(bins);
@@ -744,12 +756,12 @@ export function ChatPane({
           <div className="flex min-h-[40px] flex-1 items-center gap-2 rounded-[20px] bg-elevated px-3">
             <span className="h-2.5 w-2.5 shrink-0 animate-pulse rounded-full bg-danger" />
             <span className="w-10 shrink-0 text-sm font-medium tabular-nums text-ink">{formatClock(elapsed)}</span>
-            <span className="flex h-7 min-w-0 flex-1 items-center gap-px">
-              {(liveWave.length ? liveWave : [0.15]).map((amp, i) => (
+            <span className="flex h-8 min-w-0 flex-1 items-end gap-[2px]">
+              {(liveWave.length ? liveWave : Array.from({ length: 28 }, () => 0.16)).map((amp, i) => (
                 <span
                   key={i}
-                  className="w-full max-w-[3px] flex-1 rounded-full bg-accent"
-                  style={{ height: `${Math.max(16, Math.round(amp * 100))}%` }}
+                  className="block min-w-0 flex-1 rounded-full bg-accent"
+                  style={{ height: `${4 + Math.round(Math.max(0, Math.min(1, amp)) * 24)}px` }}
                 />
               ))}
             </span>
@@ -911,6 +923,7 @@ export function ChatPane({
           allowLabel={t.allow}
           cancelLabel={t.notNow}
           onAllow={() => {
+            armMeter();
             flushSync(() => setMicAsk(false));
             void startRec(Date.now());
           }}

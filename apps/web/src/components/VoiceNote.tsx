@@ -140,7 +140,7 @@ export function VoiceNote({
       </button>
       <div className="min-w-0 flex-1">
         <div
-          className="flex h-8 cursor-pointer items-center gap-px"
+          className="flex h-8 cursor-pointer items-end gap-[2px]"
           onClick={(e) => {
             const rect = e.currentTarget.getBoundingClientRect();
             seek(e.clientX, rect.width, rect.left);
@@ -148,11 +148,12 @@ export function VoiceNote({
         >
           {wave.map((amp, i) => {
             const played = (i + 0.5) / wave.length <= progress;
+            const height = 4 + Math.round(Math.max(0, Math.min(1, amp)) * 24);
             return (
               <span
                 key={i}
-                className={`w-full max-w-[3px] flex-1 rounded-full ${played ? "bg-white" : "bg-white/35"}`}
-                style={{ height: `${Math.max(14, Math.round(amp * 100))}%` }}
+                className={`block min-w-0 flex-1 rounded-full ${played ? "bg-white" : "bg-white/40"}`}
+                style={{ height: `${height}px` }}
               />
             );
           })}
