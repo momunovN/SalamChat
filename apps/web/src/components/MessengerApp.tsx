@@ -17,7 +17,7 @@ import {
   X,
 } from "lucide-react";
 import { api, loadSession, saveSession } from "@/lib/api";
-import { dedupeMessages, forgetChat, mergeChats, mergeThread, readActive, readRoster, readThread, writeActive, writeRoster, writeThread } from "@/lib/cache";
+import { dedupeChats, dedupeMessages, forgetChat, mergeChats, mergeThread, readActive, readRoster, readThread, writeActive, writeRoster, writeThread } from "@/lib/cache";
 import { captureAudio, captureVideo, forgetMedia, mediaRemembered, rememberMedia, stopCallMedia, warmCallConnection, type CallMedia } from "@/lib/callMedia";
 import { lastPreview } from "@/lib/chat";
 import { dict, type Lang } from "@/lib/i18n";
@@ -96,8 +96,12 @@ export function MessengerApp() {
   const allowingRef = useRef(false);
   const pendingStart = useRef<(() => Promise<Call>) | null>(null);
   const pendingAudio = useRef<MediaStreamTrack | null>(null);
-  const navLock = useRef(false);
   const goneChats = useRef(new Set<string>());
+  const pinnedChats = useRef(new Map<string, Chat>());
+  const renamed = useRef(new Map<string, string>());
+  const refreshGen = useRef(0);
+  const groupBusy = useRef(false);
+  const paintRef = useRef<(chatId: string, patch: (chat: Chat) => Chat) => void>(() => undefined);
   const errorTimer = useRef<number | null>(null);
 
   const active = chats.find((c) => c.id === activeId) || null;
@@ -135,21 +139,42 @@ export function MessengerApp() {
   const refreshChats = useCallback(async () => {
     const userId = meRef.current;
     const type = seg === "all" ? "" : seg;
+    const filtering = !!(query || seg !== "all");
+    const gen = ++refreshGen.current;
     try {
       const r = await api.chats(query, type);
+      if (gen !== refreshGen.current) return;
       const fresh = r.items ?? [];
-      if (!query && seg === "all") {
+      const freshIds = new Set(fresh.map((chat) => chat.id));
+      let next: Chat[];
+      if (!filtering) {
+        for (const id of [...pinnedChats.current.keys()]) {
+          if (freshIds.has(id)) pinnedChats.current.delete(id);
+        }
         const local = userId ? readRoster(userId) : [];
-        const next = mergeChats(local, fresh).filter((chat) => !goneChats.current.has(chat.id));
-        if (userId) writeRoster(userId, next);
-        setChats(next);
-        return;
+        next = mergeChats(local, fresh);
+        for (const chat of pinnedChats.current.values()) {
+          if (!next.some((item) => item.id === chat.id)) next.push(chat);
+        }
+      } else {
+        next = fresh.slice();
       }
-      setChats(fresh);
+      next = dedupeChats(next)
+        .filter((chat) => !goneChats.current.has(chat.id))
+        .map((chat) => {
+          const title = renamed.current.get(chat.id);
+          if (!title) return chat;
+          if (chat.title === title) {
+            renamed.current.delete(chat.id);
+            return chat;
+          }
+          return { ...chat, title };
+        });
+      if (userId && !filtering) writeRoster(userId, next);
+      setChats(next);
     } catch {
-      if (!query && seg === "all" && userId) {
-        setChats((prev) => (prev.length ? prev : readRoster(userId)));
-      }
+      if (gen !== refreshGen.current || filtering || !userId) return;
+      setChats(dedupeChats(readRoster(userId)).filter((chat) => !goneChats.current.has(chat.id)));
     }
   }, [query, seg]);
 
@@ -187,6 +212,23 @@ export function MessengerApp() {
           writeThread(userId, chatId, next);
           return next;
         });
+        const last = [...fresh].reverse().find((item) => !item.deleted_at);
+        if (last && !goneChats.current.has(chatId)) {
+          setChats((prev) =>
+            dedupeChats(
+              prev.map((chat) =>
+                chat.id === chatId
+                  ? {
+                      ...chat,
+                      last_message: last,
+                      unread_count: 0,
+                      updated_at: last.created_at > chat.updated_at ? last.created_at : chat.updated_at,
+                    }
+                  : chat,
+              ),
+            ),
+          );
+        }
         fetchedThread.current = chatId;
         setCursor(r.cursor ?? null);
         const incomingIds = fresh.filter((m) => m.author_id && m.author_id !== me).map((m) => m.id);
@@ -203,17 +245,28 @@ export function MessengerApp() {
     if (!userId || !activeId) return;
     if (messages.length === 0 && fetchedThread.current !== activeId) return;
     writeThread(userId, activeId, messages);
-    const last = [...messages].reverse().find((m) => !m.deleted_at);
-    if (!last) return;
-    const stored = readRoster(userId).map((chat) =>
-      chat.id === activeId
-        ? { ...chat, last_message: last, updated_at: last.created_at > chat.updated_at ? last.created_at : chat.updated_at }
-        : chat,
-    );
+    const last = [...messages].reverse().find((m) => !m.deleted_at) ?? null;
+    const stored = readRoster(userId)
+      .filter((chat) => !goneChats.current.has(chat.id))
+      .map((chat) => {
+        if (chat.id !== activeId) return chat;
+        if (!last) return { ...chat, last_message: null, unread_count: 0 };
+        return {
+          ...chat,
+          last_message: last,
+          updated_at: last.created_at > chat.updated_at ? last.created_at : chat.updated_at,
+          unread_count: 0,
+        };
+      });
     writeRoster(userId, stored);
   }, [session, activeId, messages]);
 
+  useEffect(() => {
+    paintRef.current = paintChat;
+  });
+
   const applyRemoteCall = useCallback((call: Call) => {
+    setCalls((prev) => [call, ...prev.filter((item) => item.id !== call.id)]);
     const myId = meRef.current;
     const terminal = call.status === "ended" || call.status === "missed" || call.status === "declined";
     if (terminal) {
@@ -264,6 +317,15 @@ export function MessengerApp() {
         const myId = meRef.current;
         if (env.type === "message.created") {
           const msg = env.body as Message;
+          if (goneChats.current.has(msg.chat_id)) goneChats.current.delete(msg.chat_id);
+          const viewing = openId === msg.chat_id;
+          const mine = msg.author_id === myId;
+          paintRef.current(msg.chat_id, (chat) => {
+            const updated = msg.created_at > chat.updated_at ? msg.created_at : chat.updated_at;
+            const same = chat.last_message?.id === msg.id || (!!msg.client_id && chat.last_message?.client_id === msg.client_id);
+            const unread = viewing ? 0 : mine || same ? chat.unread_count : chat.unread_count + 1;
+            return { ...chat, last_message: msg, updated_at: updated, unread_count: unread };
+          });
           setMessages((prev) => {
             if (!openId || msg.chat_id !== openId) return prev;
             const next = prev.some((m) => m.id === msg.id || m.client_id === msg.client_id)
@@ -278,6 +340,7 @@ export function MessengerApp() {
         }
         if (env.type === "message.updated") {
           const msg = env.body as Message;
+          paintRef.current(msg.chat_id, (chat) => (chat.last_message?.id === msg.id ? { ...chat, last_message: msg } : chat));
           setMessages((prev) => {
             if (!openId || msg.chat_id !== openId) return prev;
             return prev.map((m) => (m.id === msg.id ? { ...m, ...msg } : m));
@@ -286,6 +349,7 @@ export function MessengerApp() {
         }
         if (env.type === "message.deleted") {
           const body = env.body as { id: string; chat_id: string };
+          paintRef.current(body.chat_id, (chat) => (chat.last_message?.id === body.id ? { ...chat, last_message: null } : chat));
           setMessages((prev) => {
             if (!openId || body.chat_id !== openId) return prev;
             return prev.filter((m) => m.id !== body.id);
@@ -388,6 +452,7 @@ export function MessengerApp() {
     setCallCreds(null);
     setActiveCall((c) => (c?.id === id ? null : c));
     setIncoming((c) => (c?.id === id ? null : c));
+    setCalls((prev) => prev.map((call) => (call.id === id ? { ...call, status: "ended" } : call)));
   }
 
   function stopPendingAudio() {
@@ -447,6 +512,7 @@ export function MessengerApp() {
     setCallMedia(media);
     setIncoming(null);
     setActiveCall(call);
+    setCalls((prev) => [call, ...prev.filter((item) => item.id !== call.id)]);
   }
 
   function showCameraPermit(attempt: number, kind: "audio" | "video", audio: MediaStreamTrack, start: () => Promise<Call>) {
@@ -568,6 +634,70 @@ export function MessengerApp() {
     void placeCall(kind, () => api.answerCall(id));
   }
 
+  function paintChat(chatId: string, patch: (chat: Chat) => Chat) {
+    if (!chatId || goneChats.current.has(chatId)) return;
+    setChats((prev) => {
+      if (!prev.some((chat) => chat.id === chatId)) return prev;
+      return dedupeChats(prev.map((chat) => (chat.id === chatId ? patch(chat) : chat)));
+    });
+    const userId = meRef.current;
+    if (!userId) return;
+    const stored = readRoster(userId);
+    if (!stored.some((chat) => chat.id === chatId)) return;
+    writeRoster(
+      userId,
+      dedupeChats(
+        stored
+          .filter((chat) => !goneChats.current.has(chat.id))
+          .map((chat) => (chat.id === chatId ? patch(chat) : chat)),
+      ),
+    );
+  }
+
+  function showChat(chat: Chat) {
+    goneChats.current.delete(chat.id);
+    pinnedChats.current.set(chat.id, chat);
+    const userId = meRef.current;
+    if (userId) {
+      const stored = readRoster(userId).filter((item) => item.id !== chat.id && !goneChats.current.has(item.id));
+      writeRoster(userId, dedupeChats([chat, ...stored]));
+    }
+    setQuery("");
+    setSeg("all");
+    setChats((prev) => dedupeChats([chat, ...prev.filter((item) => item.id !== chat.id && !goneChats.current.has(item.id))]));
+  }
+
+  function hideChats(ids: string[]) {
+    const unique = [...new Set(ids)].filter(Boolean);
+    if (!unique.length) return;
+    setPendingDelete([]);
+    setChatMenu(null);
+    setPicking(false);
+    setSelectedIds((prev) => prev.filter((id) => !unique.includes(id)));
+    // Keep the ids hidden for this visit. A list response that started before the delete can still contain them.
+    for (const id of unique) {
+      goneChats.current.add(id);
+      pinnedChats.current.delete(id);
+      renamed.current.delete(id);
+    }
+    setChats((prev) => prev.filter((item) => !goneChats.current.has(item.id)));
+    const userId = meRef.current;
+    if (userId) {
+      for (const id of unique) forgetChat(userId, id);
+      if (activeIdRef.current && unique.includes(activeIdRef.current)) writeActive(userId, null);
+    }
+    if (activeIdRef.current && unique.includes(activeIdRef.current)) {
+      setActiveId(null);
+      setMessages([]);
+    }
+    void Promise.allSettled(unique.map((id) => api.hideChat(id))).then((results) => {
+      const failed = unique.filter((_, index) => results[index].status === "rejected");
+      if (!failed.length) return;
+      for (const id of failed) goneChats.current.delete(id);
+      void refreshChats();
+    });
+  }
+
   function selectChat(id: string) {
     if (id !== activeId) {
       fetchedThread.current = "";
@@ -577,35 +707,36 @@ export function MessengerApp() {
     }
     setActiveId(id);
     if (meRef.current) writeActive(meRef.current, id);
+    paintChat(id, (chat) => ({ ...chat, unread_count: 0 }));
     setTab("chats");
   }
 
   async function openDirect(userId: string) {
-    if (navLock.current) return;
-    navLock.current = true;
     try {
       const chat = await api.direct(userId);
-      await refreshChats();
+      showChat(chat);
       selectChat(chat.id);
       setNewOpen(null);
-    } finally {
-      navLock.current = false;
+    } catch {
+      /* the picker stays open */
     }
   }
 
   async function createGroup() {
     const title = groupTitle.trim();
-    if (!title || navLock.current) return;
-    navLock.current = true;
+    if (!title || groupBusy.current) return;
+    groupBusy.current = true;
     try {
       const chat = await api.group(title, picked);
-      await refreshChats();
+      showChat(chat);
       selectChat(chat.id);
       setNewOpen(null);
       setGroupTitle("");
       setPicked([]);
+    } catch {
+      /* the picker stays open */
     } finally {
-      navLock.current = false;
+      groupBusy.current = false;
     }
   }
 
@@ -616,45 +747,24 @@ export function MessengerApp() {
     setPendingDelete(unique);
   }
 
-  async function removeListChats(ids: string[]) {
-    const unique = [...new Set(ids)].filter(Boolean);
-    if (!unique.length || navLock.current) return;
-    navLock.current = true;
-    setPendingDelete([]);
-    setChatMenu(null);
-    unique.forEach((id) => goneChats.current.add(id));
-    setChats((prev) => prev.filter((item) => !goneChats.current.has(item.id)));
-    if (me) unique.forEach((id) => forgetChat(me, id));
-    if (activeId && goneChats.current.has(activeId)) {
-      setActiveId(null);
-      setMessages([]);
-    }
-    setPicking(false);
-    setSelectedIds([]);
-    try {
-      const results = await Promise.allSettled(unique.map((id) => api.hideChat(id)));
-      const failed = unique.filter((_, index) => results[index].status === "rejected");
-      failed.forEach((id) => goneChats.current.delete(id));
-      await refreshChats();
-      unique.forEach((id) => {
-        if (!failed.includes(id)) goneChats.current.delete(id);
-      });
-    } finally {
-      navLock.current = false;
-    }
-  }
-
   async function saveRename() {
-    if (!rename || navLock.current) return;
+    if (!rename) return;
     const title = renameTitle.trim();
     if (!title) return;
-    navLock.current = true;
+    const id = rename.id;
+    setRename(null);
+    renamed.current.set(id, title);
+    paintChat(id, (chat) => ({ ...chat, title }));
+    const userId = meRef.current;
+    if (userId) {
+      const stored = readRoster(userId).map((chat) => (chat.id === id ? { ...chat, title } : chat));
+      writeRoster(userId, stored);
+    }
     try {
-      await api.renameChat(rename.id, title);
-      setRename(null);
-      await refreshChats();
-    } finally {
-      navLock.current = false;
+      await api.renameChat(id, title);
+    } catch {
+      renamed.current.delete(id);
+      void refreshChats();
     }
   }
 
@@ -1050,6 +1160,28 @@ export function MessengerApp() {
       onRefreshChats={() => void refreshChats()}
       onOpenDirect={(userId) => void openDirect(userId)}
       onCall={(kind) => void beginCall(active.id, kind)}
+      onLocal={(last) => {
+        const chatId = activeIdRef.current;
+        if (!chatId) return;
+        paintChat(chatId, (chat) => {
+          if (!last) return { ...chat, last_message: null, unread_count: 0 };
+          return {
+            ...chat,
+            last_message: last,
+            unread_count: 0,
+            updated_at: last.created_at > chat.updated_at ? last.created_at : chat.updated_at,
+          };
+        });
+      }}
+      onMeta={(patch) => {
+        const chatId = activeIdRef.current;
+        if (!chatId) return;
+        paintChat(chatId, (chat) => ({ ...chat, ...patch }));
+      }}
+      onHide={() => {
+        const chatId = activeIdRef.current;
+        if (chatId) hideChats([chatId]);
+      }}
     />
   ) : (
     <div className="hidden flex-1 items-center justify-center bg-bg text-muted md:flex">
@@ -1188,7 +1320,7 @@ export function MessengerApp() {
               </button>
               <button
                 type="button"
-                onClick={() => void removeListChats(pendingDelete)}
+                onClick={() => hideChats(pendingDelete)}
                 className="h-11 flex-1 rounded-xl bg-danger font-semibold text-white"
               >
                 {t.delete}

@@ -20,18 +20,29 @@ export function saveSession(s: Session | null) {
 
 type ApiError = { error?: { code?: string; message?: string } };
 
-async function request<T>(path: string, init: RequestInit & { authed?: boolean; session?: Session | null } = {}): Promise<T> {
-  const headers = new Headers(init.headers);
+async function request<T>(path: string, init: RequestInit & { authed?: boolean; session?: Session | null; timeoutMs?: number } = {}): Promise<T> {
+  const { authed: authedOpt, session: sessionOpt, timeoutMs, ...rest } = init;
+  const headers = new Headers(rest.headers);
   headers.set("Accept", "application/json");
-  const authed = init.authed !== false;
-  const session = init.session ?? loadSession();
+  const authed = authedOpt !== false;
+  const session = sessionOpt ?? loadSession();
   if (authed && session?.access_token) {
     headers.set("Authorization", `Bearer ${session.access_token}`);
   }
-  if (init.body && !(init.body instanceof FormData) && !headers.has("Content-Type")) {
+  if (rest.body && !(rest.body instanceof FormData) && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
-  const res = await fetch(path, { ...init, headers });
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs ?? 20000);
+  let res: Response;
+  try {
+    res = await fetch(path, { ...rest, headers, signal: ctrl.signal });
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") throw new Error("timeout");
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
   if (res.status === 401 && authed && session?.refresh_token && !path.includes("/auth/refresh")) {
     const next = await refresh(session.refresh_token);
     if (next) {
@@ -168,14 +179,25 @@ export const api = {
       body: JSON.stringify({ mime: file.type || "application/octet-stream", kind, size_bytes: file.size }),
     });
     const session = loadSession();
-    const put = await fetch(intent.put_url, {
-      method: "PUT",
-      headers: {
-        Authorization: `Bearer ${session?.access_token || ""}`,
-        "Content-Type": file.type || "application/octet-stream",
-      },
-      body: file,
-    });
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 90000);
+    let put: Response;
+    try {
+      put = await fetch(intent.put_url, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${session?.access_token || ""}`,
+          "Content-Type": file.type || "application/octet-stream",
+        },
+        body: file,
+        signal: ctrl.signal,
+      });
+    } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") throw new Error("timeout");
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
     if (!put.ok) throw new Error("upload failed");
     await request(`/v1/uploads/${intent.id}/complete`, { method: "POST" });
     return intent.id;

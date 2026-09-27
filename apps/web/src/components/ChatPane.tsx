@@ -59,6 +59,9 @@ export function ChatPane({
   onRefreshChats,
   onOpenDirect,
   onCall,
+  onLocal,
+  onMeta,
+  onHide,
   rosterTick = 0,
 }: {
   t: Dict;
@@ -74,11 +77,13 @@ export function ChatPane({
   onRefreshChats: () => void;
   onOpenDirect: (userId: string) => void;
   onCall: (kind: "audio" | "video") => void;
+  onLocal: (last: Message | null) => void;
+  onMeta: (patch: { member_count?: number }) => void;
+  onHide: () => void;
   rosterTick?: number;
 }) {
   const [text, setText] = useState("");
   const [attach, setAttach] = useState(false);
-  const [busy, setBusy] = useState(false);
   const [menuId, setMenuId] = useState<string | null>(null);
   const [replyTo, setReplyTo] = useState<ReplyPreview | null>(null);
   const [editing, setEditing] = useState<Message | null>(null);
@@ -107,8 +112,17 @@ export function ChatPane({
   const meterRef = useRef<number>(0);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const samplesRef = useRef<number[]>([]);
-  const actionLock = useRef(false);
+  const textRef = useRef("");
   const addSearch = useUserSearch(adding ? addQ : "", me);
+
+  function setComposer(value: string) {
+    textRef.current = value;
+    setText(value);
+  }
+
+  function lastOf(list: Message[]) {
+    return [...list].reverse().find((item) => !item.deleted_at) ?? null;
+  }
 
   const myRole = members.find((m) => m.user.id === me)?.role || "member";
   const canManage = myRole === "owner" || myRole === "admin";
@@ -194,27 +208,20 @@ export function ChatPane({
     };
   }
 
-  function takeAction() {
-    if (actionLock.current) return false;
-    actionLock.current = true;
-    return true;
-  }
-
   async function send() {
-    const trimmed = text.trim();
-    if (!trimmed || !takeAction()) return;
+    const trimmed = textRef.current.trim();
+    if (!trimmed) return;
     if (editing) {
       const id = editing.id;
-      setText("");
+      setComposer("");
       setEditing(null);
       try {
         const msg = await api.editMessage(id, trimmed);
         setMessages((prev) => prev.map((m) => (m.id === id ? msg : m)));
+        onLocal(msg);
         onRefreshChats();
       } catch {
         /* keep old */
-      } finally {
-        actionLock.current = false;
       }
       return;
     }
@@ -232,26 +239,30 @@ export function ChatPane({
       reply_to_id: replyTo?.id,
       reply_to: replyTo,
     };
-    setText("");
+    setComposer("");
     const quoted = replyTo;
     setReplyTo(null);
     stick.current = true;
     setMessages((prev) => [...prev, optimistic]);
+    onLocal(optimistic);
     try {
       const msg = await api.send(chat.id, clientId, "text", { text: trimmed }, undefined, quoted?.id);
       setMessages((prev) => prev.map((m) => (m.client_id === clientId ? msg : m)));
+      onLocal(msg);
       onRefreshChats();
     } catch {
-      setMessages((prev) => prev.map((m) => (m.client_id === clientId ? { ...m, status: "failed" } : m)));
-    } finally {
-      actionLock.current = false;
+      const failed = { ...optimistic, status: "failed" };
+      setMessages((prev) => prev.map((m) => (m.client_id === clientId ? failed : m)));
+      onLocal(failed);
     }
   }
 
   async function retry(m: Message) {
-    if (m.status !== "failed" || !takeAction()) return;
+    if (m.status !== "failed") return;
     const saved = voiceBlobs.current.get(m.client_id);
-    setMessages((prev) => prev.map((x) => (x.id === m.id ? { ...x, status: "sending" } : x)));
+    const sending = { ...m, status: "sending" };
+    setMessages((prev) => prev.map((x) => (x.id === m.id ? sending : x)));
+    onLocal(sending);
     try {
       if (m.type === "voice" && saved) {
         const file = voiceFile(saved.blob);
@@ -270,15 +281,17 @@ export function ChatPane({
           localUrls.current.delete(m.local_url);
         }
         setMessages((prev) => prev.map((x) => (x.client_id === m.client_id ? msg : x)));
+        onLocal(msg);
       } else {
         const msg = await api.send(chat.id, m.client_id, m.type, m.payload, undefined, m.reply_to_id || undefined);
         setMessages((prev) => prev.map((x) => (x.client_id === m.client_id ? msg : x)));
+        onLocal(msg);
       }
       onRefreshChats();
     } catch {
-      setMessages((prev) => prev.map((x) => (x.client_id === m.client_id ? { ...x, status: "failed" } : x)));
-    } finally {
-      actionLock.current = false;
+      const failed = { ...m, status: "failed" };
+      setMessages((prev) => prev.map((x) => (x.client_id === m.client_id ? failed : x)));
+      onLocal(failed);
     }
   }
 
@@ -304,7 +317,7 @@ export function ChatPane({
   }
 
   function askRec(started: number) {
-    if (recording || busy || editing) return;
+    if (recording || editing) return;
     if (mediaRemembered("mic")) {
       armMeter();
       void startRec(started);
@@ -314,7 +327,7 @@ export function ChatPane({
   }
 
   async function startRec(started: number) {
-    if (recording || busy || editing) return;
+    if (recording || editing) return;
     setVoiceError(null);
     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
       noteVoiceError(t.voiceUnsupported);
@@ -408,9 +421,7 @@ export function ChatPane({
   }
 
   async function sendVoice(blob: Blob, durationMs: number, waveform: number[]) {
-    if (!takeAction()) return;
     if (durationMs < 500 || blob.size < 80) {
-      actionLock.current = false;
       noteVoiceError(durationMs >= 500 ? t.voiceFail : t.voiceShort);
       return;
     }
@@ -436,7 +447,7 @@ export function ChatPane({
     setReplyTo(null);
     stick.current = true;
     setMessages((prev) => [...prev, optimistic]);
-    setBusy(true);
+    onLocal(optimistic);
     try {
       const uploadId = await api.upload(voiceFile(blob), "voice");
       const msg = await api.send(chat.id, clientId, "voice", { duration_ms: durationMs, waveform }, [uploadId], quoted?.id);
@@ -444,45 +455,62 @@ export function ChatPane({
       URL.revokeObjectURL(localUrl);
       localUrls.current.delete(localUrl);
       setMessages((prev) => prev.map((m) => (m.client_id === clientId ? msg : m)));
+      onLocal(msg);
       onRefreshChats();
     } catch {
       noteVoiceError(t.voiceFail);
-      setMessages((prev) => prev.map((m) => (m.client_id === clientId ? { ...m, status: "failed" } : m)));
-    } finally {
-      actionLock.current = false;
-      setBusy(false);
+      const failed = { ...optimistic, status: "failed" };
+      setMessages((prev) => prev.map((m) => (m.client_id === clientId ? failed : m)));
+      onLocal(failed);
     }
   }
 
   async function sendFile(file: File, kind: "photo" | "file") {
-    if (!takeAction()) return;
     setAttach(false);
-    setBusy(true);
+    const clientId = crypto.randomUUID();
+    const optimistic: Message = {
+      id: clientId,
+      chat_id: chat.id,
+      author_id: me,
+      author_name: t.you,
+      type: kind,
+      payload: { caption: file.name },
+      client_id: clientId,
+      created_at: new Date().toISOString(),
+      status: "sending",
+      reply_to_id: replyTo?.id,
+      reply_to: replyTo,
+    };
+    const quoted = replyTo;
+    setReplyTo(null);
+    stick.current = true;
+    setMessages((prev) => [...prev, optimistic]);
+    onLocal(optimistic);
     try {
       const uploadId = await api.upload(file, kind);
-      const clientId = crypto.randomUUID();
-      const msg = await api.send(chat.id, clientId, kind, { caption: file.name }, [uploadId], replyTo?.id);
-      setReplyTo(null);
-      stick.current = true;
-      setMessages((prev) => [...prev, msg]);
+      const msg = await api.send(chat.id, clientId, kind, { caption: file.name }, [uploadId], quoted?.id);
+      setMessages((prev) => prev.map((m) => (m.client_id === clientId ? msg : m)));
+      onLocal(msg);
       onRefreshChats();
     } catch {
-      /* ignore */
-    } finally {
-      actionLock.current = false;
-      setBusy(false);
+      const failed = { ...optimistic, status: "failed" };
+      setMessages((prev) => prev.map((m) => (m.client_id === clientId ? failed : m)));
+      onLocal(failed);
     }
   }
 
   async function remove(m: Message) {
     if (!window.confirm(t.confirmDelete)) return;
     setMenuId(null);
+    const next = messages.filter((x) => x.id !== m.id);
+    setMessages(next);
+    onLocal(lastOf(next));
     try {
       await api.deleteMessage(m.id);
-      setMessages((prev) => prev.filter((x) => x.id !== m.id));
       onRefreshChats();
     } catch {
-      /* ignore */
+      setMessages(messages);
+      onLocal(lastOf(messages));
     }
   }
 
@@ -648,7 +676,7 @@ export function ChatPane({
                           <Action
                             onClick={() => {
                               setEditing(m);
-                              setText(payloadText(m.payload));
+                              setComposer(payloadText(m.payload));
                               setReplyTo(null);
                               setMenuId(null);
                             }}
@@ -741,7 +769,7 @@ export function ChatPane({
             onClick={() => {
               setReplyTo(null);
               setEditing(null);
-              if (editing) setText("");
+              if (editing) setComposer("");
             }}
             className="text-muted"
           >
@@ -788,7 +816,7 @@ export function ChatPane({
           <textarea
             value={text}
             onChange={(e) => {
-              setText(e.target.value);
+              setComposer(e.target.value);
               if (!editing && Date.now() - typingAt.current > 800) {
                 typingAt.current = Date.now();
                 void api.typing(chat.id);
@@ -808,7 +836,6 @@ export function ChatPane({
         {recording ? (
           <button
             type="button"
-            disabled={busy}
             onClick={() => stopRec(false)}
             className="flex h-10 w-10 items-center justify-center rounded-full bg-accent text-white"
             aria-label={t.voice}
@@ -818,7 +845,6 @@ export function ChatPane({
         ) : text.trim() ? (
           <button
             type="button"
-            disabled={busy}
             onClick={() => void send()}
             className="flex h-10 w-10 items-center justify-center rounded-full bg-accent text-white"
           >
@@ -827,7 +853,7 @@ export function ChatPane({
         ) : (
           <button
             type="button"
-            disabled={busy || !!editing}
+            disabled={!!editing}
             onClick={() => askRec(Date.now())}
             className="flex h-10 w-10 items-center justify-center rounded-full bg-elevated text-ink disabled:opacity-40"
             aria-label={t.voice}
@@ -952,37 +978,40 @@ export function ChatPane({
   );
 
   async function addOne(u: User) {
+    const prev = members;
+    setMembers((list) => (list.some((m) => m.user.id === u.id) ? list : [...list, { user: u, role: "member", joined_at: new Date().toISOString() }]));
+    onMeta({ member_count: (members.some((m) => m.user.id === u.id) ? members.length : members.length + 1) });
     try {
       const r = await api.addMembers(chat.id, [u.id]);
       setMembers(r.items);
       setAddQ("");
+      onMeta({ member_count: r.items.length });
       onRefreshChats();
     } catch {
-      /* ignore */
+      setMembers(prev);
+      onMeta({ member_count: prev.length });
     }
   }
 
   async function kick(userId: string) {
     if (!window.confirm(t.confirmKick)) return;
+    const prev = members;
+    const next = prev.filter((m) => m.user.id !== userId);
+    setMembers(next);
+    onMeta({ member_count: next.length });
     try {
       await api.removeMember(chat.id, userId);
-      setMembers((prev) => prev.filter((m) => m.user.id !== userId));
       onRefreshChats();
     } catch {
-      /* ignore */
+      setMembers(prev);
+      onMeta({ member_count: prev.length });
     }
   }
 
-  async function leave() {
+  function leave() {
     if (!window.confirm(t.confirmLeave)) return;
-    try {
-      await api.removeMember(chat.id, me);
-      setMembersOpen(false);
-      onBack();
-      onRefreshChats();
-    } catch {
-      /* ignore */
-    }
+    setMembersOpen(false);
+    onHide();
   }
 }
 
