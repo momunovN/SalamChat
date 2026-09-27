@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomInt } from "crypto";
 import { SignJWT, jwtVerify } from "jose";
 import { query, queryOne } from "./db";
+import { forgetName } from "./valkey";
 import { jwtSecret, otpDev } from "./env";
 import { HttpError } from "./http";
 import { sanitizeDisplayName, sanitizeUsername } from "@/lib/name";
@@ -272,6 +273,7 @@ export async function updateMe(
     if (/users_username|duplicate key/i.test(msg)) throw new HttpError(409, "conflict", "username taken");
     throw err;
   }
+  if (displayName) void forgetName(id);
   return getUser(id);
 }
 

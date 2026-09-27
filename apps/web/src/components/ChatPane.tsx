@@ -22,10 +22,12 @@ import {
   X,
 } from "lucide-react";
 import { api } from "@/lib/api";
+import { mediaPermission } from "@/lib/callMedia";
 import { dayKey, dayLabel, formatClock, membersPhrase, messageBody, payloadText } from "@/lib/chat";
 import type { Dict, Lang } from "@/lib/i18n";
 import type { Chat, ChatMember, Message, ReplyPreview, User } from "@/lib/types";
 import { Avatar } from "./Avatar";
+import { PermitToast } from "./PermitToast";
 import { PeopleResults, useUserSearch } from "./PeopleSearch";
 import { VoiceNote } from "./VoiceNote";
 
@@ -95,6 +97,7 @@ export function ChatPane({
   const localUrls = useRef(new Set<string>());
   const replyRef = useRef(replyTo);
   const [recording, setRecording] = useState(false);
+  const [micAsk, setMicAsk] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const addSearch = useUserSearch(adding ? addQ : "", me);
@@ -264,6 +267,20 @@ export function ChatPane({
     if (typeof MediaRecorder === "undefined") return "";
     const types = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"];
     return types.find((item) => MediaRecorder.isTypeSupported(item)) || "";
+  }
+
+  async function askRec() {
+    if (recording || busy || editing) return;
+    const mic = await mediaPermission("microphone");
+    if (mic === "denied") {
+      noteVoiceError(t.voiceDenied);
+      return;
+    }
+    if (mic === "granted") {
+      await startRec(Date.now());
+      return;
+    }
+    setMicAsk(true);
   }
 
   async function startRec(started: number) {
@@ -719,7 +736,7 @@ export function ChatPane({
           <button
             type="button"
             disabled={busy || !!editing}
-            onClick={() => void startRec(Date.now())}
+            onClick={() => void askRec()}
             className="flex h-10 w-10 items-center justify-center rounded-full bg-elevated text-ink disabled:opacity-40"
             aria-label={t.voice}
           >
@@ -824,6 +841,19 @@ export function ChatPane({
             </button>
           </div>
         </div>
+      ) : null}
+      {micAsk ? (
+        <PermitToast
+          title={t.allowMic}
+          body={t.needMicVoice}
+          allowLabel={t.allow}
+          cancelLabel={t.notNow}
+          onAllow={() => {
+            setMicAsk(false);
+            void startRec(Date.now());
+          }}
+          onCancel={() => setMicAsk(false)}
+        />
       ) : null}
     </div>
   );

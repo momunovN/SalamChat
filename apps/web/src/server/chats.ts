@@ -1,6 +1,7 @@
 import { query, queryOne } from "./db";
 import { presence } from "./hub";
 import { HttpError, iso } from "./http";
+import { bustMembers, hotTailMap, rememberMembers } from "./valkey";
 import { mapUser, type User, type UserRow } from "./auth";
 
 export type ReplyPreview = {
@@ -209,7 +210,30 @@ export async function listChats(userId: string, q = "", kind = "") {
   `,
     [userId, kind, q],
   );
-  return rows.map(mapChat);
+  const chats = rows.map(mapChat);
+  try {
+    const tails = await hotTailMap(chats.map((c) => c.id));
+    for (const chat of chats) {
+      const raw = tails.get(chat.id);
+      if (!raw) continue;
+      let hot: Message;
+      try {
+        hot = JSON.parse(raw) as Message;
+      } catch {
+        continue;
+      }
+      if (!hot?.id || hot.deleted_at) continue;
+      const prevAt = chat.last_message?.created_at || "";
+      if (hot.created_at <= prevAt) continue;
+      if (hot.author_id && hot.author_id !== userId && hot.id !== chat.last_message?.id) chat.unread_count += 1;
+      chat.last_message = hot;
+      if (hot.created_at > chat.updated_at) chat.updated_at = hot.created_at;
+    }
+  } catch {
+    /* the postgres list is still complete */
+  }
+  chats.sort((a, b) => (a.updated_at < b.updated_at ? 1 : a.updated_at > b.updated_at ? -1 : 0));
+  return chats;
 }
 
 export async function getChat(userId: string, chatId: string) {
@@ -234,6 +258,7 @@ export async function directChat(me: string, peer: string) {
       me,
       peer,
     ]);
+    await rememberMembers(chatId, [me, peer]).catch(() => undefined);
   } catch {
     const again = await queryOne<{ id: string }>(`SELECT id FROM chats WHERE peer_key=$1`, [key]);
     if (again) return getChat(me, again.id);
@@ -259,6 +284,7 @@ export async function createGroup(me: string, title: string, memberIds: string[]
     const role = uid === me ? "owner" : "member";
     await query(`INSERT INTO chat_members (chat_id, user_id, role) VALUES ($1,$2,$3)`, [chatId, uid, role]);
   }
+  await rememberMembers(chatId, members).catch(() => undefined);
   return getChat(me, chatId);
 }
 
@@ -329,6 +355,7 @@ export async function addMembers(me: string, chatId: string, userIds: string[]) 
     );
   }
   await query(`UPDATE chats SET updated_at=now() WHERE id=$1`, [chatId]);
+  await bustMembers(chatId).catch(() => undefined);
   return listMembers(me, chatId);
 }
 
@@ -361,5 +388,6 @@ export async function removeMember(me: string, chatId: string, targetId: string)
   }
   await query(`DELETE FROM chat_members WHERE chat_id=$1 AND user_id=$2`, [chatId, targetId]);
   await query(`UPDATE chats SET updated_at=now() WHERE id=$1`, [chatId]);
+  await bustMembers(chatId).catch(() => undefined);
   return { ok: true };
 }

@@ -34,6 +34,7 @@ import { listContacts, syncContacts } from "./contacts";
 import { getUserPublic, lookupPhones, searchUsers } from "./users";
 import { completeUpload, createIntent, mediaType, putUpload, readMedia } from "./uploads";
 import { sseResponse } from "./stream";
+import { valkeyReady } from "./valkey";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -65,7 +66,7 @@ export async function handleRequest(req: Request): Promise<Response> {
     const url = new URL(req.url);
     const pathname = url.pathname.replace(/\/$/, "") || "/";
     if (pathname === "/healthz") {
-      return json(200, { ok: true, name: "tooapp" });
+      return json(200, { ok: true, name: "tooapp", valkey: valkeyReady() ? "up" : "down" });
     }
     if (pathname.startsWith("/media/")) {
       let key = pathname.slice("/media/".length);

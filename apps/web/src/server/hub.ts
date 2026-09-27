@@ -1,3 +1,5 @@
+import { bindFanout, publishRemote } from "./valkey";
+
 export type Envelope = {
   type: string;
   ts: string;
@@ -22,7 +24,7 @@ class Hub {
     };
   }
 
-  publish(userId: string, env: Envelope) {
+  deliver(userId: string, env: Envelope) {
     this.listeners.get(userId)?.forEach((fn) => {
       try {
         fn(env);
@@ -30,6 +32,11 @@ class Hub {
         /* ignore slow clients */
       }
     });
+  }
+
+  publish(userId: string, env: Envelope) {
+    this.deliver(userId, env);
+    publishRemote(userId, env);
   }
 
   publishMany(ids: string[], env: Envelope) {
@@ -62,6 +69,8 @@ const g = globalThis as typeof globalThis & {
 
 export const hub = (g.__samalHub ??= new Hub());
 export const presence = (g.__samalPresence ??= new Presence());
+
+bindFanout((userId, env) => hub.deliver(userId, env));
 
 export function envelope(type: string, body: unknown): Envelope {
   return { type, ts: new Date().toISOString(), body };

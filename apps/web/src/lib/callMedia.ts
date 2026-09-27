@@ -23,43 +23,48 @@ export function stopCallMedia(media: CallMedia | null | undefined) {
   media?.video?.stop();
 }
 
-export async function acquireCallMedia(
-  kind: "audio" | "video",
-  onStep?: (step: "mic" | "camera") => void,
-): Promise<CallMedia> {
-  if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
-    throw new Error("mic");
-  }
-  onStep?.("mic");
-  let audioStream: MediaStream;
+export async function mediaPermission(kind: "microphone" | "camera"): Promise<"granted" | "prompt" | "denied"> {
   try {
-    audioStream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints, video: false });
+    if (typeof navigator === "undefined" || !navigator.permissions?.query) return "prompt";
+    const status = await navigator.permissions.query({ name: kind as PermissionName });
+    if (status.state === "granted" || status.state === "denied") return status.state;
   } catch {
-    throw new Error("mic");
+    /* Safari has no mic/camera permission query */
   }
-  const audio = audioStream.getAudioTracks()[0];
-  if (!audio) {
-    audioStream.getTracks().forEach((track) => track.stop());
-    throw new Error("mic");
-  }
-  if (kind !== "video") return { audio };
+  return "prompt";
+}
 
-  onStep?.("camera");
-  let videoStream: MediaStream;
+export async function captureAudio() {
+  if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) throw new Error("mic");
+  let stream: MediaStream;
   try {
-    videoStream = await navigator.mediaDevices.getUserMedia({ audio: false, video: videoConstraints });
+    stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints, video: false });
   } catch {
-    audio.stop();
+    throw new Error("mic");
+  }
+  const audio = stream.getAudioTracks()[0];
+  if (!audio) {
+    stream.getTracks().forEach((track) => track.stop());
+    throw new Error("mic");
+  }
+  return audio;
+}
+
+export async function captureVideo() {
+  if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) throw new Error("camera");
+  let stream: MediaStream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: videoConstraints });
+  } catch {
     throw new Error("camera");
   }
-  const video = videoStream.getVideoTracks()[0];
+  const video = stream.getVideoTracks()[0];
   if (!video) {
-    audio.stop();
-    videoStream.getTracks().forEach((track) => track.stop());
+    stream.getTracks().forEach((track) => track.stop());
     throw new Error("camera");
   }
   video.contentHint = "detail";
-  return { audio, video };
+  return video;
 }
 
 export function warmCallConnection(url: string, token: string) {

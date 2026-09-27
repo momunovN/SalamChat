@@ -4,6 +4,7 @@ import next from "next";
 import { loadEnv } from "./src/server/env";
 import { migrate, warmup } from "./src/server/db";
 import { handleRequest } from "./src/server/router";
+import { connectValkey } from "./src/server/valkey";
 import { attachWs } from "./src/server/ws";
 
 loadEnv();
@@ -63,7 +64,7 @@ async function main() {
     res.end();
   }
 
-  await app.prepare();
+  await Promise.all([app.prepare(), connectValkey()]);
 
   const server = createServer(async (req, res) => {
     const pathname = parse(req.url || "").pathname || "";
