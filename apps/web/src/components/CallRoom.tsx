@@ -21,13 +21,17 @@ const HANGUP_TOPIC = "tooapp.call";
 
 type Creds = { url: string; token: string; room: string };
 
+const videoEncoding = { maxBitrate: 4_500_000, maxFramerate: 30, priority: "high" as const };
+
+// 1080p H.264 is encoded on the phone's hardware. 360p and 720p stay available when the upload is weak.
 const videoPublish = {
   source: Track.Source.Camera,
   simulcast: true,
-  videoCodec: "vp8" as const,
+  videoCodec: "h264" as const,
+  backupCodec: { codec: "vp8" as const, encoding: videoEncoding },
   degradationPreference: "maintain-resolution" as const,
-  videoEncoding: { maxBitrate: 2_800_000, maxFramerate: 30, priority: "high" as const },
-  videoSimulcastLayers: [VideoPresets.h180, VideoPresets.h360],
+  videoEncoding,
+  videoSimulcastLayers: [VideoPresets.h360, VideoPresets.h720],
 };
 
 function mountPreview(box: HTMLDivElement, track: MediaStreamTrack, mirror: boolean) {
@@ -117,7 +121,7 @@ export function CallRoom({
         autoGainControl: true,
       },
       videoCaptureDefaults: {
-        resolution: VideoPresets.h720.resolution,
+        resolution: VideoPresets.h1080.resolution,
         facingMode: "user",
       },
       publishDefaults: {
@@ -214,7 +218,12 @@ export function CallRoom({
           }),
         ];
         if (video && media.video) {
-          publishes.push(room.localParticipant.publishTrack(media.video, videoPublish));
+          const camera = media.video;
+          publishes.push(
+            room.localParticipant.publishTrack(camera, videoPublish).catch(() =>
+              room.localParticipant.publishTrack(camera, { ...videoPublish, videoCodec: "vp8", backupCodec: false }),
+            ),
+          );
         }
         await Promise.all(publishes);
         if (cancelled || ended) return;
