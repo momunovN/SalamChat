@@ -25,6 +25,7 @@ import {
 import { api } from "@/lib/api";
 import { forgetMedia, mediaRemembered, rememberMedia, requestUserMedia } from "@/lib/callMedia";
 import { dedupeMessages } from "@/lib/cache";
+import { levelFromTimeDomain, packWave, WAVE_BARS } from "@/lib/voice";
 import { dayKey, dayLabel, formatClock, membersPhrase, messageBody, payloadText } from "@/lib/chat";
 import type { Dict, Lang } from "@/lib/i18n";
 import type { Chat, ChatMember, Message, ReplyPreview, User } from "@/lib/types";
@@ -102,6 +103,10 @@ export function ChatPane({
   const [micAsk, setMicAsk] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [voiceError, setVoiceError] = useState<string | null>(null);
+  const [liveWave, setLiveWave] = useState<number[]>([]);
+  const meterRef = useRef<number>(0);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const samplesRef = useRef<number[]>([]);
   const addSearch = useUserSearch(adding ? addQ : "", me);
 
   const myRole = members.find((m) => m.user.id === me)?.role || "member";
@@ -152,7 +157,7 @@ export function ChatPane({
     return () => {
       discardRef.current = true;
       if (recRef.current && recRef.current.state !== "inactive") recRef.current.stop();
-      streamRef.current?.getTracks().forEach((track) => track.stop());
+      releaseMic();
       for (const url of urls) URL.revokeObjectURL(url);
       urls.clear();
     };
@@ -240,7 +245,14 @@ export function ChatPane({
       if (m.type === "voice" && saved) {
         const file = voiceFile(saved.blob);
         const uploadId = await api.upload(file, "voice");
-        const msg = await api.send(chat.id, m.client_id, "voice", { duration_ms: saved.ms }, [uploadId], m.reply_to_id || undefined);
+        const msg = await api.send(
+          chat.id,
+          m.client_id,
+          "voice",
+          { duration_ms: saved.ms, waveform: m.payload?.waveform },
+          [uploadId],
+          m.reply_to_id || undefined,
+        );
         voiceBlobs.current.delete(m.client_id);
         if (m.local_url) {
           URL.revokeObjectURL(m.local_url);
@@ -295,25 +307,30 @@ export function ChatPane({
         if (ev.data.size) chunksRef.current.push(ev.data);
       };
       const live = stream;
+      const waveform = () => packWave(samplesRef.current, WAVE_BARS);
       rec.onstop = () => {
-        live.getTracks().forEach((track) => track.stop());
         const ms = Date.now() - startedAt.current;
+        const wave = waveform();
+        releaseMic();
+        live.getTracks().forEach((track) => track.stop());
         const type = (rec.mimeType || mime || "audio/webm").split(";")[0];
         const discard = discardRef.current;
         discardRef.current = false;
         recRef.current = null;
-        streamRef.current = null;
         window.setTimeout(() => {
           const blob = new Blob(chunksRef.current, { type });
           chunksRef.current = [];
-          if (!discard) void sendVoice(blob, ms);
+          if (!discard) void sendVoice(blob, ms, wave);
         }, 0);
       };
       streamRef.current = stream;
       recRef.current = rec;
       startedAt.current = started;
+      samplesRef.current = [];
+      setLiveWave([]);
       setElapsed(0);
       setRecording(true);
+      startMeter(stream);
       rec.start(200);
     } catch {
       if (!stream) forgetMedia("mic");
@@ -322,11 +339,37 @@ export function ChatPane({
     }
   }
 
+  function releaseMic() {
+    if (meterRef.current) window.clearInterval(meterRef.current);
+    meterRef.current = 0;
+    const ctx = audioCtxRef.current;
+    audioCtxRef.current = null;
+    if (ctx && ctx.state !== "closed") void ctx.close();
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
+    setLiveWave([]);
+  }
+
+  function startMeter(stream: MediaStream) {
+    const ctx = new AudioContext();
+    const source = ctx.createMediaStreamSource(stream);
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 1024;
+    source.connect(analyser);
+    audioCtxRef.current = ctx;
+    const bins = new Uint8Array(analyser.fftSize);
+    meterRef.current = window.setInterval(() => {
+      analyser.getByteTimeDomainData(bins);
+      samplesRef.current.push(levelFromTimeDomain(bins));
+      setLiveWave(packWave(samplesRef.current, 28));
+    }, 80);
+  }
+
   function stopRec(discard: boolean) {
     const rec = recRef.current;
     setRecording(false);
     if (!rec || rec.state === "inactive") {
-      streamRef.current?.getTracks().forEach((track) => track.stop());
+      releaseMic();
       return;
     }
     discardRef.current = discard;
@@ -336,9 +379,10 @@ export function ChatPane({
       /* some browsers only flush on stop */
     }
     rec.stop();
+    releaseMic();
   }
 
-  async function sendVoice(blob: Blob, durationMs: number) {
+  async function sendVoice(blob: Blob, durationMs: number, waveform: number[]) {
     if (durationMs < 500 || blob.size < 80) {
       noteVoiceError(durationMs >= 500 ? t.voiceFail : t.voiceShort);
       return;
@@ -354,7 +398,7 @@ export function ChatPane({
       author_id: me,
       author_name: t.you,
       type: "voice",
-      payload: { duration_ms: durationMs },
+      payload: { duration_ms: durationMs, waveform },
       client_id: clientId,
       created_at: new Date().toISOString(),
       status: "sending",
@@ -368,7 +412,7 @@ export function ChatPane({
     setBusy(true);
     try {
       const uploadId = await api.upload(voiceFile(blob), "voice");
-      const msg = await api.send(chat.id, clientId, "voice", { duration_ms: durationMs }, [uploadId], quoted?.id);
+      const msg = await api.send(chat.id, clientId, "voice", { duration_ms: durationMs, waveform }, [uploadId], quoted?.id);
       voiceBlobs.current.delete(clientId);
       URL.revokeObjectURL(localUrl);
       localUrls.current.delete(localUrl);
@@ -526,11 +570,23 @@ export function ChatPane({
                         </div>
                       ) : null}
                       {m.type === "voice" && m.local_url ? (
-                        <VoiceNote src={m.local_url} durationMs={m.payload?.duration_ms} />
+                        <VoiceNote
+                          key={m.local_url}
+                          src={m.local_url}
+                          durationMs={m.payload?.duration_ms}
+                          waveform={m.payload?.waveform}
+                        />
                       ) : null}
                       {m.attachments?.map((a) =>
                         a.kind === "voice" || a.mime?.startsWith("audio/") ? (
-                          <VoiceNote key={a.id} src={a.url} durationMs={a.duration_ms || m.payload?.duration_ms} />
+                          m.local_url ? null : (
+                            <VoiceNote
+                              key={a.id}
+                              src={a.url}
+                              durationMs={a.duration_ms || m.payload?.duration_ms}
+                              waveform={m.payload?.waveform}
+                            />
+                          )
                         ) : a.kind === "photo" ? (
                           // eslint-disable-next-line @next/next/no-img-element
                           <img key={a.id} src={a.url} alt="" className="mb-1 max-h-64 rounded-lg" />
@@ -686,9 +742,17 @@ export function ChatPane({
         )}
         {recording ? (
           <div className="flex min-h-[40px] flex-1 items-center gap-2 rounded-[20px] bg-elevated px-3">
-            <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-danger" />
-            <span className="text-sm font-medium tabular-nums text-ink">{formatClock(elapsed)}</span>
-            <span className="text-sm text-muted">{t.recording}</span>
+            <span className="h-2.5 w-2.5 shrink-0 animate-pulse rounded-full bg-danger" />
+            <span className="w-10 shrink-0 text-sm font-medium tabular-nums text-ink">{formatClock(elapsed)}</span>
+            <span className="flex h-7 min-w-0 flex-1 items-center gap-px">
+              {(liveWave.length ? liveWave : [0.15]).map((amp, i) => (
+                <span
+                  key={i}
+                  className="w-full max-w-[3px] flex-1 rounded-full bg-accent"
+                  style={{ height: `${Math.max(16, Math.round(amp * 100))}%` }}
+                />
+              ))}
+            </span>
           </div>
         ) : (
           <textarea

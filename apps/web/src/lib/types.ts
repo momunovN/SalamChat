@@ -36,7 +36,7 @@ export type Message = {
   author_id?: string | null;
   author_name?: string | null;
   type: string;
-  payload: { text?: string; lat?: number; lon?: number; caption?: string; duration_ms?: number };
+  payload: { text?: string; lat?: number; lon?: number; caption?: string; duration_ms?: number; waveform?: number[] };
   client_id: string;
   reply_to_id?: string | null;
   reply_to?: ReplyPreview | null;

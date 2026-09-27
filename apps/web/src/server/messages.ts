@@ -255,8 +255,15 @@ function prepareSend(input: SendInput) {
   if (type === "voice") {
     const raw = Number((payload as { duration_ms?: number }).duration_ms);
     voiceMs = Number.isFinite(raw) ? Math.max(1, Math.min(Math.round(raw), 10 * 60 * 1000)) : null;
-    const base = payload && typeof payload === "object" ? payload : {};
-    payload = { ...base, ...(voiceMs ? { duration_ms: voiceMs } : {}) };
+    const base = payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {};
+    const wave = Array.isArray(base.waveform)
+      ? base.waveform
+          .map((n) => Number(n))
+          .filter((n) => Number.isFinite(n))
+          .slice(0, 64)
+          .map((n) => Math.max(0, Math.min(1, n)))
+      : [];
+    payload = { ...base, ...(voiceMs ? { duration_ms: voiceMs } : {}), ...(wave.length ? { waveform: wave } : {}) };
   }
   return { type, payload, voiceMs };
 }
