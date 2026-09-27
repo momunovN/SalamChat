@@ -121,7 +121,7 @@ export function dedupeChats(items: Chat[]): Chat[] {
 }
 
 export function mergeChats(local: Chat[], fresh: Chat[]): Chat[] {
-  if (fresh.length === 0) return dedupeChats(local);
+  if (fresh.length === 0) return [];
   const prev = new Map(dedupeChats(local).map((chat) => [chat.id, chat]));
   const out: Chat[] = [];
   for (const chat of fresh) {

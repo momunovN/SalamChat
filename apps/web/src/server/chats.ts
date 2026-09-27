@@ -316,11 +316,21 @@ export async function hideChat(userId: string, chatId: string) {
   await mustMember(chatId, userId);
   const chat = await queryOne<{ type: string }>(`SELECT type FROM chats WHERE id=$1`, [chatId]);
   if (!chat) throw new HttpError(404, "not_found", "not found");
-  if (chat.type === "group") return removeMember(userId, chatId, userId);
-  await query(`UPDATE chat_members SET hidden_at=now(), cleared_at=now() WHERE chat_id=$1 AND user_id=$2`, [
-    chatId,
-    userId,
-  ]);
+  if (chat.type === "group") {
+    try {
+      return await removeMember(userId, chatId, userId);
+    } catch {
+      /* still hide the row if leaving the group failed */
+    }
+  }
+  try {
+    await query(`UPDATE chat_members SET hidden_at=now(), cleared_at=now() WHERE chat_id=$1 AND user_id=$2`, [
+      chatId,
+      userId,
+    ]);
+  } catch {
+    await query(`DELETE FROM chat_members WHERE chat_id=$1 AND user_id=$2`, [chatId, userId]);
+  }
   return { ok: true };
 }
 

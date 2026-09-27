@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 import {
+  Check,
   Languages,
   LogOut,
   MessageSquare,
@@ -74,6 +75,9 @@ export function MessengerApp() {
   const [typingNow, setTypingNow] = useState(0);
   const [newOpen, setNewOpen] = useState<"direct" | "group" | null>(null);
   const [chatMenu, setChatMenu] = useState<Chat | null>(null);
+  const [picking, setPicking] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [pendingDelete, setPendingDelete] = useState<string[]>([]);
   const [rename, setRename] = useState<Chat | null>(null);
   const [renameTitle, setRenameTitle] = useState("");
   const [groupTitle, setGroupTitle] = useState("");
@@ -93,6 +97,7 @@ export function MessengerApp() {
   const pendingStart = useRef<(() => Promise<Call>) | null>(null);
   const pendingAudio = useRef<MediaStreamTrack | null>(null);
   const navLock = useRef(false);
+  const goneChats = useRef(new Set<string>());
   const errorTimer = useRef<number | null>(null);
 
   const active = chats.find((c) => c.id === activeId) || null;
@@ -135,9 +140,9 @@ export function MessengerApp() {
       const fresh = r.items ?? [];
       if (!query && seg === "all") {
         const local = userId ? readRoster(userId) : [];
-        const next = mergeChats(local, fresh);
-        if (userId && fresh.length) writeRoster(userId, next);
-        setChats(next.length ? next : local);
+        const next = mergeChats(local, fresh).filter((chat) => !goneChats.current.has(chat.id));
+        if (userId) writeRoster(userId, next);
+        setChats(next);
         return;
       }
       setChats(fresh);
@@ -604,19 +609,36 @@ export function MessengerApp() {
     }
   }
 
-  async function removeListChat(chat: Chat) {
-    const ok = window.confirm(chat.type === "group" ? t.confirmLeaveList : t.confirmHideChat);
-    if (!ok || navLock.current) return;
-    navLock.current = true;
+  function askDelete(ids: string[]) {
+    const unique = [...new Set(ids)].filter(Boolean);
+    if (!unique.length) return;
     setChatMenu(null);
+    setPendingDelete(unique);
+  }
+
+  async function removeListChats(ids: string[]) {
+    const unique = [...new Set(ids)].filter(Boolean);
+    if (!unique.length || navLock.current) return;
+    navLock.current = true;
+    setPendingDelete([]);
+    setChatMenu(null);
+    unique.forEach((id) => goneChats.current.add(id));
+    setChats((prev) => prev.filter((item) => !goneChats.current.has(item.id)));
+    if (me) unique.forEach((id) => forgetChat(me, id));
+    if (activeId && goneChats.current.has(activeId)) {
+      setActiveId(null);
+      setMessages([]);
+    }
+    setPicking(false);
+    setSelectedIds([]);
     try {
-      await api.hideChat(chat.id);
-      if (me) forgetChat(me, chat.id);
-      setChats((prev) => prev.filter((item) => item.id !== chat.id));
-      if (activeId === chat.id) {
-        setActiveId(null);
-        setMessages([]);
-      }
+      const results = await Promise.allSettled(unique.map((id) => api.hideChat(id)));
+      const failed = unique.filter((_, index) => results[index].status === "rejected");
+      failed.forEach((id) => goneChats.current.delete(id));
+      await refreshChats();
+      unique.forEach((id) => {
+        if (!failed.includes(id)) goneChats.current.delete(id);
+      });
     } finally {
       navLock.current = false;
     }
@@ -732,18 +754,30 @@ export function MessengerApp() {
           {tab === "chats" ? t.app : tab === "calls" ? t.tabCalls : tab === "contacts" ? t.tabContacts : t.tabMore}
         </h1>
         {tab === "chats" ? (
-          <button
-            type="button"
-            onClick={() => {
-              setPickerQ("");
-              setPicked([]);
-              setNewOpen("direct");
-            }}
-            className="flex h-9 w-9 items-center justify-center rounded-full text-ink hover:bg-elevated"
-            aria-label={t.newChat}
-          >
-            <Pencil size={18} />
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => {
+                setPicking((on) => !on);
+                setSelectedIds([]);
+              }}
+              className="rounded-full px-3 py-1.5 text-sm font-semibold text-accent"
+            >
+              {picking ? t.cancel : t.selectChats}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setPickerQ("");
+                setPicked([]);
+                setNewOpen("direct");
+              }}
+              className="flex h-9 w-9 items-center justify-center rounded-full text-ink hover:bg-elevated"
+              aria-label={t.newChat}
+            >
+              <Pencil size={18} />
+            </button>
+          </div>
         ) : null}
       </div>
 
@@ -763,6 +797,15 @@ export function MessengerApp() {
 
       {tab === "chats" ? (
         <div className="flex gap-1 px-4 pb-2">
+          {picking ? (
+            <button
+              type="button"
+              onClick={() => setSelectedIds(chats.map((chat) => chat.id))}
+              className="h-8 rounded-full px-3 text-sm font-semibold text-accent"
+            >
+              {t.selectAll}
+            </button>
+          ) : null}
           {(["all", "direct", "group"] as Seg[]).map((s) => (
             <button
               key={s}
@@ -788,9 +831,19 @@ export function MessengerApp() {
                 key={c.id}
                 role="button"
                 tabIndex={0}
-                onClick={() => selectChat(c.id)}
+                onClick={() => {
+                  if (picking) {
+                    setSelectedIds((prev) => (prev.includes(c.id) ? prev.filter((id) => id !== c.id) : [...prev, c.id]));
+                    return;
+                  }
+                  selectChat(c.id);
+                }}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") selectChat(c.id);
+                  if (e.key === "Enter") {
+                    if (picking) {
+                      setSelectedIds((prev) => (prev.includes(c.id) ? prev.filter((id) => id !== c.id) : [...prev, c.id]));
+                    } else selectChat(c.id);
+                  }
                 }}
                 onContextMenu={(e) => {
                   e.preventDefault();
@@ -800,6 +853,15 @@ export function MessengerApp() {
                   activeId === c.id ? "bg-elevated" : "hover:bg-elevated/60"
                 }`}
               >
+                {picking ? (
+                  <span
+                    className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border ${
+                      selectedIds.includes(c.id) ? "border-accent bg-accent text-white" : "border-muted"
+                    }`}
+                  >
+                    {selectedIds.includes(c.id) ? <Check size={14} /> : null}
+                  </span>
+                ) : null}
                 <Avatar name={c.title} src={c.avatar_url} size={56} online={c.peer?.online} />
                 <div className="min-w-0 flex-1 border-b border-line pb-2">
                   <div className="flex items-center gap-2">
@@ -955,6 +1017,19 @@ export function MessengerApp() {
           </div>
         ) : null}
       </div>
+      {picking && tab === "chats" ? (
+        <div className="border-t border-line px-4 py-3">
+          <button
+            type="button"
+            disabled={selectedIds.length === 0}
+            onClick={() => askDelete(selectedIds)}
+            className="h-11 w-full rounded-xl bg-danger font-semibold text-white disabled:opacity-40"
+          >
+            {t.deleteChat}
+            {selectedIds.length ? ` · ${selectedIds.length}` : ""}
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 
@@ -1093,8 +1168,38 @@ export function MessengerApp() {
         </div>
       ) : null}
 
+      {pendingDelete.length ? (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 px-4 pb-6" onClick={() => setPendingDelete([])}>
+          <div className="w-full max-w-md rounded-2xl bg-elevated p-4" onClick={(e) => e.stopPropagation()}>
+            <p className="text-base font-semibold text-ink">
+              {pendingDelete.length > 1
+                ? t.confirmHideMany
+                : chats.find((chat) => chat.id === pendingDelete[0])?.type === "group"
+                  ? t.confirmLeaveList
+                  : t.confirmHideChat}
+            </p>
+            <div className="mt-4 flex gap-2">
+              <button
+                type="button"
+                onClick={() => setPendingDelete([])}
+                className="h-11 flex-1 rounded-xl bg-bg font-semibold text-ink"
+              >
+                {t.cancel}
+              </button>
+              <button
+                type="button"
+                onClick={() => void removeListChats(pendingDelete)}
+                className="h-11 flex-1 rounded-xl bg-danger font-semibold text-white"
+              >
+                {t.delete}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {chatMenu ? (
-        <div className="fixed inset-0 z-30 flex items-end justify-center bg-black/50 px-4 pb-6" onClick={() => setChatMenu(null)}>
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 px-4 pb-6" onClick={() => setChatMenu(null)}>
           <div className="w-full max-w-md rounded-2xl bg-elevated p-2" onClick={(e) => e.stopPropagation()}>
             <p className="truncate px-3 py-2 font-semibold text-ink">{chatMenu.title}</p>
             {chatMenu.type === "group" ? (
@@ -1112,7 +1217,7 @@ export function MessengerApp() {
             ) : null}
             <button
               type="button"
-              onClick={() => void removeListChat(chatMenu)}
+              onClick={() => askDelete([chatMenu.id])}
               className="flex h-11 w-full items-center rounded-xl px-3 text-left font-medium text-danger"
             >
               {t.deleteChat}
