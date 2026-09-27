@@ -28,7 +28,7 @@ final class APIClient {
         return e
     }()
 
-    init(baseURL: URL = URL(string: "https://too-app.ru")!) {
+    init(baseURL: URL = URL(string: "https://salam-chat.ru")!) {
         self.baseURL = baseURL
     }
 

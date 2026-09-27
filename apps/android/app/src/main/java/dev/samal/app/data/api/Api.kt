@@ -118,7 +118,7 @@ class SamalApi(
                 || Build.HARDWARE.contains("goldfish")
                 || Build.PRODUCT.contains("sdk")
             // Physical USB device: adb reverse tcp:8080 tcp:8080
-            return if (emulator) "http://10.0.2.2:3000" else "https://too-app.ru"
+            return if (emulator) "http://10.0.2.2:3000" else "https://salam-chat.ru"
         }
     }
 }

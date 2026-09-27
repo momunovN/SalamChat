@@ -1,4 +1,4 @@
-"app.name" = "TooApp";
+"app.name" = "Salam";
 "tab.chats" = "Чаттар";
 "tab.calls" = "Чалуулар";
 "tab.contacts" = "Байланыштар";
@@ -23,7 +23,7 @@
 "attach.file" = "Файл";
 "attach.geo" = "Гео";
 "auth.phone_title" = "Телефон номери";
-"auth.phone_subtitle" = "TooApp SMS менен код жөнөтөт";
+"auth.phone_subtitle" = "Salam SMS менен код жөнөтөт";
 "auth.country_kg" = "Кыргызстан";
 "auth.country_ru" = "Россия";
 "auth.continue" = "Улантуу";
@@ -36,5 +36,5 @@
 "auth.nick_optional" = "Ник (милдеттүү эмес)";
 "auth.nick_hint" = "Сизди @nickname менен табышат";
 "auth.sync_contacts" = "Контакттарды синхрондоо";
-"contacts.sync_hint" = "Синхрондоону күйгүзүңүз — TooApp’тагы достор ушул жерде жана сайтта чыгат.";
+"contacts.sync_hint" = "Синхрондоону күйгүзүңүз — Salam’дагы достор ушул жерде жана сайтта чыгат.";
 "auth.err_name" = "Атын жазыңыз — эки тамгадан кем эмес";

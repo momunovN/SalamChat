@@ -1,4 +1,4 @@
-"app.name" = "TooApp";
+"app.name" = "Salam";
 "tab.chats" = "Чаты";
 "tab.calls" = "Звонки";
 "tab.contacts" = "Контакты";
@@ -23,7 +23,7 @@
 "attach.file" = "Файл";
 "attach.geo" = "Гео";
 "auth.phone_title" = "Номер телефона";
-"auth.phone_subtitle" = "TooApp отправит SMS с кодом";
+"auth.phone_subtitle" = "Salam отправит SMS с кодом";
 "auth.country_kg" = "Кыргызстан";
 "auth.country_ru" = "Россия";
 "auth.continue" = "Продолжить";
@@ -36,5 +36,5 @@
 "auth.nick_optional" = "Ник (необязательно)";
 "auth.nick_hint" = "По нему можно найти вас: @nickname";
 "auth.sync_contacts" = "Синхронизировать контакты";
-"contacts.sync_hint" = "Включите синхронизацию контактов — друзья из TooApp появятся здесь и на сайте.";
+"contacts.sync_hint" = "Включите синхронизацию контактов — друзья из Salam появятся здесь и на сайте.";
 "auth.err_name" = "Введите имя — не меньше двух букв";

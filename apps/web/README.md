@@ -1,4 +1,4 @@
-# TooApp Web + API
+# Salam Web + API
 
 Веб-мессенджер и тот же REST/realtime API, что и у iOS/Android.
 

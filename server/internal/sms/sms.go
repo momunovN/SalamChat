@@ -41,7 +41,7 @@ func New(cfg config.Config, log *slog.Logger) Sender {
 				q := url.Values{
 					"api_id": {cfg.SMSAPIKey},
 					"to":     {digits(phone)},
-					"msg":    {"TooApp: " + code},
+					"msg":    {"Salam: " + code},
 					"json":   {"1"},
 				}
 				if sender := strings.TrimSpace(cfg.SMSSender); sender != "" && !strings.EqualFold(sender, "TooApp") && !strings.EqualFold(sender, "SAMAL") {
@@ -70,7 +70,7 @@ func New(cfg config.Config, log *slog.Logger) Sender {
 					"login":  {cfg.SMSLogin},
 					"psw":    {cfg.SMSAPIKey},
 					"phones": {digits(phone)},
-					"mes":    {"TooApp: " + code},
+					"mes":    {"Salam: " + code},
 					"fmt":    {"3"},
 				}
 				if sender := strings.TrimSpace(cfg.SMSSender); sender != "" && !strings.EqualFold(sender, "TooApp") && !strings.EqualFold(sender, "SAMAL") {

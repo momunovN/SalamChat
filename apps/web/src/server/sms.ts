@@ -5,7 +5,7 @@ function digits(phone: string) {
 }
 
 function text(code: string) {
-  return `TooApp: ${code}`;
+  return `Salam: ${code}`;
 }
 
 async function sendSmsRu(phone: string, code: string) {
@@ -69,7 +69,7 @@ export async function sendOTP(phone: string, code: string) {
       await sendSmsc(phone, code);
       return "smsc";
     default:
-      console.log(`TooApp OTP ${phone} ${code}`);
+      console.log(`Salam OTP ${phone} ${code}`);
       return "stub";
   }
 }

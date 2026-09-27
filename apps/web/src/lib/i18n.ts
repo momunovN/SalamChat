@@ -1,7 +1,7 @@
 export type Lang = "ru" | "ky";
 
 const ru = {
-  app: "TooApp",
+  app: "Salam",
   tabChats: "Чаты",
   tabCalls: "Звонки",
   tabContacts: "Контакты",
@@ -22,7 +22,7 @@ const ru = {
   errNick: "Ник: латиница, 3–24 символа, начать с буквы",
   errNickTaken: "Этот ник уже занят",
   emptySynced: "Пока нет друзей из телефонной книги",
-  syncHint: "В приложении TooApp включите «Синхронизировать контакты» — кто уже в TooApp, появится здесь.",
+  syncHint: "В приложении Salam включите «Синхронизировать контакты» — кто уже в Salam, появится здесь.",
   emptyPeople: "Никого не нашли",
   searching: "Ищем…",
   nameTitle: "Как вас зовут?",
@@ -30,7 +30,7 @@ const ru = {
   namePlaceholder: "Ваше имя",
   errName: "Введите имя — не меньше двух букв",
   phoneTitle: "Номер телефона",
-  phoneSubtitle: "TooApp отправит SMS с кодом",
+  phoneSubtitle: "Salam отправит SMS с кодом",
   countryKg: "Кыргызстан",
   countryRu: "Россия",
   phonePlaceholderKg: "+996 XXX XXX XXX",
@@ -93,7 +93,7 @@ const ru = {
   memberFew: "участника",
   memberMany: "участников",
   you: "Вы",
-  apiHint: "TooApp API: /v1",
+  apiHint: "salam-chat.ru/v1",
   pickChat: "Выберите чат",
   reply: "Ответить",
   copy: "Копировать",
@@ -136,7 +136,7 @@ const ru = {
 };
 
 const ky: typeof ru = {
-  app: "TooApp",
+  app: "Salam",
   tabChats: "Чаттар",
   tabCalls: "Чалуулар",
   tabContacts: "Байланыштар",
@@ -157,7 +157,7 @@ const ky: typeof ru = {
   errNick: "Ник: латиница, 3–24 символ, тамгадан башталсын",
   errNickTaken: "Бул ник бош эмес",
   emptySynced: "Телефон китебинен достор жок",
-  syncHint: "TooApp колдонмосунда «Контакттарды синхрондоо» күйгүзүңүз — TooApp’тагылар ушул жерде чыгат.",
+  syncHint: "Salam колдонмосунда «Контакттарды синхрондоо» күйгүзүңүз — Salam’дагылар ушул жерде чыгат.",
   emptyPeople: "Эч ким табылган жок",
   searching: "Издеп жатабыз…",
   nameTitle: "Атыңыз ким?",
@@ -165,7 +165,7 @@ const ky: typeof ru = {
   namePlaceholder: "Атыңыз",
   errName: "Атын жазыңыз — эки тамгадан кем эмес",
   phoneTitle: "Телефон номери",
-  phoneSubtitle: "TooApp SMS менен код жөнөтөт",
+  phoneSubtitle: "Salam SMS менен код жөнөтөт",
   countryKg: "Кыргызстан",
   countryRu: "Россия",
   phonePlaceholderKg: "+996 XXX XXX XXX",
@@ -228,7 +228,7 @@ const ky: typeof ru = {
   memberFew: "катышуучу",
   memberMany: "катышуучу",
   you: "Сиз",
-  apiHint: "TooApp API: /v1",
+  apiHint: "salam-chat.ru/v1",
   pickChat: "Чатты тандаңыз",
   reply: "Жооп",
   copy: "Көчүрүү",

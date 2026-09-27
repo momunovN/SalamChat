@@ -1,6 +1,6 @@
-# Деплой TooApp на RelaxDev
+# Деплой Salam (salam-chat) на RelaxDev
 
-Прод: **https://too-app.ru** (сайт и `/v1` на одном домене). Health: `GET https://too-app.ru/healthz`.
+Прод: **https://salam-chat.ru** (сайт и `/v1` на одном домене). Health: `GET https://salam-chat.ru/healthz`.
 
 Сайт и API живут вместе. После деплоя:
 
@@ -31,7 +31,7 @@
 
 | Ключ | Значение |
 |---|---|
-| `TOOAPP_PUBLIC_URL` | `https://<имя>.relaxdev.ru` |
+| `TOOAPP_PUBLIC_URL` | `https://salam-chat.ru` |
 | `TOOAPP_JWT_SECRET` | длинный случайный секрет |
 | `TOOAPP_OTP_DEV` | `false` в проде |
 | `DATABASE_URL` | строка Postgres |

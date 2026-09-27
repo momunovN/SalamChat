@@ -1,14 +1,14 @@
 ---
 name: too-app
-description: Rules and handoff for TooApp messenger (too-app.ru, repo momunovN/tooApp). Use when building, fixing, deploying, or renaming Too / TooApp / Samal Android iOS web Go chat, OTP, WebSocket, RelaxDev, Neon, Gradle JDK.
+description: Rules and handoff for Salam messenger (salam-chat.ru, repo momunovN/tooApp). Use when building, fixing, deploying, or renaming Salam / salam-chat / TooApp / Samal Android iOS web Go chat, OTP, WebSocket, RelaxDev, Neon, Gradle JDK.
 ---
 
-# TooApp agent skill
+# Salam agent skill
 
 Work as staff engineer on https://github.com/momunovN/tooApp. Read /HANDOFF.md before large changes.
 
 ## Product
-- Name in UI: Too
+- Name in headers: Salam. Site: salam-chat.ru
 - Market: Kyrgyzstan. UI languages: ru + ky
 - Native apps + Next.js web on the same /v1 API
 - Fast like Telegram. Optimistic send. No phone-to-Postgres
@@ -20,7 +20,7 @@ Work as staff engineer on https://github.com/momunovN/tooApp. Read /HANDOFF.md b
 - Animate only opacity/transform, max 160ms
 - New messages need client_id for idempotency
 - Media metadata in Postgres, blobs in object storage
-- Do not invent a fourth brand name. Too is current. Samal/Bluepeak are legacy
+- Do not invent another brand name. Headers say Salam. The site is salam-chat.ru. TooApp/Samal/Bluepeak are legacy
 
 ## Where to edit
 - Android: apps/android — package still dev.samal.app
@@ -33,4 +33,4 @@ Work as staff engineer on https://github.com/momunovN/tooApp. Read /HANDOFF.md b
 Gradle JDK must be Temurin 21. Reject 25/27 and jbr-17 Invalid.
 
 ## Deploy
-Root on RelaxDev is apps/web. Prod URL https://too-app.ru. Health GET /healthz.
+Root on RelaxDev is apps/web. Prod URL https://salam-chat.ru. Health GET /healthz.

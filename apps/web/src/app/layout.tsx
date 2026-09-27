@@ -8,9 +8,9 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "TooApp",
-  description: "TooApp — мессенджер. Веб и API /v1.",
-  appleWebApp: { capable: true, title: "TooApp", statusBarStyle: "black-translucent" },
+  title: "Salam",
+  description: "Salam — мессенджер. salam-chat.ru",
+  appleWebApp: { capable: true, title: "Salam", statusBarStyle: "black-translucent" },
 };
 
 export const viewport: Viewport = {

@@ -1201,7 +1201,7 @@ export function MessengerApp() {
       style={{ paddingTop: "env(safe-area-inset-top)", paddingBottom: "env(safe-area-inset-bottom)" }}
     >
       <aside className="hidden w-16 flex-col items-center gap-2 border-r border-line bg-elevated py-4 md:flex">
-        <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-2xl bg-accent text-sm font-bold">T</div>
+        <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-2xl bg-accent text-sm font-bold">S</div>
         {navBtn("chats", <MessageSquare size={20} />, t.tabChats)}
         {navBtn("calls", <Phone size={20} />, t.tabCalls)}
         {navBtn("contacts", <Users size={20} />, t.tabContacts)}

@@ -21,7 +21,7 @@ targets:
     info:
       path: SAMAL/Info.plist
       properties:
-        CFBundleDisplayName: TooApp
+        CFBundleDisplayName: Salam
         CFBundleShortVersionString: "0.1.0"
         CFBundleVersion: "1"
         UILaunchScreen: {}
@@ -29,11 +29,11 @@ targets:
           - UIInterfaceOrientationPortrait
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
-        NSMicrophoneUsageDescription: TooApp использует микрофон для голосовых сообщений и звонков.
-        NSCameraUsageDescription: TooApp использует камеру для фото, видео и видеозвонков.
-        NSPhotoLibraryUsageDescription: TooApp прикрепляет фото и видео из галереи.
-        NSLocationWhenInUseUsageDescription: TooApp может отправить геолокацию в чат.
-        NSContactsUsageDescription: TooApp находит друзей среди контактов телефона.
+        NSMicrophoneUsageDescription: Salam использует микрофон для голосовых сообщений и звонков.
+        NSCameraUsageDescription: Salam использует камеру для фото, видео и видеозвонков.
+        NSPhotoLibraryUsageDescription: Salam прикрепляет фото и видео из галереи.
+        NSLocationWhenInUseUsageDescription: Salam может отправить геолокацию в чат.
+        NSContactsUsageDescription: Salam находит друзей среди контактов телефона.
         UIStatusBarStyle: UIStatusBarStyleLightContent
         UIViewControllerBasedStatusBarAppearance: true
     settings:

@@ -1,12 +1,12 @@
-# Handoff — TooApp (too-app.ru)
+# Handoff — Salam (salam-chat.ru)
 
 **Дата:** 2026-09-27
 **Ветка:** `main`
 **Репо:** https://github.com/momunovN/tooApp
-**Сайт / API:** https://too-app.ru
+**Сайт / API:** https://salam-chat.ru
 **Прод:** RelaxDev + Neon PostgreSQL
 **Figma:** https://www.figma.com/design/1MlHF63Z8m006x2gD47zCQ
-**Бренд:** Too (кыргызское «тоо» — гора). В коде ещё встречаются Samal / SAMAL / Bluepeak — старые имена, не плодить новые.
+**Бренд:** в шапках сайта «Salam», адрес salam-chat.ru. В коде ещё встречаются TooApp / Samal / SAMAL — старые имена, не плодить новые.
 
 ---
 
