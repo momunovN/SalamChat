@@ -137,6 +137,9 @@ export const api = {
     request<Chat>("/v1/chats/direct", { method: "POST", body: JSON.stringify({ user_id: userId }) }),
   group: (title: string, memberIds: string[]) =>
     request<Chat>("/v1/chats/groups", { method: "POST", body: JSON.stringify({ title, member_ids: memberIds }) }),
+  hideChat: (chatId: string) => request<{ ok: boolean }>(`/v1/chats/${chatId}`, { method: "DELETE" }),
+  renameChat: (chatId: string, title: string) =>
+    request<Chat>(`/v1/chats/${chatId}`, { method: "PATCH", body: JSON.stringify({ title }) }),
   users: (q: string) =>
     request<{ items: User[] }>(`/v1/users?q=${encodeURIComponent(q)}`).then((r) => ({ items: r.items ?? [] })),
   contacts: () =>

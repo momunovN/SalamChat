@@ -172,6 +172,7 @@ export async function listChats(userId: string, q = "", kind = "") {
         SELECT count(*) FROM messages msg
         WHERE msg.chat_id=c.id AND msg.deleted_at IS NULL
           AND msg.author_id IS DISTINCT FROM $1
+          AND (cm.cleared_at IS NULL OR msg.created_at > cm.cleared_at)
           AND (cm.last_read_at IS NULL OR msg.created_at > cm.last_read_at)
       ),0) AS unread,
       peer.id AS peer_id, peer.phone AS peer_phone, peer.display_name AS peer_display_name,
@@ -193,11 +194,13 @@ export async function listChats(userId: string, q = "", kind = "") {
       SELECT id, chat_id, author_id, type, payload, client_id, reply_to_id, created_at, edited_at, deleted_at
       FROM messages
       WHERE chat_id = c.id AND deleted_at IS NULL
+        AND (cm.cleared_at IS NULL OR created_at > cm.cleared_at)
       ORDER BY created_at DESC
       LIMIT 1
     ) lm ON true
     LEFT JOIN users lma ON lma.id = lm.author_id
     WHERE cm.user_id = $1
+      AND cm.hidden_at IS NULL
       AND ($2 = '' OR c.type = $2)
       AND (
         $3 = '' OR
@@ -249,7 +252,14 @@ export async function directChat(me: string, peer: string) {
   const [a, b] = me < peer ? [me, peer] : [peer, me];
   const key = `${a}:${b}`;
   const existing = await queryOne<{ id: string }>(`SELECT id FROM chats WHERE peer_key=$1`, [key]);
-  if (existing) return getChat(me, existing.id);
+  if (existing) {
+    await query(
+      `INSERT INTO chat_members (chat_id, user_id, role) VALUES ($1,$2,'member')
+       ON CONFLICT (chat_id, user_id) DO UPDATE SET hidden_at = NULL`,
+      [existing.id, me],
+    );
+    return getChat(me, existing.id);
+  }
   const chatId = crypto.randomUUID();
   try {
     await query(`INSERT INTO chats (id, type, created_by, peer_key) VALUES ($1,'direct',$2,$3)`, [chatId, me, key]);
@@ -286,6 +296,44 @@ export async function createGroup(me: string, title: string, memberIds: string[]
   }
   await rememberMembers(chatId, members).catch(() => undefined);
   return getChat(me, chatId);
+}
+
+export async function unhideChat(chatId: string) {
+  await query(`UPDATE chat_members SET hidden_at = NULL WHERE chat_id=$1 AND hidden_at IS NOT NULL`, [chatId]);
+}
+
+export async function clearedAt(chatId: string, userId: string) {
+  const row = await queryOne<{ cleared_at: Date | string | null }>(
+    `SELECT cleared_at FROM chat_members WHERE chat_id=$1 AND user_id=$2`,
+    [chatId, userId],
+  );
+  if (!row?.cleared_at) return null;
+  const date = new Date(row.cleared_at);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+export async function hideChat(userId: string, chatId: string) {
+  await mustMember(chatId, userId);
+  const chat = await queryOne<{ type: string }>(`SELECT type FROM chats WHERE id=$1`, [chatId]);
+  if (!chat) throw new HttpError(404, "not_found", "not found");
+  if (chat.type === "group") return removeMember(userId, chatId, userId);
+  await query(`UPDATE chat_members SET hidden_at=now(), cleared_at=now() WHERE chat_id=$1 AND user_id=$2`, [
+    chatId,
+    userId,
+  ]);
+  return { ok: true };
+}
+
+export async function renameChat(userId: string, chatId: string, title: string) {
+  title = title.trim();
+  if (!title || [...title].length > 80) throw new HttpError(400, "bad_request", "title length");
+  const chat = await queryOne<{ type: string }>(`SELECT type FROM chats WHERE id=$1`, [chatId]);
+  if (!chat) throw new HttpError(404, "not_found", "not found");
+  if (chat.type !== "group") throw new HttpError(400, "bad_request", "not a group");
+  const role = await memberRole(chatId, userId);
+  if (!canManageMembers(role)) throw new HttpError(403, "forbidden", "forbidden");
+  await query(`UPDATE chats SET title=$2, updated_at=now() WHERE id=$1`, [chatId, title]);
+  return getChat(userId, chatId);
 }
 
 export async function mustMember(chatId: string, userId: string) {

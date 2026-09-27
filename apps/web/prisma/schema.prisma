@@ -103,6 +103,8 @@ model ChatMember {
   mutedUntil         DateTime? @map("muted_until") @db.Timestamptz(6)
   lastReadAt         DateTime? @map("last_read_at") @db.Timestamptz(6)
   lastReadMessageId  String?   @map("last_read_message_id") @db.Uuid
+  hiddenAt           DateTime? @map("hidden_at") @db.Timestamptz(6)
+  clearedAt          DateTime? @map("cleared_at") @db.Timestamptz(6)
 
   chat Chat @relation(fields: [chatId], references: [id], onDelete: Cascade)
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)

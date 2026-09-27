@@ -12,10 +12,12 @@ import {
   createGroup,
   directChat,
   getChat,
+  hideChat,
   listChats,
   listMembers,
   markRead,
   removeMember,
+  renameChat,
 } from "./chats";
 import {
   answerCall,
@@ -150,9 +152,26 @@ async function dispatch(method: string, parts: string[], req: Request, url: URL)
   }
   {
     const m = p("chats/:chatID");
+    if (m && !UUID.test(m.chatID)) throw new HttpError(400, "bad_id", "invalid chat id");
     if (method === "GET" && m) {
-      if (!UUID.test(m.chatID)) throw new HttpError(400, "bad_id", "invalid chat id");
       return json(200, await getChat(auth.userId, m.chatID));
+    }
+    if (method === "DELETE" && m) {
+      const out = await hideChat(auth.userId, m.chatID);
+      try {
+        const ids = await (await import("./chats")).memberIds(m.chatID);
+        hub.publishMany([...new Set([...ids, auth.userId])], envelope("chat.updated", { chat_id: m.chatID }));
+      } catch {
+        hub.publish(auth.userId, envelope("chat.updated", { chat_id: m.chatID }));
+      }
+      return json(200, out);
+    }
+    if (method === "PATCH" && m) {
+      const body = await readJSON<{ title?: string }>(req);
+      const chat = await renameChat(auth.userId, m.chatID, body.title || "");
+      const ids = await (await import("./chats")).memberIds(m.chatID);
+      hub.publishMany(ids, envelope("chat.updated", { chat_id: m.chatID }));
+      return json(200, chat);
     }
   }
   {

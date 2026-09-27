@@ -6,6 +6,7 @@ import {
   Languages,
   LogOut,
   MessageSquare,
+  MoreHorizontal,
   Pencil,
   Phone,
   Search,
@@ -15,7 +16,7 @@ import {
   X,
 } from "lucide-react";
 import { api, loadSession, saveSession } from "@/lib/api";
-import { dedupeMessages, mergeChats, mergeThread, readActive, readRoster, readThread, writeActive, writeRoster, writeThread } from "@/lib/cache";
+import { dedupeMessages, forgetChat, mergeChats, mergeThread, readActive, readRoster, readThread, writeActive, writeRoster, writeThread } from "@/lib/cache";
 import { captureAudio, captureVideo, forgetMedia, mediaRemembered, rememberMedia, stopCallMedia, warmCallConnection, type CallMedia } from "@/lib/callMedia";
 import { lastPreview } from "@/lib/chat";
 import { dict, type Lang } from "@/lib/i18n";
@@ -72,6 +73,9 @@ export function MessengerApp() {
   const [typing, setTyping] = useState<Record<string, number>>({});
   const [typingNow, setTypingNow] = useState(0);
   const [newOpen, setNewOpen] = useState<"direct" | "group" | null>(null);
+  const [chatMenu, setChatMenu] = useState<Chat | null>(null);
+  const [rename, setRename] = useState<Chat | null>(null);
+  const [renameTitle, setRenameTitle] = useState("");
   const [groupTitle, setGroupTitle] = useState("");
   const [picked, setPicked] = useState<string[]>([]);
   const [name, setName] = useState("");
@@ -88,6 +92,7 @@ export function MessengerApp() {
   const allowingRef = useRef(false);
   const pendingStart = useRef<(() => Promise<Call>) | null>(null);
   const pendingAudio = useRef<MediaStreamTrack | null>(null);
+  const navLock = useRef(false);
   const errorTimer = useRef<number | null>(null);
 
   const active = chats.find((c) => c.id === activeId) || null;
@@ -571,20 +576,64 @@ export function MessengerApp() {
   }
 
   async function openDirect(userId: string) {
-    const chat = await api.direct(userId);
-    await refreshChats();
-    selectChat(chat.id);
-    setNewOpen(null);
+    if (navLock.current) return;
+    navLock.current = true;
+    try {
+      const chat = await api.direct(userId);
+      await refreshChats();
+      selectChat(chat.id);
+      setNewOpen(null);
+    } finally {
+      navLock.current = false;
+    }
   }
 
   async function createGroup() {
-    if (!groupTitle.trim()) return;
-    const chat = await api.group(groupTitle.trim(), picked);
-    await refreshChats();
-    selectChat(chat.id);
-    setNewOpen(null);
-    setGroupTitle("");
-    setPicked([]);
+    const title = groupTitle.trim();
+    if (!title || navLock.current) return;
+    navLock.current = true;
+    try {
+      const chat = await api.group(title, picked);
+      await refreshChats();
+      selectChat(chat.id);
+      setNewOpen(null);
+      setGroupTitle("");
+      setPicked([]);
+    } finally {
+      navLock.current = false;
+    }
+  }
+
+  async function removeListChat(chat: Chat) {
+    const ok = window.confirm(chat.type === "group" ? t.confirmLeaveList : t.confirmHideChat);
+    if (!ok || navLock.current) return;
+    navLock.current = true;
+    setChatMenu(null);
+    try {
+      await api.hideChat(chat.id);
+      if (me) forgetChat(me, chat.id);
+      setChats((prev) => prev.filter((item) => item.id !== chat.id));
+      if (activeId === chat.id) {
+        setActiveId(null);
+        setMessages([]);
+      }
+    } finally {
+      navLock.current = false;
+    }
+  }
+
+  async function saveRename() {
+    if (!rename || navLock.current) return;
+    const title = renameTitle.trim();
+    if (!title) return;
+    navLock.current = true;
+    try {
+      await api.renameChat(rename.id, title);
+      setRename(null);
+      await refreshChats();
+    } finally {
+      navLock.current = false;
+    }
   }
 
   function logout() {
@@ -735,10 +784,18 @@ export function MessengerApp() {
         ) : null}
         {tab === "chats"
           ? chats.map((c) => (
-              <button
+              <div
                 key={c.id}
-                type="button"
+                role="button"
+                tabIndex={0}
                 onClick={() => selectChat(c.id)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") selectChat(c.id);
+                }}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  setChatMenu(c);
+                }}
                 className={`flex w-full items-center gap-3 px-4 py-[10px] text-left transition-colors ${
                   activeId === c.id ? "bg-elevated" : "hover:bg-elevated/60"
                 }`}
@@ -748,6 +805,17 @@ export function MessengerApp() {
                   <div className="flex items-center gap-2">
                     <p className="min-w-0 flex-1 truncate text-[17px] font-semibold text-ink">{c.title}</p>
                     <span className="text-[12px] font-medium text-muted">{fmtTime(c.updated_at)}</span>
+                    <button
+                      type="button"
+                      aria-label={t.edit}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setChatMenu(c);
+                      }}
+                      className="flex h-8 w-8 items-center justify-center rounded-full text-muted"
+                    >
+                      <MoreHorizontal size={18} />
+                    </button>
                   </div>
                   <div className="mt-0.5 flex items-center gap-2">
                     <p className="min-w-0 flex-1 truncate text-sm text-muted">
@@ -762,7 +830,7 @@ export function MessengerApp() {
                     ) : null}
                   </div>
                 </div>
-              </button>
+              </div>
             ))
           : null}
 
@@ -1014,12 +1082,63 @@ export function MessengerApp() {
             {newOpen === "group" ? (
               <button
                 type="button"
+                disabled={!groupTitle.trim()}
                 onClick={() => void createGroup()}
-                className="mt-4 h-11 w-full rounded-xl bg-accent font-semibold"
+                className="mt-4 h-11 w-full rounded-xl bg-accent font-semibold disabled:opacity-40"
               >
                 {t.create}
               </button>
             ) : null}
+          </div>
+        </div>
+      ) : null}
+
+      {chatMenu ? (
+        <div className="fixed inset-0 z-30 flex items-end justify-center bg-black/50 px-4 pb-6" onClick={() => setChatMenu(null)}>
+          <div className="w-full max-w-md rounded-2xl bg-elevated p-2" onClick={(e) => e.stopPropagation()}>
+            <p className="truncate px-3 py-2 font-semibold text-ink">{chatMenu.title}</p>
+            {chatMenu.type === "group" ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setRenameTitle(chatMenu.title);
+                  setRename(chatMenu);
+                  setChatMenu(null);
+                }}
+                className="flex h-11 w-full items-center rounded-xl px-3 text-left font-medium text-ink"
+              >
+                {t.rename}
+              </button>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => void removeListChat(chatMenu)}
+              className="flex h-11 w-full items-center rounded-xl px-3 text-left font-medium text-danger"
+            >
+              {t.deleteChat}
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {rename ? (
+        <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/50 px-4 pb-6" onClick={() => setRename(null)}>
+          <div className="w-full max-w-md rounded-2xl bg-elevated p-4" onClick={(e) => e.stopPropagation()}>
+            <p className="mb-3 font-semibold text-ink">{t.rename}</p>
+            <input
+              value={renameTitle}
+              onChange={(e) => setRenameTitle(e.target.value)}
+              placeholder={t.newTitle}
+              className="mb-3 h-11 w-full rounded-xl bg-bg px-3 text-ink outline-none"
+            />
+            <button
+              type="button"
+              disabled={!renameTitle.trim()}
+              onClick={() => void saveRename()}
+              className="h-11 w-full rounded-xl bg-accent font-semibold disabled:opacity-40"
+            >
+              {t.save}
+            </button>
           </div>
         </div>
       ) : null}

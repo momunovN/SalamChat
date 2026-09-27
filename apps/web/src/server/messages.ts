@@ -17,9 +17,11 @@ import {
 } from "./valkey";
 import {
   canManageMembers,
+  clearedAt,
   memberIds,
   memberRole,
   mustMember,
+  unhideChat,
   parsePayload,
   type Attachment,
   type Message,
@@ -167,15 +169,17 @@ export async function listMessages(userId: string, chatId: string, q = "", curso
   q = q.trim();
   const before = cursor ? new Date(cursor) : new Date(Date.now() + 60 * 60 * 1000);
   if (Number.isNaN(before.getTime())) throw new HttpError(400, "bad_request", "bad cursor");
+  const cleared = await clearedAt(chatId, userId);
   const rows = await query<MsgRow>(
     `SELECT ${MSG_COLS}
      FROM messages m
      LEFT JOIN users u ON u.id = m.author_id
      WHERE m.chat_id=$1 AND m.created_at < $2 AND m.deleted_at IS NULL
+       AND ($5::timestamptz IS NULL OR m.created_at > $5::timestamptz)
        AND ($3 = '' OR (m.payload->>'text') ILIKE '%'||$3||'%')
      ORDER BY m.created_at DESC
      LIMIT $4`,
-    [chatId, before.toISOString(), q, limit + 1],
+    [chatId, before.toISOString(), q, limit + 1, cleared],
   );
   let next: string | undefined;
   let pgItems = rows.map(mapMsg);
@@ -199,6 +203,7 @@ export async function listMessages(userId: string, chatId: string, q = "", curso
       }
       if (!msg?.id || seen.has(msg.id) || msg.deleted_at) continue;
       if (msg.client_id && pgItems.some((item) => item.client_id === msg.client_id)) continue;
+      if (cleared && msg.created_at <= cleared) continue;
       if (new Date(msg.created_at) >= before) continue;
       if (needle) {
         const text = String(parsePayload(msg.payload).text || "").toLowerCase();
@@ -335,6 +340,7 @@ export async function sendMessage(userId: string, chatId: string, input: SendInp
     }),
   ]);
   if (!members.includes(userId)) throw new HttpError(403, "forbidden", "forbidden");
+  await unhideChat(chatId);
   if (dupRaw) {
     const dup = JSON.parse(dupRaw) as Message;
     if (dup.chat_id === chatId) return dup;
@@ -394,6 +400,7 @@ async function sendMessagePg(
   req?: Request,
 ): Promise<Message> {
   await mustMember(chatId, userId);
+  await unhideChat(chatId);
   const { type, payload, voiceMs } = prepared;
 
   if (input.reply_to_id) await replyPreview(chatId, input.reply_to_id);

@@ -183,6 +183,14 @@ export function writeThread(userId: string, chatId: string, messages: Message[])
   write(userId, store);
 }
 
+export function forgetChat(userId: string, chatId: string) {
+  const store = read(userId);
+  store.chats = store.chats.filter((chat) => chat.id !== chatId);
+  delete store.threads[chatId];
+  if (store.activeId === chatId) store.activeId = null;
+  write(userId, store);
+}
+
 export function writeActive(userId: string, chatId: string | null) {
   const store = read(userId);
   store.activeId = chatId;

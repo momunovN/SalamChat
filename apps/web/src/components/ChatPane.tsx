@@ -107,6 +107,7 @@ export function ChatPane({
   const meterRef = useRef<number>(0);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const samplesRef = useRef<number[]>([]);
+  const actionLock = useRef(false);
   const addSearch = useUserSearch(adding ? addQ : "", me);
 
   const myRole = members.find((m) => m.user.id === me)?.role || "member";
@@ -193,9 +194,15 @@ export function ChatPane({
     };
   }
 
+  function takeAction() {
+    if (actionLock.current) return false;
+    actionLock.current = true;
+    return true;
+  }
+
   async function send() {
     const trimmed = text.trim();
-    if (!trimmed) return;
+    if (!trimmed || !takeAction()) return;
     if (editing) {
       const id = editing.id;
       setText("");
@@ -206,6 +213,8 @@ export function ChatPane({
         onRefreshChats();
       } catch {
         /* keep old */
+      } finally {
+        actionLock.current = false;
       }
       return;
     }
@@ -234,11 +243,13 @@ export function ChatPane({
       onRefreshChats();
     } catch {
       setMessages((prev) => prev.map((m) => (m.client_id === clientId ? { ...m, status: "failed" } : m)));
+    } finally {
+      actionLock.current = false;
     }
   }
 
   async function retry(m: Message) {
-    if (m.status !== "failed") return;
+    if (m.status !== "failed" || !takeAction()) return;
     const saved = voiceBlobs.current.get(m.client_id);
     setMessages((prev) => prev.map((x) => (x.id === m.id ? { ...x, status: "sending" } : x)));
     try {
@@ -266,6 +277,8 @@ export function ChatPane({
       onRefreshChats();
     } catch {
       setMessages((prev) => prev.map((x) => (x.client_id === m.client_id ? { ...x, status: "failed" } : x)));
+    } finally {
+      actionLock.current = false;
     }
   }
 
@@ -395,7 +408,9 @@ export function ChatPane({
   }
 
   async function sendVoice(blob: Blob, durationMs: number, waveform: number[]) {
+    if (!takeAction()) return;
     if (durationMs < 500 || blob.size < 80) {
+      actionLock.current = false;
       noteVoiceError(durationMs >= 500 ? t.voiceFail : t.voiceShort);
       return;
     }
@@ -434,11 +449,13 @@ export function ChatPane({
       noteVoiceError(t.voiceFail);
       setMessages((prev) => prev.map((m) => (m.client_id === clientId ? { ...m, status: "failed" } : m)));
     } finally {
+      actionLock.current = false;
       setBusy(false);
     }
   }
 
   async function sendFile(file: File, kind: "photo" | "file") {
+    if (!takeAction()) return;
     setAttach(false);
     setBusy(true);
     try {
@@ -452,6 +469,7 @@ export function ChatPane({
     } catch {
       /* ignore */
     } finally {
+      actionLock.current = false;
       setBusy(false);
     }
   }
