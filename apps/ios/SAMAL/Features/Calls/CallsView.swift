@@ -3,11 +3,15 @@ import SwiftUI
 struct CallsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(L10n.tabCalls)
-                .font(SamalFont.title())
-                .foregroundStyle(SamalColor.text)
-                .padding(.horizontal, 16)
-                .padding(.top, 8)
+            HStack(spacing: 10) {
+                SalamLogo(size: 36)
+                Text(L10n.tabCalls)
+                    .font(SamalFont.title())
+                    .foregroundStyle(SamalColor.text)
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -66,10 +70,14 @@ struct ContactsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(L10n.tabContacts)
-                .font(SamalFont.title())
-                .foregroundStyle(SamalColor.text)
-                .padding(16)
+            HStack(spacing: 10) {
+                SalamLogo(size: 36)
+                Text(L10n.tabContacts)
+                    .font(SamalFont.title())
+                    .foregroundStyle(SamalColor.text)
+                Spacer()
+            }
+            .padding(16)
             if items.isEmpty {
                 Text(L10n.syncHint)
                     .font(SamalFont.subhead())
@@ -112,7 +120,11 @@ struct MoreView: View {
     @EnvironmentObject var session: SessionStore
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text(L10n.tabMore).font(SamalFont.title()).foregroundStyle(SamalColor.text)
+            HStack(spacing: 10) {
+                SalamLogo(size: 36)
+                Text(L10n.tabMore).font(SamalFont.title()).foregroundStyle(SamalColor.text)
+                Spacer()
+            }
             Text(session.user?.displayName ?? "")
                 .font(SamalFont.headline())
                 .foregroundStyle(SamalColor.text)

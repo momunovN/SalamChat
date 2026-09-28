@@ -36,6 +36,7 @@ import {
 import { formatPhone } from "@/lib/phone";
 import type { Call, Chat, Envelope, Message, Session, User } from "@/lib/types";
 import { Avatar } from "./Avatar";
+import { BrandMark } from "./BrandMark";
 import { CallRoom, IncomingCall } from "./CallRoom";
 import { ChatPane } from "./ChatPane";
 import { NameOnboarding } from "./NameOnboarding";
@@ -907,9 +908,12 @@ export function MessengerApp() {
   const listPanel = (
     <div className="flex h-full min-w-0 flex-col border-r border-line bg-bg">
       <div className="flex items-center justify-between px-4 pt-3 pb-2">
-        <h1 className="text-[28px] font-bold tracking-tight text-ink">
-          {tab === "chats" ? t.app : tab === "calls" ? t.tabCalls : tab === "contacts" ? t.tabContacts : t.tabMore}
-        </h1>
+        <div className="flex min-w-0 items-center gap-2.5">
+          <BrandMark alt="" className="h-9 w-9 md:hidden" />
+          <h1 className="truncate text-[28px] font-bold tracking-tight text-ink">
+            {tab === "chats" ? t.app : tab === "calls" ? t.tabCalls : tab === "contacts" ? t.tabContacts : t.tabMore}
+          </h1>
+        </div>
         {tab === "chats" ? (
           <div className="flex items-center gap-1">
             <button
@@ -1233,7 +1237,7 @@ export function MessengerApp() {
   ) : (
     <div className="hidden flex-1 items-center justify-center bg-bg text-muted md:flex">
       <div className="text-center">
-        <MessageSquare className="mx-auto mb-3 text-accent" size={36} />
+        <BrandMark alt="" className="mx-auto mb-3 h-16 w-16" />
         <p className="text-lg font-semibold text-ink">{t.pickChat}</p>
       </div>
     </div>
@@ -1248,7 +1252,7 @@ export function MessengerApp() {
       style={{ paddingTop: "env(safe-area-inset-top)", paddingBottom: "env(safe-area-inset-bottom)" }}
     >
       <aside className="hidden w-16 flex-col items-center gap-2 border-r border-line bg-elevated py-4 md:flex">
-        <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-2xl bg-accent text-sm font-bold">S</div>
+        <BrandMark className="mb-4 h-10 w-10" />
         {navBtn("chats", <MessageSquare size={20} />, t.tabChats)}
         {navBtn("calls", <Phone size={20} />, t.tabCalls)}
         {navBtn("contacts", <Users size={20} />, t.tabContacts)}

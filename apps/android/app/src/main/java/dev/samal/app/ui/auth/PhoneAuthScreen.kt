@@ -41,6 +41,7 @@ import dev.samal.app.R
 import dev.samal.app.data.session.SessionStore
 import dev.samal.app.ui.theme.Accent
 import dev.samal.app.ui.theme.Bg
+import dev.samal.app.ui.theme.SalamLogo
 import dev.samal.app.ui.theme.Danger
 import dev.samal.app.ui.theme.Elevated
 import dev.samal.app.ui.theme.Muted
@@ -91,6 +92,8 @@ fun PhoneAuthScreen(session: SessionStore) {
             .padding(24.dp),
     ) {
         Spacer(Modifier.height(24.dp))
+        SalamLogo(72.dp)
+        Spacer(Modifier.height(16.dp))
         Text(
             stringResource(R.string.app_name),
             color = Text,

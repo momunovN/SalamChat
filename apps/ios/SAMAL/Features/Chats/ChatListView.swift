@@ -80,7 +80,8 @@ struct ChatListView: View {
     }
 
     private var header: some View {
-        HStack {
+        HStack(spacing: 10) {
+            SalamLogo(size: 36)
             Text(L10n.appName)
                 .font(SamalFont.title())
                 .foregroundStyle(SamalColor.text)

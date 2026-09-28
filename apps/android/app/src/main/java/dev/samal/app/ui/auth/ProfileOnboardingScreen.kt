@@ -44,6 +44,7 @@ import dev.samal.app.data.contacts.sanitizeUsername
 import dev.samal.app.data.session.SessionStore
 import dev.samal.app.ui.theme.Accent
 import dev.samal.app.ui.theme.Bg
+import dev.samal.app.ui.theme.SalamLogo
 import dev.samal.app.ui.theme.Danger
 import dev.samal.app.ui.theme.Muted
 import dev.samal.app.ui.theme.Text
@@ -109,6 +110,8 @@ fun ProfileOnboardingScreen(session: SessionStore) {
             .padding(24.dp),
     ) {
         Spacer(Modifier.height(24.dp))
+        SalamLogo(72.dp)
+        Spacer(Modifier.height(16.dp))
         Text(stringResource(R.string.app_name), color = Text, fontSize = 28.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(16.dp))
         Text(stringResource(R.string.name_title), color = Text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)

@@ -6,6 +6,7 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -25,8 +26,12 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import dev.samal.app.data.db.ChatEntity
 import dev.samal.app.data.contacts.needsDisplayName
 import dev.samal.app.ui.auth.PhoneAuthScreen
@@ -38,6 +43,7 @@ import dev.samal.app.ui.theme.Accent
 import dev.samal.app.ui.theme.Bg
 import dev.samal.app.ui.theme.Elevated
 import dev.samal.app.ui.theme.Muted
+import dev.samal.app.ui.theme.SalamLogo
 import dev.samal.app.ui.theme.SamalTheme
 import dev.samal.app.ui.theme.Text
 
@@ -73,15 +79,23 @@ private fun MainShell(app: SamalApp) {
             } else when (tab) {
                 0 -> ChatListScreen(app.db.dao()) { open = it }
                 2 -> ContactsScreen(app.api) { /* open chat by user id later */ }
-                else -> Text(
-                    listOf(
-                        stringResource(R.string.tab_calls),
-                        stringResource(R.string.tab_contacts),
-                        stringResource(R.string.tab_more),
-                    ).getOrElse(tab - 1) { "" },
-                    color = Text,
-                    modifier = Modifier.padding(),
-                )
+                else -> Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                ) {
+                    SalamLogo(36.dp)
+                    Text(
+                        listOf(
+                            stringResource(R.string.tab_calls),
+                            stringResource(R.string.tab_contacts),
+                            stringResource(R.string.tab_more),
+                        ).getOrElse(tab - 1) { "" },
+                        color = Text,
+                        fontSize = 28.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(start = 10.dp),
+                    )
+                }
             }
         }
         if (open == null) {

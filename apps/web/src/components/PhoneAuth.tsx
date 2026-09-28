@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { api, saveSession } from "@/lib/api";
 import type { Dict } from "@/lib/i18n";
 import type { Session } from "@/lib/types";
+import { BrandMark } from "./BrandMark";
 
 export function PhoneAuth({
   t,
@@ -91,6 +92,7 @@ export function PhoneAuth({
     <div className="flex min-h-full flex-1 items-center justify-center px-6">
       <div className="w-full max-w-md">
         <div className="mb-10">
+          <BrandMark alt="" className="mb-5 h-16 w-16" />
           <p className="text-xs font-semibold tracking-[0.28em] text-accent">KG · RU</p>
           <h1 className="mt-2 text-[40px] font-bold tracking-tight text-ink">{t.app}</h1>
           <p className="mt-3 text-[17px] font-semibold text-ink">{step === 0 ? t.phoneTitle : t.otpTitle}</p>

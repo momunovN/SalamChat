@@ -11,6 +11,7 @@ struct ProfileOnboardingView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Spacer(minLength: 24)
+            SalamLogo(size: 72)
             Text(L10n.appName).font(SamalFont.title()).foregroundStyle(SamalColor.text)
             Text(L10n.nameTitle).font(SamalFont.headline()).foregroundStyle(SamalColor.text)
             Text(L10n.nameSubtitle).font(SamalFont.subhead()).foregroundStyle(SamalColor.muted)

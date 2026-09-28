@@ -37,6 +37,7 @@ import dev.samal.app.data.db.ChatEntity
 import dev.samal.app.data.db.SamalDao
 import dev.samal.app.ui.theme.Accent
 import dev.samal.app.ui.theme.Bg
+import dev.samal.app.ui.theme.SalamLogo
 import dev.samal.app.ui.theme.Elevated
 import dev.samal.app.ui.theme.Muted
 import dev.samal.app.ui.theme.Text
@@ -56,13 +57,19 @@ fun ChatListScreen(dao: SamalDao, onOpen: (ChatEntity) -> Unit) {
     val chats by dao.chats(type, q).collectAsState(initial = emptyList())
 
     Column(Modifier.fillMaxSize().background(Bg)) {
-        Text(
-            stringResource(R.string.app_name),
-            color = Text,
-            fontSize = 28.sp,
-            fontWeight = FontWeight.Bold,
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-        )
+        ) {
+            SalamLogo(36.dp)
+            Text(
+                stringResource(R.string.app_name),
+                color = Text,
+                fontSize = 28.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(start = 10.dp),
+            )
+        }
         TextField(
             value = q,
             onValueChange = { q = it },

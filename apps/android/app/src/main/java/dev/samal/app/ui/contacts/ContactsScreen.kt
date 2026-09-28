@@ -29,6 +29,7 @@ import dev.samal.app.R
 import dev.samal.app.data.api.SamalApi
 import dev.samal.app.ui.theme.Bg
 import dev.samal.app.ui.theme.Elevated
+import dev.samal.app.ui.theme.SalamLogo
 import dev.samal.app.ui.theme.Muted
 import dev.samal.app.ui.theme.Text
 import kotlinx.coroutines.Dispatchers
@@ -57,13 +58,19 @@ fun ContactsScreen(api: SamalApi, onOpen: (String) -> Unit) {
         }
     }
     Column(Modifier.fillMaxSize().background(Bg).padding(top = 8.dp)) {
-        Text(
-            stringResource(R.string.tab_contacts),
-            color = Text,
-            fontSize = 28.sp,
-            fontWeight = FontWeight.Bold,
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-        )
+        ) {
+            SalamLogo(36.dp)
+            Text(
+                stringResource(R.string.tab_contacts),
+                color = Text,
+                fontSize = 28.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(start = 10.dp),
+            )
+        }
         if (rows.isEmpty()) {
             Text(
                 stringResource(R.string.sync_hint),
