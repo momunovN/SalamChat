@@ -8,6 +8,8 @@
 "seg.groups" = "Группы";
 "seg.calls" = "Звонки";
 "search" = "Поиск";
+"search.people" = "Имя, @ник или номер";
+"people.empty" = "Никого не нашли";
 "composer.placeholder" = "Сообщение";
 "voice.cancel" = "слайд влево — отмена";
 "voice.lock" = "вверх — закрепить";

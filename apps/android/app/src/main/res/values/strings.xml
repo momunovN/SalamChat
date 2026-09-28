@@ -9,6 +9,8 @@
     <string name="seg_groups">Группы</string>
     <string name="seg_calls">Звонки</string>
     <string name="search">Поиск</string>
+    <string name="search_people">Имя, @ник или номер</string>
+    <string name="people_empty">Никого не нашли</string>
     <string name="composer">Сообщение</string>
     <string name="voice_cancel">слайд влево — отмена</string>
     <string name="voice_lock">вверх — закрепить</string>

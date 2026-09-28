@@ -104,6 +104,17 @@ final class APIClient {
         let _: Ok = try await post("/v1/contacts/sync", body: ["enabled": enabled, "items": payload])
     }
 
+    func users(q: String) async throws -> [APIUser] {
+        struct Wrap: Decodable { var items: [APIUser] }
+        let enc = q.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? q
+        let w: Wrap = try await get("/v1/users?q=\(enc)")
+        return w.items
+    }
+
+    func direct(userID: UUID) async throws -> APIChat {
+        try await post("/v1/chats/direct", body: ["user_id": userID.uuidString])
+    }
+
     func contacts() async throws -> [APIUser] {
         struct Wrap: Decodable { var items: [APIUser] }
         let w: Wrap = try await get("/v1/contacts")

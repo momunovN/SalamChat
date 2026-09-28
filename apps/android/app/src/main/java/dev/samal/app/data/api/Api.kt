@@ -8,6 +8,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
+import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 
 class SamalApi(
@@ -75,6 +76,23 @@ class SamalApi(
     }
 
     fun contacts(): JSONArray = get("/v1/contacts").optJSONArray("items") ?: JSONArray()
+
+    fun users(q: String): JSONArray {
+        val enc = URLEncoder.encode(q, Charsets.UTF_8.name())
+        return get("/v1/users?q=$enc").optJSONArray("items") ?: JSONArray()
+    }
+
+    fun direct(userId: String): JSONObject =
+        post("/v1/chats/direct", JSONObject().put("user_id", userId), true)
+
+    fun streamRequest(): Request {
+        val enc = URLEncoder.encode(token.orEmpty(), Charsets.UTF_8.name())
+        return Request.Builder()
+            .url("$base/v1/stream?token=$enc")
+            .header("Accept", "text/event-stream")
+            .header("Cache-Control", "no-cache")
+            .build()
+    }
 
     private fun get(path: String): JSONObject = exec(Request.Builder().url(base + path).get())
 

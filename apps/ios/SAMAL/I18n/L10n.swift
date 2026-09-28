@@ -11,6 +11,8 @@ enum L10n {
     static var segGroups: String { t("seg.groups") }
     static var segCalls: String { t("seg.calls") }
     static var search: String { t("search") }
+    static var searchPeople: String { t("search.people") }
+    static var peopleEmpty: String { t("people.empty") }
     static var composerPlaceholder: String { t("composer.placeholder") }
     static var voiceHintCancel: String { t("voice.cancel") }
     static var voiceHintLock: String { t("voice.lock") }

@@ -68,6 +68,15 @@ interface SamalDao {
 
     @Query("UPDATE messages SET status = :status WHERE id = :id")
     suspend fun setStatus(id: String, status: String)
+
+    @Query("DELETE FROM messages WHERE clientId = :clientId AND id != :keepId")
+    suspend fun dropClientCopy(clientId: String, keepId: String)
+
+    @Query("UPDATE chats SET lastText = CASE WHEN :at >= lastAt THEN :text ELSE lastText END, lastAt = CASE WHEN :at >= lastAt THEN :at ELSE lastAt END, unread = unread + :add WHERE id = :id")
+    suspend fun noteMessage(id: String, text: String, at: Long, add: Int): Int
+
+    @Query("UPDATE chats SET unread = 0 WHERE id = :id")
+    suspend fun clearUnread(id: String)
 }
 
 @Database(entities = [ChatEntity::class, MessageEntity::class, OutboxEntity::class], version = 1)

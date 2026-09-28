@@ -30,6 +30,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -46,6 +47,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.samal.app.R
+import dev.samal.app.data.api.SamalApi
 import dev.samal.app.data.db.ChatEntity
 import dev.samal.app.data.db.MessageEntity
 import dev.samal.app.data.db.OutboxEntity
@@ -58,19 +60,37 @@ import dev.samal.app.ui.theme.Incoming
 import dev.samal.app.ui.theme.Muted
 import dev.samal.app.ui.theme.Outgoing
 import dev.samal.app.ui.theme.Success
+import dev.samal.app.data.sync.messageEntity
 import dev.samal.app.ui.theme.Text
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.UUID
 import kotlin.math.roundToInt
 
 @Composable
-fun ChatScreen(chat: ChatEntity, dao: SamalDao, me: String, onBack: () -> Unit) {
+fun ChatScreen(chat: ChatEntity, dao: SamalDao, api: SamalApi, me: String, onBack: () -> Unit) {
     val messages by dao.messages(chat.id, "").collectAsState(initial = emptyList())
     var text by remember { mutableStateOf("") }
     var recording by remember { mutableStateOf(false) }
     var dragX by remember { mutableStateOf(0f) }
     var dragY by remember { mutableStateOf(0f) }
     val scope = rememberCoroutineScope()
+
+    LaunchedEffect(chat.id) {
+        while (isActive) {
+            val remote = withContext(Dispatchers.IO) {
+                runCatching { api.messages(chat.id) }.getOrNull()
+            }
+            if (remote != null) {
+                dao.upsertMessages((0 until remote.length()).map { messageEntity(remote.getJSONObject(it), me) })
+                dao.clearUnread(chat.id)
+            }
+            delay(3_000)
+        }
+    }
 
     Column(Modifier.fillMaxSize().background(Bg)) {
         Row(Modifier.fillMaxWidth().padding(4.dp), verticalAlignment = Alignment.CenterVertically) {

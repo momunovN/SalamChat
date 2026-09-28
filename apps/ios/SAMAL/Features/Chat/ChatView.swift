@@ -15,10 +15,10 @@ final class ChatViewModel: ObservableObject {
     func start(session: SessionStore) {
         tick?.cancel()
         tick = Task {
-            await sync(session: session)
             while !Task.isCancelled {
+                await sync(session: session)
                 reload()
-                try? await Task.sleep(nanoseconds: 250_000_000)
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
             }
         }
     }

@@ -8,6 +8,8 @@
 "seg.groups" = "Топтор";
 "seg.calls" = "Чалуулар";
 "search" = "Издөө";
+"search.people" = "Аты, @ник же номер";
+"people.empty" = "Эч ким табылган жок";
 "composer.placeholder" = "Билдирүү";
 "voice.cancel" = "солго сүйрө — жокко чыгаруу";
 "voice.lock" = "өйдө — бекитүү";

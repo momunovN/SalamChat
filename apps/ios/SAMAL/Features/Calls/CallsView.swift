@@ -66,53 +66,111 @@ struct IncomingCallView: View {
 
 struct ContactsView: View {
     @EnvironmentObject var session: SessionStore
-    @State private var items: [APIUser] = []
+    @State private var book: [APIUser] = []
+    @State private var found: [APIUser] = []
+    @State private var query = ""
+    @State private var open: LocalChat?
+
+    private var rows: [APIUser] {
+        let me = session.user?.id
+        let source = query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? book : found
+        return source.filter { $0.id != me }
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 10) {
-                SalamLogo(size: 36)
-                Text(L10n.tabContacts)
-                    .font(SamalFont.title())
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 10) {
+                    SalamLogo(size: 36)
+                    Text(L10n.tabContacts)
+                        .font(SamalFont.title())
+                        .foregroundStyle(SamalColor.text)
+                    Spacer()
+                }
+                .padding(16)
+                TextField(L10n.searchPeople, text: $query)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
                     .foregroundStyle(SamalColor.text)
-                Spacer()
-            }
-            .padding(16)
-            if items.isEmpty {
-                Text(L10n.syncHint)
-                    .font(SamalFont.subhead())
-                    .foregroundStyle(SamalColor.muted)
+                    .padding(.horizontal, 14)
+                    .frame(height: 44)
+                    .background(SamalColor.elevated, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                     .padding(.horizontal, 16)
-                Spacer()
-            } else {
-                ScrollView {
-                    ForEach(items) { u in
-                        HStack(spacing: 12) {
-                            Circle().fill(SamalColor.elevated).frame(width: 44, height: 44)
-                                .overlay(
-                                    Text(String((u.bookName ?? u.displayName).prefix(1)).uppercased())
-                                        .font(.system(size: 18, weight: .semibold))
-                                        .foregroundStyle(SamalColor.text)
-                                )
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(u.bookName ?? u.displayName)
-                                    .font(SamalFont.headline())
-                                    .foregroundStyle(SamalColor.text)
-                                Text(u.username.map { "@\($0)" } ?? u.phone)
-                                    .font(SamalFont.caption())
-                                    .foregroundStyle(SamalColor.muted)
+                if rows.isEmpty {
+                    Text(query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? L10n.syncHint : L10n.peopleEmpty)
+                        .font(SamalFont.subhead())
+                        .foregroundStyle(SamalColor.muted)
+                        .padding(16)
+                    Spacer()
+                } else {
+                    ScrollView {
+                        ForEach(rows) { u in
+                            Button { Task { await openDirect(u) } } label: {
+                                HStack(spacing: 12) {
+                                    Circle().fill(SamalColor.elevated).frame(width: 44, height: 44)
+                                        .overlay(
+                                            Text(String((u.bookName ?? u.displayName).prefix(1)).uppercased())
+                                                .font(.system(size: 18, weight: .semibold))
+                                                .foregroundStyle(SamalColor.text)
+                                        )
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(u.bookName ?? u.displayName)
+                                            .font(SamalFont.headline())
+                                            .foregroundStyle(SamalColor.text)
+                                        Text(personLine(u))
+                                            .font(SamalFont.caption())
+                                            .foregroundStyle(SamalColor.muted)
+                                    }
+                                    Spacer()
+                                }
+                                .padding(.horizontal, 16)
+                                .frame(height: 64)
                             }
-                            Spacer()
+                            .buttonStyle(.plain)
                         }
-                        .padding(.horizontal, 16)
-                        .frame(height: 64)
                     }
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(SamalColor.bg)
+            .navigationBarHidden(true)
+            .navigationDestination(item: $open) { chat in
+                ChatView(chat: chat)
+            }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(SamalColor.bg)
-        .task { items = (try? await session.api.contacts()) ?? [] }
+        .task { book = (try? await session.api.contacts()) ?? [] }
+        .task(id: query) {
+            let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+            if q.isEmpty {
+                found = []
+                return
+            }
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            found = (try? await session.api.users(q: q)) ?? []
+        }
+    }
+
+    private func personLine(_ u: APIUser) -> String {
+        var parts: [String] = []
+        if let nick = u.username, !nick.isEmpty { parts.append("@\(nick)") }
+        if !u.phone.isEmpty { parts.append(u.phone) }
+        return parts.joined(separator: " · ")
+    }
+
+    private func openDirect(_ u: APIUser) async {
+        guard let chat = try? await session.api.direct(userID: u.id) else { return }
+        try? AppDatabase.shared.upsertChats([chat])
+        open = LocalChat(
+            id: chat.id.uuidString,
+            type: chat.type,
+            title: chat.title.isEmpty ? (u.bookName ?? u.displayName) : chat.title,
+            avatarURL: chat.avatarURL,
+            peerID: chat.peer?.id.uuidString,
+            lastText: "",
+            lastAt: chat.updatedAt,
+            unread: chat.unreadCount,
+            memberCount: chat.memberCount
+        )
     }
 }
 

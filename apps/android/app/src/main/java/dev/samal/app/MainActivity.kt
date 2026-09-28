@@ -87,7 +87,7 @@ private fun MainShell(app: SamalApp) {
         Box(Modifier.weight(1f)) {
             val chat = open
             if (chat != null) {
-                ChatScreen(chat, app.db.dao(), me = me, onBack = { open = null })
+                ChatScreen(chat, app.db.dao(), app.api, me = me, onBack = { open = null })
             } else when (tab) {
                 0 -> ChatListScreen(app.db.dao()) { open = it }
                 1 -> Row(
@@ -103,7 +103,7 @@ private fun MainShell(app: SamalApp) {
                         modifier = Modifier.padding(start = 10.dp),
                     )
                 }
-                2 -> ContactsScreen(app.api) { /* open chat by user id later */ }
+                2 -> ContactsScreen(app.api, app.db.dao(), me) { open = it }
                 else -> MoreScreen(app.session)
             }
         }

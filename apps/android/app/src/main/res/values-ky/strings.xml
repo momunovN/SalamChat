@@ -9,6 +9,8 @@
     <string name="seg_groups">Топтор</string>
     <string name="seg_calls">Чалуулар</string>
     <string name="search">Издөө</string>
+    <string name="search_people">Аты, @ник же номер</string>
+    <string name="people_empty">Эч ким табылган жок</string>
     <string name="composer">Билдирүү</string>
     <string name="voice_cancel">солго сүйрө — жокко чыгаруу</string>
     <string name="voice_lock">өйдө — бекитүү</string>

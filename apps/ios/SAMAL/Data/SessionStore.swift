@@ -110,6 +110,11 @@ final class SessionStore: ObservableObject {
         case "message.created":
             if let msg = try? JSONDecoder.iso.decode(APIMessage.self, from: body) {
                 try? db.upsertMessages([msg], me: me.id)
+                Task { [weak self] in
+                    if let remote = try? await self?.api.chats() {
+                        try? self?.db.upsertChats(remote)
+                    }
+                }
                 if msg.authorID != me.id {
                     Task { try? await api.receipts(ids: [msg.id], status: "delivered") }
                 }
