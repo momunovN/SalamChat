@@ -2,7 +2,7 @@ import { createHash, randomBytes, randomInt } from "crypto";
 import { SignJWT, jwtVerify } from "jose";
 import { query, queryOne } from "./db";
 import { forgetName } from "./valkey";
-import { jwtSecret, otpDev } from "./env";
+import { jwtSecret } from "./env";
 import { HttpError } from "./http";
 import { sanitizeDisplayName, sanitizeUsername } from "@/lib/name";
 import { defaultDisplayName, normalizeEmail, optionalPhone } from "./phone";
@@ -114,7 +114,7 @@ export async function requestOTP(emailRaw: string, phoneRaw = "") {
     ok: true,
     retry_after_sec: 60,
     via,
-    ...(otpDev() || via === "stub" ? { dev_code: code } : {}),
+    ...(via === "stub" ? { dev_code: code } : {}),
   };
 }
 

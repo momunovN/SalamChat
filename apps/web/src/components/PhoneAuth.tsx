@@ -26,7 +26,6 @@ export function PhoneAuth({
   const [busy, setBusy] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [otp, setOtp] = useState<string | null>(null);
   const [waited, setWaited] = useState(false);
 
   function pickCountry(next: "996" | "7") {
@@ -65,14 +64,8 @@ export function PhoneAuth({
           return;
         }
         const sentPhone = phoneSkipped(phone) ? "" : phone;
-        const r = await api.requestOTP(email.trim(), sentPhone);
-        if (r.dev_code) {
-          setOtp(r.dev_code);
-          setHint(`${t.yourCode}: ${r.dev_code}`);
-        } else {
-          setOtp(null);
-          setHint(email.trim());
-        }
+        await api.requestOTP(email.trim(), sentPhone);
+        setHint(email.trim());
         setCode("");
         setStep(1);
       } else {
@@ -179,11 +172,6 @@ export function PhoneAuth({
         {busy && waited ? <p className="mt-3 text-xs font-medium text-muted">{t.connecting}</p> : null}
         {hint ? <p className="mt-3 text-sm font-semibold tracking-[0.08em] text-success">{hint}</p> : null}
         {error ? <p className="mt-2 text-xs font-medium text-danger">{error}</p> : null}
-        {step === 1 && otp ? (
-          <button type="button" className="mt-2 text-xs text-muted underline" onClick={() => setCode(otp)}>
-            {t.yourCode}: {otp}
-          </button>
-        ) : null}
         <button
           type="button"
           disabled={busy}

@@ -110,11 +110,8 @@ struct PhoneAuthView: View {
             defer { busy = false }
             do {
                 if step == 0 {
-                    if let dev = try await session.api.requestOTP(email: email.trimmingCharacters(in: .whitespaces), phone: sentPhone) {
-                        hint = dev
-                    } else {
-                        hint = email.trimmingCharacters(in: .whitespaces)
-                    }
+                    _ = try await session.api.requestOTP(email: email.trimmingCharacters(in: .whitespaces), phone: sentPhone)
+                    hint = email.trimmingCharacters(in: .whitespaces)
                     step = 1
                 } else {
                     try await session.login(email: email.trimmingCharacters(in: .whitespaces), phone: sentPhone, code: code)

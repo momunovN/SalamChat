@@ -85,8 +85,8 @@ fun PhoneAuthScreen(session: SessionStore) {
             try {
                 val sentPhone = if (skippedPhone(phone)) "" else phone
                 if (step == 0) {
-                    val dev = session.requestOtp(email.trim(), sentPhone)
-                    hint = dev ?: email.trim()
+                    session.requestOtp(email.trim(), sentPhone)
+                    hint = email.trim()
                     hintError = false
                     step = 1
                 } else {
