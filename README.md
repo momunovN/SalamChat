@@ -24,7 +24,7 @@ Postgres: Neon (`TOOAPP_DATABASE_URL` or `DATABASE_URL`, direct host without `-p
 
 Health: `GET http://localhost:8080/healthz`
 
-OTP in dev returns `dev_code` (`TOOAPP_OTP_DEV=true`). SMS is stub until you set a key — then `sms.ru` or `smsc.ru` (RU + KG). See `.env.example`.
+OTP in dev returns `dev_code` (`TOOAPP_OTP_DEV=true`). SMS is stub until you set `SMS_API_KEY` from https://admin.p1sms.ru/ — then OTP goes through P1SMS (RU + KG). See `.env.example`.
 
 ## Clients
 

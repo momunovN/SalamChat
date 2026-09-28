@@ -8,68 +8,77 @@ function text(code: string) {
   return `Salam: ${code}`;
 }
 
-async function sendSmsRu(phone: string, code: string) {
-  const key = env("SMS_API_KEY");
-  const from = env("SMS_SENDER", "").trim();
-  const url = new URL("https://sms.ru/sms/send");
-  url.searchParams.set("api_id", key);
-  url.searchParams.set("to", digits(phone));
-  url.searchParams.set("msg", text(code));
-  url.searchParams.set("json", "1");
-  // `from` only if the name is already approved in sms.ru. Empty = common sender.
-  if (from && !["tooapp", "samal"].includes(from.toLowerCase())) {
-    url.searchParams.set("from", from);
+type P1Item = {
+  id?: number | string;
+  status?: string;
+  errorDescription?: string | null;
+  message?: string;
+};
+
+type P1Body = {
+  status?: string;
+  message?: string;
+  data?: P1Item[] | { message?: string; error?: string };
+};
+
+const FAILED = new Set(["error", "rejected", "low_balance", "low_partner_balance"]);
+
+function p1Message(body: P1Body, status: number) {
+  if (body.data && !Array.isArray(body.data)) {
+    return body.data.message || body.data.error || body.message || `p1sms ${body.status || status}`;
   }
-  const res = await fetch(url, { method: "GET" });
-  const body = (await res.json()) as {
-    status?: string;
-    status_code?: number;
-    status_text?: string;
-    sms?: Record<string, { status?: string; status_text?: string }>;
-  };
-  if (body.status !== "OK") {
-    const first = body.sms ? Object.values(body.sms)[0] : undefined;
-    throw new Error(first?.status_text || body.status_text || `sms.ru ${body.status_code ?? "error"}`);
-  }
+  return body.message || `p1sms ${body.status || status}`;
 }
 
-async function sendSmsc(phone: string, code: string) {
-  const login = env("SMS_LOGIN");
-  const psw = env("SMS_API_KEY");
+// Digit channel sends from a shared number and does not need a registered name.
+// A moderated name in SMS_SENDER uses the char channel.
+async function sendP1(phone: string, code: string) {
+  const key = env("SMS_API_KEY");
   const from = env("SMS_SENDER", "").trim();
-  const url = new URL("https://smsc.ru/sys/send.php");
-  url.searchParams.set("login", login);
-  url.searchParams.set("psw", psw);
-  url.searchParams.set("phones", digits(phone));
-  url.searchParams.set("mes", text(code));
-  url.searchParams.set("fmt", "3");
-  if (from && !["tooapp", "samal"].includes(from.toLowerCase())) {
-    url.searchParams.set("sender", from);
+  const named = from && !["tooapp", "samal"].includes(from.toLowerCase());
+  const sms: Record<string, string> = {
+    channel: named ? "char" : "digit",
+    phone: digits(phone),
+    text: text(code),
+  };
+  if (named) sms.sender = from;
+
+  const res = await fetch("https://admin.p1sms.ru/apiSms/create", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      accept: "application/json",
+    },
+    body: JSON.stringify({ apiKey: key, sms: [sms] }),
+  });
+  const raw = await res.text();
+  let body: P1Body = {};
+  try {
+    body = raw ? (JSON.parse(raw) as P1Body) : {};
+  } catch {
+    throw new Error(`p1sms ${res.status}: ${raw.slice(0, 180)}`);
   }
-  const res = await fetch(url, { method: "GET" });
-  const body = (await res.json()) as { error?: string; id?: number };
-  if (body.error && !body.id) {
-    throw new Error(body.error);
+  if (!res.ok || body.status !== "success") {
+    throw new Error(p1Message(body, res.status));
+  }
+  const first = Array.isArray(body.data) ? body.data[0] : undefined;
+  const itemStatus = String(first?.status || "").toLowerCase();
+  if (first && FAILED.has(itemStatus)) {
+    throw new Error(first.errorDescription || first.message || `p1sms ${first.status}`);
   }
 }
 
 export async function sendOTP(phone: string, code: string) {
   let provider = env("SMS_PROVIDER", "stub").toLowerCase();
   const key = env("SMS_API_KEY");
-  if (key && (provider === "stub" || provider === "")) {
-    provider = env("SMS_LOGIN") ? "smsc" : "smsru";
+  // Earlier cabinets were sms.ru / smsc.ru. Those names now send through P1SMS.
+  if (provider === "smsru" || provider === "smsc") provider = "p1sms";
+  if (key && (provider === "stub" || provider === "")) provider = "p1sms";
+  if (provider === "p1sms") {
+    if (!key) throw new Error("SMS_API_KEY required for p1sms");
+    await sendP1(phone, code);
+    return "p1sms";
   }
-  switch (provider) {
-    case "smsru":
-      if (!key) throw new Error("SMS_API_KEY required for sms.ru");
-      await sendSmsRu(phone, code);
-      return "smsru";
-    case "smsc":
-      if (!key || !env("SMS_LOGIN")) throw new Error("SMS_LOGIN and SMS_API_KEY required for smsc.ru");
-      await sendSmsc(phone, code);
-      return "smsc";
-    default:
-      console.log(`Salam OTP ${phone} ${code}`);
-      return "stub";
-  }
+  console.log(`Salam OTP ${phone} ${code}`);
+  return "stub";
 }

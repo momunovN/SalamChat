@@ -25,7 +25,7 @@ npm run dev
 
 OTP в dev приходит в ответе (`dev_code`). SMS никуда не уходит, ключ не нужен.
 
-Реальная SMS на РФ и Кыргызстан: `SMS_PROVIDER=smsru` и `SMS_API_KEY` с [sms.ru](https://sms.ru/?panel=api), либо `SMS_PROVIDER=smsc` + `SMS_LOGIN` + `SMS_API_KEY` с [smsc.ru](https://smsc.ru/api/). В проде `TOOAPP_OTP_DEV=false`.
+Реальная SMS на РФ и Кыргызстан: `SMS_PROVIDER=p1sms` и `SMS_API_KEY` из кабинета [P1SMS](https://admin.p1sms.ru/) (раздел «Инструкция по API»). Пустой `SMS_SENDER` — цифровой канал. В проде `TOOAPP_OTP_DEV=false`.
 
 ## Приложения
 
