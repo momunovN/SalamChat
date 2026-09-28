@@ -8,12 +8,15 @@ JSON envelopes both ways.
 ## Server → client
 
 ```json
-{ "type": "message.created", "ts": "2026-01-01T00:00:00Z", "body": { /* Message */ } }
-{ "type": "receipt.upserted", "ts": "...", "body": { "message_id": "...", "user_id": "...", "status": "delivered|read", "chat_id": "..." } }
+{ "type": "message.new", "ts": "2026-01-01T00:00:00Z", "body": { /* Message */ } }
+{ "type": "message.ack", "ts": "...", "body": { "id": "...", "client_id": "...", "chat_id": "...", "created_at": "..." } }
+{ "type": "receipt", "ts": "...", "body": { "message_id": "...", "user_id": "...", "status": "delivered|read", "chat_id": "..." } }
 { "type": "typing", "ts": "...", "body": { "chat_id": "...", "user_id": "..." } }
-{ "type": "call.updated", "ts": "...", "body": { /* Call */ } }
+{ "type": "presence", "ts": "...", "body": { "user_id": "...", "online": true } }
 { "type": "pong", "ts": "...", "body": {} }
 ```
+
+`message.created` and `receipt.upserted` are still sent as aliases of `message.new` and `receipt`.
 
 ## Client → server
 

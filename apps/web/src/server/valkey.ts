@@ -19,9 +19,8 @@ export type PersistJob = {
   voiceMs: number | null;
 };
 
-type Fanout = { origin: string; userId: string; env: FanoutEnvelope };
+type Fanout = { origin: string; userId?: string; env: FanoutEnvelope };
 
-const CHANNEL = "tooapp:fanout";
 const OUTBOX = "tooapp:outbox";
 const WORK = "tooapp:outbox:work";
 const TAIL = "tooapp:tail";
@@ -101,11 +100,13 @@ async function open() {
       console.error("valkey sub", err.message);
     });
     await sub.connect();
-    await sub.subscribe(CHANNEL, (message) => {
+    await sub.pSubscribe("user:*", (message, channel) => {
       try {
         const parsed = JSON.parse(message) as Fanout;
-        if (!parsed || parsed.origin === origin || !parsed.userId || !parsed.env) return;
-        remote(parsed.userId, parsed.env);
+        if (!parsed?.env || parsed.origin === origin) return;
+        const userId = channel.startsWith("user:") ? channel.slice(5) : parsed.userId;
+        if (!userId || userId.includes(":")) return;
+        remote(userId, parsed.env);
       } catch {
         /* ignore malformed fanout */
       }
@@ -133,9 +134,80 @@ async function recoverWork() {
 export function publishRemote(userId: string, env: FanoutEnvelope) {
   const client = pub;
   if (!client?.isOpen) return;
-  void client.publish(CHANNEL, JSON.stringify({ origin, userId, env })).catch((err: unknown) => {
+  void client.publish(`user:${userId}`, JSON.stringify({ origin, userId, env })).catch((err: unknown) => {
     console.error("valkey publish", err instanceof Error ? err.message : err);
   });
+}
+
+export function publishChat(chatId: string, env: FanoutEnvelope) {
+  const client = pub;
+  if (!client?.isOpen || !chatId) return;
+  void client.publish(`chat:${chatId}`, JSON.stringify({ origin, env })).catch((err: unknown) => {
+    console.error("valkey chat", err instanceof Error ? err.message : err);
+  });
+}
+
+export function touchOnline(userId: string) {
+  const client = pub;
+  if (!client?.isOpen) return;
+  void client.set(`user:${userId}:online`, "1", { EX: 45 }).catch(() => undefined);
+}
+
+export function markTyping(chatId: string, userId: string) {
+  const client = pub;
+  if (!client?.isOpen) return;
+  void client.set(`chat:${chatId}:typing`, userId, { EX: 4 }).catch(() => undefined);
+}
+
+export async function noteSocket(userId: string, connId: string) {
+  const client = pub;
+  if (!client?.isOpen) return;
+  try {
+    await client.sAdd(`user:${userId}:sess`, connId);
+    await client.expire(`user:${userId}:sess`, 90);
+    await client.set(`user:${userId}:online`, "1", { EX: 45 });
+  } catch {
+    /* chat still delivers on this process */
+  }
+}
+
+export async function beatSocket(userId: string, connId: string) {
+  const client = pub;
+  if (!client?.isOpen) return;
+  try {
+    await client.sAdd(`user:${userId}:sess`, connId);
+    await client.expire(`user:${userId}:sess`, 90);
+    await client.set(`user:${userId}:online`, "1", { EX: 45 });
+  } catch {
+    /* ignore */
+  }
+}
+
+export async function dropSocket(userId: string, connId: string) {
+  const client = pub;
+  if (!client?.isOpen) return true;
+  try {
+    await client.sRem(`user:${userId}:sess`, connId);
+    const n = await client.sCard(`user:${userId}:sess`);
+    if (Number(n) === 0) {
+      await client.del(`user:${userId}:online`);
+      return true;
+    }
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+export async function clearOnline(userId: string) {
+  const client = pub;
+  if (!client?.isOpen) return;
+  try {
+    const n = await client.sCard(`user:${userId}:sess`);
+    if (Number(n) === 0) await client.del(`user:${userId}:online`);
+  } catch {
+    /* ignore */
+  }
 }
 
 export async function cachedName(userId: string, load: () => Promise<string>) {

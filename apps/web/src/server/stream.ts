@@ -1,7 +1,11 @@
 import { envelope, hub, presence } from "./hub";
+import { clearOnline, touchOnline } from "./valkey";
+import { announcePresence } from "./ws";
 
 export function sseResponse(userId: string) {
-  presence.heartbeat(userId);
+  const first = presence.enter(userId);
+  touchOnline(userId);
+  if (first) void announcePresence(userId, true);
   const encoder = new TextEncoder();
   let unsub: () => void = () => {};
   let ping: ReturnType<typeof setInterval> | undefined;
@@ -20,12 +24,17 @@ export function sseResponse(userId: string) {
       send(envelope("pong", {}));
       ping = setInterval(() => {
         presence.heartbeat(userId);
+        touchOnline(userId);
         send(envelope("pong", {}));
       }, 20_000);
     },
     cancel() {
       unsub();
       if (ping) clearInterval(ping);
+      if (presence.exit(userId)) {
+        void clearOnline(userId);
+        void announcePresence(userId, false);
+      }
     },
   });
   return new Response(stream, {

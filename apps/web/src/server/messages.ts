@@ -3,17 +3,12 @@ import { publicBase } from "./env";
 import { envelope, hub } from "./hub";
 import { HttpError, iso } from "./http";
 import {
-  cachedName,
-  connectValkey,
   membersCached,
-  messageByClient,
   onPersist,
+  publishChat,
   readHot,
   readRecent,
   rewriteHot,
-  stageMessage,
-  valkeyReady,
-  type PersistJob,
 } from "./valkey";
 import {
   canManageMembers,
@@ -163,12 +158,22 @@ export async function getMessage(userId: string, id: string, req?: Request) {
   return msg;
 }
 
-export async function listMessages(userId: string, chatId: string, q = "", cursor = "", limit = 50, req?: Request) {
+export async function listMessages(
+  userId: string,
+  chatId: string,
+  q = "",
+  cursor = "",
+  limit = 50,
+  req?: Request,
+  after = "",
+) {
   await mustMember(chatId, userId);
   if (limit <= 0 || limit > 100) limit = 50;
   q = q.trim();
   const before = cursor ? new Date(cursor) : new Date(Date.now() + 60 * 60 * 1000);
   if (Number.isNaN(before.getTime())) throw new HttpError(400, "bad_request", "bad cursor");
+  const since = after ? new Date(after) : null;
+  if (since && Number.isNaN(since.getTime())) throw new HttpError(400, "bad_request", "bad after");
   const cleared = await clearedAt(chatId, userId);
   const rows = await query<MsgRow>(
     `SELECT ${MSG_COLS}
@@ -176,10 +181,11 @@ export async function listMessages(userId: string, chatId: string, q = "", curso
      LEFT JOIN users u ON u.id = m.author_id
      WHERE m.chat_id=$1 AND m.created_at < $2 AND m.deleted_at IS NULL
        AND ($5::timestamptz IS NULL OR m.created_at > $5::timestamptz)
+       AND ($6::timestamptz IS NULL OR m.created_at > $6::timestamptz)
        AND ($3 = '' OR (m.payload->>'text') ILIKE '%'||$3||'%')
      ORDER BY m.created_at DESC
      LIMIT $4`,
-    [chatId, before.toISOString(), q, limit + 1, cleared],
+    [chatId, before.toISOString(), q, limit + 1, cleared, since ? since.toISOString() : null],
   );
   let next: string | undefined;
   let pgItems = rows.map(mapMsg);
@@ -291,105 +297,27 @@ async function replyPreview(chatId: string, replyId: string) {
   return previewFrom(mapMsg(reply));
 }
 
-async function readyAttachments(
-  userId: string,
-  msgType: string,
-  uploadIds: string[],
-  voiceMs: number | null,
-  req?: Request,
-) {
-  const base = publicBase(req);
-  const out: Attachment[] = [];
-  let kind = msgType;
-  for (const uid of uploadIds) {
-    const u = await queryOne<{ object_key: string; mime: string; size_bytes: string | number; kind: string; status: string }>(
-      `SELECT object_key, mime, size_bytes, kind, status FROM uploads WHERE id=$1 AND user_id=$2`,
-      [uid, userId],
+function fanoutNew(chatId: string, members: string[], msg: Message) {
+  const fresh = envelope("message.new", msg);
+  hub.publishMany(members, fresh);
+  hub.publishMany(members, envelope("message.created", msg));
+  publishChat(chatId, fresh);
+  if (msg.author_id) {
+    hub.publish(
+      msg.author_id,
+      envelope("message.ack", {
+        id: msg.id,
+        client_id: msg.client_id,
+        chat_id: chatId,
+        created_at: msg.created_at,
+      }),
     );
-    if (!u) throw new HttpError(400, "bad_request", "upload not found");
-    if (u.status !== "ready") throw new HttpError(400, "bad_request", "upload not ready");
-    if (kind === "photo" && u.kind !== "photo" && u.kind !== "video") kind = u.kind;
-    else if (u.kind) kind = u.kind;
-    out.push({
-      id: crypto.randomUUID(),
-      kind,
-      object_key: u.object_key,
-      url: /^https?:\/\//i.test(u.object_key) ? u.object_key : `${base}/media/${u.object_key}`,
-      mime: u.mime,
-      size_bytes: Number(u.size_bytes || 0),
-      duration_ms: kind === "voice" ? voiceMs : null,
-    });
   }
-  return out;
 }
 
 export async function sendMessage(userId: string, chatId: string, input: SendInput, req?: Request): Promise<Message> {
   const prepared = prepareSend(input);
-  await connectValkey();
-  if (!valkeyReady()) return sendMessagePg(userId, chatId, input, prepared, req);
-
-  const uploadIds = input.upload_ids || [];
-  const [members, dupRaw, reply, attachments, authorName] = await Promise.all([
-    membersCached(chatId, () => memberIds(chatId)),
-    messageByClient(input.client_id).catch(() => null),
-    input.reply_to_id ? replyPreview(chatId, input.reply_to_id) : Promise.resolve(undefined),
-    uploadIds.length ? readyAttachments(userId, prepared.type, uploadIds, prepared.voiceMs, req) : Promise.resolve([]),
-    cachedName(userId, async () => {
-      const row = await queryOne<{ display_name: string }>(`SELECT display_name FROM users WHERE id=$1`, [userId]);
-      return row?.display_name || "";
-    }),
-  ]);
-  if (!members.includes(userId)) throw new HttpError(403, "forbidden", "forbidden");
-  await unhideChat(chatId);
-  if (dupRaw) {
-    const dup = JSON.parse(dupRaw) as Message;
-    if (dup.chat_id === chatId) return dup;
-  }
-
-  const id = crypto.randomUUID();
-  const msg: Message = {
-    id,
-    chat_id: chatId,
-    author_id: userId,
-    author_name: authorName || undefined,
-    type: prepared.type,
-    payload: prepared.payload,
-    client_id: input.client_id,
-    reply_to_id: input.reply_to_id || null,
-    reply_to: reply,
-    created_at: new Date().toISOString(),
-    attachments,
-    status: "sent",
-  };
-  const job: PersistJob = {
-    id,
-    chatId,
-    userId,
-    type: prepared.type,
-    payload: prepared.payload,
-    clientId: input.client_id,
-    replyToId: input.reply_to_id || null,
-    createdAt: msg.created_at,
-    uploadIds,
-    voiceMs: prepared.voiceMs,
-  };
-  try {
-    const staged = await stageMessage(JSON.stringify(msg), id, input.client_id, chatId, job);
-    if (staged === "dup") {
-      const again = await messageByClient(input.client_id);
-      if (again) {
-        const parsed = JSON.parse(again) as Message;
-        if (parsed.chat_id === chatId) return parsed;
-      }
-      return sendMessagePg(userId, chatId, input, prepared, req);
-    }
-    if (staged === "down") return sendMessagePg(userId, chatId, input, prepared, req);
-  } catch (err) {
-    console.error("valkey stage", err instanceof Error ? err.message : err);
-    return sendMessagePg(userId, chatId, input, prepared, req);
-  }
-  hub.publishMany(members, envelope("message.created", msg));
-  return msg;
+  return sendMessagePg(userId, chatId, input, prepared, req);
 }
 
 async function sendMessagePg(
@@ -417,35 +345,70 @@ async function sendMessagePg(
     const atts = await attachmentsFor([msg.id], req);
     msg.attachments = atts.get(msg.id) || [];
     msg.status = await statusFor(msg.id);
+    if (msg.chat_id === chatId) fanoutNew(chatId, await memberIds(chatId), msg);
     return msg;
   }
 
   const id = crypto.randomUUID();
+  let realId = id;
   try {
-    await query(
+    const inserted = await query<{ id: string }>(
       `INSERT INTO messages (id, chat_id, author_id, type, payload, client_id, reply_to_id)
        VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7)
-       ON CONFLICT (client_id) DO NOTHING`,
+       ON CONFLICT (client_id) DO NOTHING
+       RETURNING id`,
       [id, chatId, userId, type, JSON.stringify(payload), input.client_id, input.reply_to_id || null],
     );
+    if (!inserted[0]?.id) {
+      const again = await queryOne<MsgRow>(
+        `SELECT ${MSG_COLS}
+         FROM messages m
+         LEFT JOIN users u ON u.id = m.author_id
+         WHERE m.client_id=$1`,
+        [input.client_id],
+      );
+      if (!again) throw new HttpError(409, "conflict", "client_id");
+      const dup = mapMsg(again);
+      const atts = await attachmentsFor([dup.id], req);
+      dup.attachments = atts.get(dup.id) || [];
+      dup.status = await statusFor(dup.id);
+      if (dup.chat_id === chatId) fanoutNew(chatId, await memberIds(chatId), dup);
+      return dup;
+    }
+    realId = inserted[0].id;
   } catch (err) {
+    if (err instanceof HttpError) throw err;
     const msg = err instanceof Error ? err.message : "";
     if (msg.includes("messages_client_id_uidx") || msg.includes("duplicate key")) {
-      return sendMessage(userId, chatId, input, req);
+      const again = await queryOne<MsgRow>(
+        `SELECT ${MSG_COLS}
+         FROM messages m
+         LEFT JOIN users u ON u.id = m.author_id
+         WHERE m.client_id=$1`,
+        [input.client_id],
+      );
+      if (again) {
+        const dup = mapMsg(again);
+        const atts = await attachmentsFor([dup.id], req);
+        dup.attachments = atts.get(dup.id) || [];
+        dup.status = await statusFor(dup.id);
+        if (dup.chat_id === chatId) fanoutNew(chatId, await memberIds(chatId), dup);
+        return dup;
+      }
     }
     throw err;
   }
 
   if (input.upload_ids?.length) {
-    await attachUploads(userId, id, type, input.upload_ids, voiceMs);
+    await attachUploads(userId, realId, type, input.upload_ids, voiceMs);
   }
 
-  await query(`UPDATE chats SET updated_at=now(), last_message_id=$2 WHERE id=$1`, [chatId, id]);
+  await query(`UPDATE chats SET updated_at=now(), last_message_id=$2 WHERE id=$1`, [chatId, realId]);
 
-  const msg = await getMessage(userId, id, req);
+  const msg = await getMessage(userId, realId, req);
   msg.status = "sent";
   const members = await memberIds(chatId);
-  hub.publishMany(members, envelope("message.created", msg));
+  fanoutNew(chatId, members, msg);
   return msg;
 }
 
@@ -598,15 +561,14 @@ export async function receipts(userId: string, messageIds: string[], status: str
       );
     }
     if (row.author_id) {
-      hub.publish(
-        row.author_id,
-        envelope("receipt.upserted", {
-          message_id: id,
-          user_id: userId,
-          status,
-          chat_id: row.chat_id,
-        }),
-      );
+      const body = {
+        message_id: id,
+        user_id: userId,
+        status,
+        chat_id: row.chat_id,
+      };
+      hub.publish(row.author_id, envelope("receipt", body));
+      hub.publish(row.author_id, envelope("receipt.upserted", body));
     }
   }
   return { ok: true };

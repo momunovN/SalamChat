@@ -36,9 +36,35 @@ import { listContacts, syncContacts } from "./contacts";
 import { getUserPublic, lookupPhones, searchUsers } from "./users";
 import { completeUpload, createIntent, mediaType, putUpload, readMedia } from "./uploads";
 import { sseResponse } from "./stream";
-import { valkeyReady } from "./valkey";
+import { markTyping, valkeyReady } from "./valkey";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+type SendBody = {
+  chat_id?: string;
+  client_id?: string;
+  type?: string;
+  text?: string;
+  payload?: unknown;
+  reply_to_id?: string;
+  upload_ids?: string[];
+};
+
+function sendInput(body: SendBody) {
+  const payload =
+    body.payload && typeof body.payload === "object"
+      ? body.payload
+      : body.text != null
+        ? { text: body.text }
+        : body.payload;
+  return {
+    client_id: body.client_id || "",
+    type: body.type || "text",
+    payload,
+    reply_to_id: body.reply_to_id,
+    upload_ids: body.upload_ids,
+  };
+}
 
 function match(parts: string[], pattern: string) {
   const pat = pattern.split("/").filter(Boolean);
@@ -224,31 +250,21 @@ async function dispatch(method: string, parts: string[], req: Request, url: URL)
           url.searchParams.get("cursor") || "",
           limit,
           req,
+          url.searchParams.get("after") || "",
         ),
       );
     }
     if (method === "POST" && m) {
-      const body = await readJSON<{
-        client_id?: string;
-        type?: string;
-        payload?: unknown;
-        reply_to_id?: string;
-        upload_ids?: string[];
-      }>(req);
-      const msg = await sendMessage(
-        auth.userId,
-        m.chatID,
-        {
-          client_id: body.client_id || "",
-          type: body.type || "text",
-          payload: body.payload,
-          reply_to_id: body.reply_to_id,
-          upload_ids: body.upload_ids,
-        },
-        req,
-      );
+      const body = await readJSON<SendBody>(req);
+      const msg = await sendMessage(auth.userId, m.chatID, sendInput(body), req);
       return json(201, msg);
     }
+  }
+  if (method === "POST" && p("messages")) {
+    const body = await readJSON<SendBody>(req);
+    if (!body.chat_id || !UUID.test(body.chat_id)) throw new HttpError(400, "bad_id", "invalid chat id");
+    const msg = await sendMessage(auth.userId, body.chat_id, sendInput(body), req);
+    return json(201, msg);
   }
   {
     const m = p("chats/:chatID/calls");
@@ -331,6 +347,7 @@ async function dispatch(method: string, parts: string[], req: Request, url: URL)
   if (method === "POST" && p("typing")) {
     const body = await readJSON<{ chat_id?: string }>(req);
     if (body.chat_id) {
+      markTyping(body.chat_id, auth.userId);
       const members = await (await import("./chats")).memberIds(body.chat_id);
       hub.publishMany(
         members.filter((id) => id !== auth.userId),

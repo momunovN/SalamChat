@@ -110,6 +110,7 @@ export function MessengerApp() {
   const pendingStart = useRef<(() => Promise<Call>) | null>(null);
   const pendingAudio = useRef<MediaStreamTrack | null>(null);
   const goneChats = useRef(new Set<string>());
+  const heard = useRef(new Set<string>());
   const pinnedChats = useRef(new Map<string, Chat>());
   const renamed = useRef(new Map<string, string>());
   const refreshGen = useRef(0);
@@ -352,8 +353,13 @@ export function MessengerApp() {
         const env = JSON.parse(ev.data) as Envelope;
         const openId = activeIdRef.current;
         const myId = meRef.current;
-        if (env.type === "message.created") {
+        if (env.type === "message.created" || env.type === "message.new") {
           const msg = env.body as Message;
+          if (msg.id && heard.current.has(msg.id)) return;
+          if (msg.id) {
+            if (heard.current.size > 400) heard.current.clear();
+            heard.current.add(msg.id);
+          }
           if (goneChats.current.has(msg.chat_id)) goneChats.current.delete(msg.chat_id);
           const viewing = openId === msg.chat_id;
           const mine = msg.author_id === myId;
@@ -406,7 +412,19 @@ export function MessengerApp() {
           setRosterTick((n) => n + 1);
           void refreshChats();
         }
-        if (env.type === "receipt.upserted") {
+        if (env.type === "message.ack") {
+          const body = env.body as { id?: string; client_id?: string };
+          if (body.id && body.client_id) {
+            setMessages((prev) =>
+              prev.map((m) => {
+                if (m.client_id !== body.client_id && m.id !== body.client_id && m.id !== body.id) return m;
+                const status = m.status === "read" || m.status === "delivered" ? m.status : "sent";
+                return { ...m, id: body.id || m.id, status };
+              }),
+            );
+          }
+        }
+        if (env.type === "receipt" || env.type === "receipt.upserted") {
           const body = env.body as { message_id: string; status: string };
           setMessages((prev) => prev.map((m) => (m.id === body.message_id ? { ...m, status: body.status } : m)));
         }

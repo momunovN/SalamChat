@@ -4,8 +4,15 @@ import type { Duplex } from "stream";
 import { parse } from "url";
 import { WebSocket, WebSocketServer } from "ws";
 import { parseAccess } from "./auth";
-import { memberIds } from "./chats";
+import { memberIds, peerUserIds } from "./chats";
 import { envelope, hub, presence } from "./hub";
+import { beatSocket, clearOnline, dropSocket, markTyping, noteSocket } from "./valkey";
+
+export async function announcePresence(userId: string, online: boolean) {
+  const peers = await peerUserIds(userId).catch(() => [] as string[]);
+  if (peers.length === 0) return;
+  hub.publishMany(peers, envelope("presence", { user_id: userId, online }));
+}
 
 export function attachWs(
   server: Server,
@@ -25,7 +32,10 @@ export function attachWs(
     try {
       const { userId } = await parseAccess(token);
       wss.handleUpgrade(req, socket, head, (ws) => {
-        presence.heartbeat(userId);
+        const connId = crypto.randomUUID();
+        const first = presence.enter(userId);
+        void noteSocket(userId, connId);
+        if (first) void announcePresence(userId, true);
         const unsub = hub.subscribe(userId, (env) => {
           if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(env));
         });
@@ -33,6 +43,7 @@ export function attachWs(
           if (ws.readyState === WebSocket.OPEN) {
             ws.ping();
             presence.heartbeat(userId);
+            void beatSocket(userId, connId);
           }
         }, 25_000);
         ws.on("message", async (raw) => {
@@ -41,8 +52,10 @@ export function attachWs(
             if (msg.type === "ping") {
               ws.send(JSON.stringify(envelope("pong", {})));
               presence.heartbeat(userId);
+              void beatSocket(userId, connId);
             }
             if (msg.type === "typing" && msg.chat_id) {
+              markTyping(msg.chat_id, userId);
               const ids = await memberIds(msg.chat_id);
               hub.publishMany(
                 ids.filter((id) => id !== userId),
@@ -56,6 +69,11 @@ export function attachWs(
         ws.on("close", () => {
           clearInterval(ping);
           unsub();
+          const last = presence.exit(userId);
+          void dropSocket(userId, connId).then((empty) => {
+            if (last && empty) void announcePresence(userId, false);
+            else if (last) void clearOnline(userId);
+          });
         });
       });
     } catch {

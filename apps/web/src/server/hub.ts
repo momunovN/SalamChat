@@ -46,13 +46,33 @@ class Hub {
 
 class Presence {
   private last = new Map<string, number>();
+  private counts = new Map<string, number>();
   private ttl = 45_000;
 
   heartbeat(userId: string) {
     this.last.set(userId, Date.now());
   }
 
+  enter(userId: string) {
+    const n = (this.counts.get(userId) || 0) + 1;
+    this.counts.set(userId, n);
+    this.last.set(userId, Date.now());
+    return n === 1;
+  }
+
+  exit(userId: string) {
+    const n = (this.counts.get(userId) || 1) - 1;
+    if (n <= 0) {
+      this.counts.delete(userId);
+      this.last.delete(userId);
+      return true;
+    }
+    this.counts.set(userId, n);
+    return false;
+  }
+
   leave(userId: string) {
+    this.counts.delete(userId);
     this.last.delete(userId);
   }
 

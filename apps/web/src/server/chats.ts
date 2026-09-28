@@ -356,6 +356,18 @@ export async function memberIds(chatId: string) {
   return rows.map((r) => r.user_id);
 }
 
+export async function peerUserIds(userId: string) {
+  const rows = await query<{ user_id: string }>(
+    `SELECT DISTINCT other.user_id
+     FROM chat_members me
+     JOIN chat_members other ON other.chat_id = me.chat_id AND other.user_id <> me.user_id
+     WHERE me.user_id = $1
+     LIMIT 500`,
+    [userId],
+  );
+  return rows.map((r) => r.user_id);
+}
+
 export async function markRead(chatId: string, userId: string, messageId: string) {
   await mustMember(chatId, userId);
   await query(
