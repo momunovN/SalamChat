@@ -41,6 +41,11 @@ enum L10n {
     static var syncContacts: String { t("auth.sync_contacts") }
     static var syncHint: String { t("contacts.sync_hint") }
     static var errName: String { t("auth.err_name") }
+    static var fieldName: String { t("more.name") }
+    static var fieldNick: String { t("more.nick") }
+    static var fieldBio: String { t("more.bio") }
+    static var save: String { t("more.save") }
+    static var logout: String { t("more.logout") }
 
     static func t(_ key: String) -> String {
         NSLocalizedString(key, comment: "")

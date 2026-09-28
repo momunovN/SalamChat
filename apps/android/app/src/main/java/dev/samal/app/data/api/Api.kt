@@ -59,9 +59,10 @@ class SamalApi(
         return post("/v1/chats/$chatId/messages", body, true)
     }
 
-    fun patchMe(displayName: String, username: String?): JSONObject {
+    fun patchMe(displayName: String, username: String?, bio: String? = null): JSONObject {
         val body = JSONObject().put("display_name", displayName)
         if (!username.isNullOrBlank()) body.put("username", username)
+        if (bio != null) body.put("bio", bio)
         return patch("/v1/me", body)
     }
 

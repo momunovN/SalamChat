@@ -17,6 +17,9 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
@@ -100,16 +103,22 @@ fun ProfileOnboardingScreen(session: SessionStore) {
         }
     }
 
-    Column(
+    Box(
         Modifier
             .fillMaxSize()
             .background(Bg)
             .statusBarsPadding()
             .navigationBarsPadding()
-            .imePadding()
-            .padding(24.dp),
+            .imePadding(),
     ) {
-        Spacer(Modifier.height(24.dp))
+    Column(
+        Modifier
+            .align(Alignment.TopCenter)
+            .widthIn(max = 480.dp)
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 20.dp, vertical = 16.dp),
+    ) {
         SalamLogo(72.dp)
         Spacer(Modifier.height(16.dp))
         Text(stringResource(R.string.app_name), color = Text, fontSize = 28.sp, fontWeight = FontWeight.Bold)
@@ -151,5 +160,7 @@ fun ProfileOnboardingScreen(session: SessionStore) {
         ) {
             Text(stringResource(R.string.auth_continue), color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
         }
+        Spacer(Modifier.height(24.dp))
+    }
     }
 }

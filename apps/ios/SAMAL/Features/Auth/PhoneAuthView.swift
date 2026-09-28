@@ -10,9 +10,10 @@ struct PhoneAuthView: View {
     @State private var hint: String?
 
     var body: some View {
+        GeometryReader { geo in
+        ScrollView {
         VStack(alignment: .leading, spacing: 16) {
-            Spacer(minLength: 24)
-            SalamLogo(size: 72)
+            SalamLogo(size: geo.size.height < 700 ? 56 : 72)
             Text(L10n.appName).font(SamalFont.title()).foregroundStyle(SamalColor.text)
             Text(step == 0 ? L10n.phoneTitle : L10n.otpTitle)
                 .font(SamalFont.headline())
@@ -44,9 +45,14 @@ struct PhoneAuthView: View {
             }
             .disabled(busy)
             .buttonStyle(.plain)
-            Spacer()
         }
-        .padding(24)
+        .padding(.horizontal, geo.size.width < 360 ? 16 : 24)
+        .padding(.vertical, 16)
+        .frame(maxWidth: 480)
+        .frame(maxWidth: .infinity)
+        .frame(minHeight: geo.size.height, alignment: .top)
+        }
+        }
         .background(SamalColor.bg.ignoresSafeArea())
     }
 

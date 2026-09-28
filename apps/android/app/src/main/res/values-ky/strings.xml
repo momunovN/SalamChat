@@ -25,4 +25,11 @@
     <string name="auth_continue">Улантуу</string>
     <string name="auth_otp_title">SMS коду</string>
     <string name="auth_otp_subtitle">6 санды жазыңыз</string>
+    <string name="field_name">Аты</string>
+    <string name="field_nick">Ник</string>
+    <string name="field_bio">Жөнүндө</string>
+    <string name="save">Сактоо</string>
+    <string name="logout">Чыгуу</string>
+    <string name="err_name">Атын жазыңыз — эки тамгадан кем эмес</string>
+    <string name="err_nick">Ник: латиница, 3–24 символ, тамгадан башталат</string>
 </resources>

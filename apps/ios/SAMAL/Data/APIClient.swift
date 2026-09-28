@@ -91,9 +91,10 @@ final class APIClient {
         return w.items
     }
 
-    func patchMe(displayName: String, username: String?) async throws -> APIUser {
+    func patchMe(displayName: String, username: String?, bio: String? = nil) async throws -> APIUser {
         var body: [String: Any] = ["display_name": displayName]
         if let username, !username.isEmpty { body["username"] = username }
+        if let bio { body["bio"] = bio }
         return try await send("/v1/me", method: "PATCH", body: body, authed: true)
     }
 

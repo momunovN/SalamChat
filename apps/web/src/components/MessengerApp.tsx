@@ -858,7 +858,7 @@ export function MessengerApp() {
   if (!ready) return <div className="min-h-full bg-bg" />;
   if (!session) {
     return (
-      <div className="min-h-full bg-bg">
+      <div className="min-h-dvh bg-bg">
         <PhoneAuth
           t={t}
           onSession={(s) => {
@@ -874,7 +874,7 @@ export function MessengerApp() {
   }
   if (needsDisplayName(session.user.display_name)) {
     return (
-      <div className="min-h-full bg-bg">
+      <div className="min-h-dvh bg-bg">
         <NameOnboarding
           t={t}
           onDone={(user) => {
@@ -907,10 +907,10 @@ export function MessengerApp() {
 
   const listPanel = (
     <div className="flex h-full min-w-0 flex-col border-r border-line bg-bg">
-      <div className="flex items-center justify-between px-4 pt-3 pb-2">
-        <div className="flex min-w-0 items-center gap-2.5">
-          <BrandMark alt="" className="h-9 w-9 md:hidden" />
-          <h1 className="truncate text-[28px] font-bold tracking-tight text-ink">
+      <div className="flex items-center justify-between gap-2 px-3 pt-2 pb-2 sm:px-4 sm:pt-3">
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <BrandMark alt="" className="h-8 w-8 shrink-0 sm:h-9 sm:w-9 md:hidden" />
+          <h1 className="truncate text-[22px] font-bold tracking-tight text-ink sm:text-[28px]">
             {tab === "chats" ? t.app : tab === "calls" ? t.tabCalls : tab === "contacts" ? t.tabContacts : t.tabMore}
           </h1>
         </div>
@@ -922,7 +922,7 @@ export function MessengerApp() {
                 setPicking((on) => !on);
                 setSelectedIds([]);
               }}
-              className="rounded-full px-3 py-1.5 text-sm font-semibold text-accent"
+              className="shrink-0 rounded-full px-2 py-1.5 text-[13px] font-semibold text-accent sm:px-3 sm:text-sm"
             >
               {picking ? t.cancel : t.selectChats}
             </button>
@@ -957,7 +957,7 @@ export function MessengerApp() {
       ) : null}
 
       {tab === "chats" ? (
-        <div className="flex gap-1 px-4 pb-2">
+        <div className="flex flex-wrap gap-1 px-3 pb-2 sm:px-4">
           {picking ? (
             <button
               type="button"
@@ -1261,7 +1261,7 @@ export function MessengerApp() {
 
       <div className={`w-full md:w-[340px] md:shrink-0 ${activeId ? "hidden md:flex md:flex-col" : "flex flex-col"}`}>
         {listPanel}
-        <nav className="flex border-t border-line bg-elevated py-1.5 md:hidden">
+        <nav className="flex border-t border-line bg-elevated py-1 md:hidden">
           <div className="flex w-full justify-around">
             {navBtn("chats", <MessageSquare size={20} />, t.tabChats)}
             {navBtn("calls", <Phone size={20} />, t.tabCalls)}

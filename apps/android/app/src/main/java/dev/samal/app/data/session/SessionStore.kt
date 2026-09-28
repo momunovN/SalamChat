@@ -52,8 +52,8 @@ class SessionStore(
         apply(sess)
     }
 
-    suspend fun patchProfile(displayName: String, username: String?) {
-        val raw = withContext(Dispatchers.IO) { api.patchMe(displayName, username) }
+    suspend fun patchProfile(displayName: String, username: String?, bio: String? = null) {
+        val raw = withContext(Dispatchers.IO) { api.patchMe(displayName, username, bio) }
         val current = prefs.getString(KEY, null) ?: return
         val sess = Session.from(JSONObject(current))
         val nextUser = Session.from(

@@ -118,25 +118,108 @@ struct ContactsView: View {
 
 struct MoreView: View {
     @EnvironmentObject var session: SessionStore
+    @State private var name = ""
+    @State private var nick = ""
+    @State private var bio = ""
+    @State private var error: String?
+    @State private var busy = false
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack(spacing: 10) {
-                SalamLogo(size: 36)
-                Text(L10n.tabMore).font(SamalFont.title()).foregroundStyle(SamalColor.text)
-                Spacer()
+        GeometryReader { geo in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    HStack(spacing: 10) {
+                        SalamLogo(size: 36)
+                        Text(L10n.tabMore).font(SamalFont.title()).foregroundStyle(SamalColor.text)
+                        Spacer()
+                    }
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(session.user?.displayName ?? "")
+                            .font(SamalFont.headline())
+                            .foregroundStyle(SamalColor.text)
+                        Text(accountLine)
+                            .font(SamalFont.subhead())
+                            .foregroundStyle(SamalColor.muted)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(16)
+                    .background(SamalColor.elevated, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+
+                    Text(L10n.fieldName).font(SamalFont.caption()).foregroundStyle(SamalColor.muted)
+                    field($name)
+                    Text(L10n.fieldNick).font(SamalFont.caption()).foregroundStyle(SamalColor.muted)
+                    field($nick)
+                    Text(L10n.nickHint).font(SamalFont.caption()).foregroundStyle(SamalColor.muted)
+                    Text(L10n.fieldBio).font(SamalFont.caption()).foregroundStyle(SamalColor.muted)
+                    field($bio)
+                    if let error {
+                        Text(error).font(SamalFont.caption()).foregroundStyle(SamalColor.danger)
+                    }
+                    Button(action: save) {
+                        Text(L10n.save)
+                            .font(SamalFont.headline())
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 48)
+                            .background(SamalColor.accent, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .opacity(busy ? 0.6 : 1)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(busy)
+                    Button(L10n.logout) { session.logout() }
+                        .foregroundStyle(SamalColor.danger)
+                }
+                .padding(.horizontal, geo.size.width < 360 ? 16 : 20)
+                .padding(.vertical, 12)
+                .frame(maxWidth: 480)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            Text(session.user?.displayName ?? "")
-                .font(SamalFont.headline())
-                .foregroundStyle(SamalColor.text)
-            Text(session.user?.phone ?? "")
-                .font(SamalFont.subhead())
-                .foregroundStyle(SamalColor.muted)
-            Button("Выйти") { session.logout() }
-                .foregroundStyle(SamalColor.danger)
-            Spacer()
         }
-        .padding(16)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(SamalColor.bg)
+        .onAppear {
+            name = session.user?.displayName ?? ""
+            nick = session.user?.username ?? ""
+            bio = session.user?.bio ?? ""
+        }
+    }
+
+    private var accountLine: String {
+        var parts: [String] = []
+        if let nick = session.user?.username, !nick.isEmpty { parts.append("@\(nick)") }
+        if let phone = session.user?.phone, !phone.isEmpty { parts.append(phone) }
+        return parts.joined(separator: " · ")
+    }
+
+    private func field(_ binding: Binding<String>) -> some View {
+        TextField("", text: binding)
+            .font(SamalFont.body())
+            .foregroundStyle(SamalColor.text)
+            .padding(.horizontal, 14)
+            .frame(height: 48)
+            .background(SamalColor.elevated, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    private func save() {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count >= 2 else {
+            error = L10n.errName
+            return
+        }
+        busy = true
+        error = nil
+        Task {
+            defer { busy = false }
+            do {
+                let clean = nick.trimmingCharacters(in: .whitespacesAndNewlines).trimmingPrefix("@")
+                let user = try await session.api.patchMe(
+                    displayName: trimmed,
+                    username: clean.isEmpty ? nil : String(clean),
+                    bio: bio
+                )
+                session.updateUser(user)
+            } catch {
+                self.error = error.localizedDescription
+            }
+        }
     }
 }

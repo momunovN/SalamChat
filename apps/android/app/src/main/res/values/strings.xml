@@ -33,4 +33,9 @@
     <string name="sync_hint">Включите синхронизацию контактов — друзья из Salam появятся здесь и на сайте.</string>
     <string name="err_name">Введите имя — не меньше двух букв</string>
     <string name="err_nick">Ник: латиница, 3–24 символа, начать с буквы</string>
+    <string name="field_name">Имя</string>
+    <string name="field_nick">Ник</string>
+    <string name="field_bio">О себе</string>
+    <string name="save">Сохранить</string>
+    <string name="logout">Выйти</string>
 </resources>

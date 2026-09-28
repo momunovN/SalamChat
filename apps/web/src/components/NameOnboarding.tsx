@@ -64,12 +64,12 @@ export function NameOnboarding({
   }
 
   return (
-    <div className="flex min-h-full flex-1 items-center justify-center px-6">
-      <div className="w-full max-w-md">
-        <div className="mb-10">
-          <BrandMark alt="" className="mb-5 h-16 w-16" />
+    <div className="min-h-dvh overflow-y-auto px-4 pt-[max(1.25rem,env(safe-area-inset-top))] pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:px-6">
+      <div className="mx-auto w-full max-w-md">
+        <div className="mb-8 sm:mb-10">
+          <BrandMark alt="" className="mb-5 h-14 w-14 sm:h-16 sm:w-16" />
           <p className="text-xs font-semibold tracking-[0.28em] text-accent">KG · RU</p>
-          <h1 className="mt-2 text-[40px] font-bold tracking-tight text-ink">{t.app}</h1>
+          <h1 className="mt-2 text-[32px] font-bold tracking-tight text-ink sm:text-[40px]">{t.app}</h1>
           <p className="mt-3 text-[17px] font-semibold text-ink">{t.nameTitle}</p>
           <p className="mt-1 text-sm text-muted">{t.nameSubtitle}</p>
         </div>

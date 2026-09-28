@@ -38,7 +38,8 @@ struct MainTabs: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
             HStack {
                 tabBtn(0, "bubble.left.and.bubble.right.fill", L10n.tabChats)
                 tabBtn(1, "phone.fill", L10n.tabCalls)
@@ -47,7 +48,7 @@ struct MainTabs: View {
             }
             .padding(.top, 8)
             .padding(.bottom, 6)
-            .background(SamalColor.elevated)
+            .background(SamalColor.elevated.ignoresSafeArea(edges: .bottom))
         }
         .background(SamalColor.bg.ignoresSafeArea())
     }
