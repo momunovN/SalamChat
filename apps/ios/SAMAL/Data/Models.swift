@@ -3,6 +3,7 @@ import Foundation
 struct APIUser: Codable, Hashable, Identifiable {
     var id: UUID
     var phone: String
+    var email: String?
     var displayName: String
     var username: String?
     var avatarURL: String?
@@ -12,7 +13,7 @@ struct APIUser: Codable, Hashable, Identifiable {
     var bookName: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, phone, username, bio, online
+        case id, phone, email, username, bio, online
         case displayName = "display_name"
         case avatarURL = "avatar_url"
         case lastSeenAt = "last_seen_at"

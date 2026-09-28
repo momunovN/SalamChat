@@ -29,13 +29,18 @@ class SamalApi(
         .build()
     private val refreshing = AtomicBoolean(false)
 
-    fun requestOtp(phone: String): String? {
-        val body = post("/v1/auth/otp/request", JSONObject().put("phone", phone), false)
+    fun requestOtp(email: String, phone: String): String? {
+        val body = post(
+            "/v1/auth/otp/request",
+            JSONObject().put("email", email).put("phone", phone),
+            false,
+        )
         return body.optString("dev_code").takeIf { it.isNotBlank() }
     }
 
-    fun verifyOtp(phone: String, code: String, deviceName: String = "Android"): Session {
+    fun verifyOtp(email: String, phone: String, code: String, deviceName: String = "Android"): Session {
         val payload = JSONObject()
+            .put("email", email)
             .put("phone", phone)
             .put("code", code)
             .put(

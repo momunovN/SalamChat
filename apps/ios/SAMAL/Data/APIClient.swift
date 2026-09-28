@@ -1,9 +1,26 @@
 import Foundation
 
-enum APIError: Error {
+enum APIError: LocalizedError {
     case http(Int, String)
     case decode
     case unauthorized
+
+    var errorDescription: String? {
+        switch self {
+        case .http(_, let body):
+            if let data = body.data(using: .utf8),
+               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let err = json["error"] as? [String: Any],
+               let message = err["message"] as? String, !message.isEmpty {
+                return message
+            }
+            return body.isEmpty ? "http" : body
+        case .decode:
+            return "decode"
+        case .unauthorized:
+            return "unauthorized"
+        }
+    }
 }
 
 final class APIClient {
@@ -33,14 +50,15 @@ final class APIClient {
         self.baseURL = baseURL
     }
 
-    func requestOTP(phone: String) async throws -> String? {
+    func requestOTP(email: String, phone: String) async throws -> String? {
         struct Out: Decodable { var dev_code: String? }
-        let r: Out = try await post("/v1/auth/otp/request", body: ["phone": phone], authed: false)
+        let r: Out = try await post("/v1/auth/otp/request", body: ["email": email, "phone": phone], authed: false)
         return r.dev_code
     }
 
-    func verifyOTP(phone: String, code: String) async throws -> APISession {
+    func verifyOTP(email: String, phone: String, code: String) async throws -> APISession {
         try await post("/v1/auth/otp/verify", body: [
+            "email": email,
             "phone": phone,
             "code": code,
             "device": ["platform": "ios", "device_name": "iPhone"]

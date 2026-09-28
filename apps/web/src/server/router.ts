@@ -130,12 +130,12 @@ async function dispatch(method: string, parts: string[], req: Request, url: URL)
   const p = (pat: string) => match(parts, pat);
 
   if (method === "POST" && p("auth/otp/request")) {
-    const body = await readJSON<{ phone?: string }>(req);
-    return json(200, await requestOTP(body.phone || ""));
+    const body = await readJSON<{ email?: string; phone?: string }>(req);
+    return json(200, await requestOTP(body.email || "", body.phone || ""));
   }
   if (method === "POST" && p("auth/otp/verify")) {
-    const body = await readJSON<{ phone?: string; code?: string; device?: { platform?: string; device_name?: string; push_token?: string } }>(req);
-    return json(200, await verifyOTP(body.phone || "", body.code || "", body.device));
+    const body = await readJSON<{ email?: string; phone?: string; code?: string; device?: { platform?: string; device_name?: string; push_token?: string } }>(req);
+    return json(200, await verifyOTP(body.email || "", body.code || "", body.device, body.phone || ""));
   }
   if (method === "POST" && p("auth/refresh")) {
     const body = await readJSON<{ refresh_token?: string }>(req);

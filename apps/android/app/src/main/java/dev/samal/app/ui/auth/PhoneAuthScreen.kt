@@ -57,6 +57,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun PhoneAuthScreen(session: SessionStore) {
     var cc by remember { mutableStateOf("996") }
+    var email by remember { mutableStateOf("") }
     var phone by remember { mutableStateOf("+996") }
     var code by remember { mutableStateOf("") }
     var step by remember { mutableIntStateOf(0) }
@@ -64,19 +65,32 @@ fun PhoneAuthScreen(session: SessionStore) {
     var hint by remember { mutableStateOf<String?>(null) }
     var hintError by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    val errEmail = stringResource(R.string.auth_err_email)
+
+    fun skippedPhone(value: String): Boolean {
+        val digits = value.filter(Char::isDigit)
+        return digits.isEmpty() || digits == "996" || digits == "7"
+    }
 
     fun go() {
         if (busy) return
+        if (step == 0 && !email.contains("@")) {
+            hint = errEmail
+            hintError = true
+            return
+        }
         busy = true
         hint = null
         scope.launch {
             try {
+                val sentPhone = if (skippedPhone(phone)) "" else phone
                 if (step == 0) {
-                    hint = session.requestOtp(phone)
+                    val dev = session.requestOtp(email.trim(), sentPhone)
+                    hint = dev ?: email.trim()
                     hintError = false
                     step = 1
                 } else {
-                    session.login(phone, code)
+                    session.login(email.trim(), sentPhone, code)
                 }
             } catch (e: Exception) {
                 hint = e.message
@@ -126,6 +140,21 @@ fun PhoneAuthScreen(session: SessionStore) {
         )
         Spacer(Modifier.height(16.dp))
         if (step == 0) {
+            AuthField(
+                value = email,
+                onValueChange = { email = it },
+                keyboard = KeyboardType.Email,
+                onGo = ::go,
+                placeholder = stringResource(R.string.auth_email_hint),
+            )
+            Spacer(Modifier.height(14.dp))
+            Text(
+                stringResource(R.string.auth_phone_optional),
+                color = Muted,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+            )
+            Spacer(Modifier.height(8.dp))
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 CountryChip(
                     label = stringResource(R.string.auth_country_kg),
@@ -204,10 +233,14 @@ internal fun AuthField(
     onValueChange: (String) -> Unit,
     keyboard: KeyboardType,
     onGo: () -> Unit,
+    placeholder: String = "",
 ) {
     TextField(
         value = value,
         onValueChange = onValueChange,
+        placeholder = {
+            if (placeholder.isNotEmpty()) Text(placeholder, color = Muted)
+        },
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(14.dp)),

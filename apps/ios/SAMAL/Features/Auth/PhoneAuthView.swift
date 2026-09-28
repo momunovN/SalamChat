@@ -2,12 +2,14 @@ import SwiftUI
 
 struct PhoneAuthView: View {
     @EnvironmentObject var session: SessionStore
+    @State private var email = ""
     @State private var phone = "+996"
     @State private var cc = "996"
     @State private var code = ""
     @State private var step = 0
     @State private var busy = false
     @State private var hint: String?
+    @State private var failed = false
 
     var body: some View {
         GeometryReader { geo in
@@ -23,16 +25,22 @@ struct PhoneAuthView: View {
                 .foregroundStyle(SamalColor.muted)
 
             if step == 0 {
+                field($email, keyboard: .emailAddress, prompt: L10n.emailPlaceholder)
+                Text(L10n.phoneOptional)
+                    .font(SamalFont.caption())
+                    .foregroundStyle(SamalColor.muted)
                 HStack(spacing: 8) {
                     countryChip("996", L10n.countryKg, "+996")
                     countryChip("7", L10n.countryRu, "+7")
                 }
-                field($phone, keyboard: .phonePad)
+                field($phone, keyboard: .phonePad, prompt: "")
             } else {
-                field($code, keyboard: .numberPad)
+                field($code, keyboard: .numberPad, prompt: "000000")
             }
             if let hint {
-                Text(hint).font(SamalFont.caption()).foregroundStyle(SamalColor.success)
+                Text(hint)
+                    .font(SamalFont.caption())
+                    .foregroundStyle(failed ? SamalColor.danger : SamalColor.success)
             }
             Button(action: go) {
                 Text(L10n.continueCta)
@@ -72,9 +80,11 @@ struct PhoneAuthView: View {
         .buttonStyle(.plain)
     }
 
-    private func field(_ binding: Binding<String>, keyboard: UIKeyboardType) -> some View {
-        TextField("", text: binding)
+    private func field(_ binding: Binding<String>, keyboard: UIKeyboardType, prompt: String) -> some View {
+        TextField("", text: binding, prompt: Text(prompt).foregroundStyle(SamalColor.muted))
             .keyboardType(keyboard)
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled()
             .font(SamalFont.body())
             .foregroundStyle(SamalColor.text)
             .padding(.horizontal, 14)
@@ -82,19 +92,36 @@ struct PhoneAuthView: View {
             .background(SamalColor.elevated, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
+    private func skippedPhone(_ value: String) -> Bool {
+        let digits = value.filter(\.isNumber)
+        return digits.isEmpty || digits == "996" || digits == "7"
+    }
+
     private func go() {
+        if step == 0 && !email.contains("@") {
+            hint = L10n.errEmail
+            failed = true
+            return
+        }
         busy = true
+        failed = false
+        let sentPhone = skippedPhone(phone) ? "" : phone
         Task {
             defer { busy = false }
             do {
                 if step == 0 {
-                    hint = try await session.api.requestOTP(phone: phone)
+                    if let dev = try await session.api.requestOTP(email: email.trimmingCharacters(in: .whitespaces), phone: sentPhone) {
+                        hint = dev
+                    } else {
+                        hint = email.trimmingCharacters(in: .whitespaces)
+                    }
                     step = 1
                 } else {
-                    try await session.login(phone: phone, code: code)
+                    try await session.login(email: email.trimmingCharacters(in: .whitespaces), phone: sentPhone, code: code)
                 }
             } catch {
                 hint = error.localizedDescription
+                failed = true
             }
         }
     }

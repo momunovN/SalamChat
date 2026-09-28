@@ -20,6 +20,22 @@ export function normalizePhone(raw: string): string | null {
   return s;
 }
 
+/** Empty or a bare country prefix means the person skipped the phone. A longer invalid number is an error. */
+export function optionalPhone(raw: string): { phone: string | null; invalid: boolean } {
+  const digits = raw.replace(/\D/g, "");
+  if (!digits || digits === "996" || digits === "7") return { phone: null, invalid: false };
+  const phone = normalizePhone(raw);
+  if (!phone) return { phone: null, invalid: true };
+  return { phone, invalid: false };
+}
+
+export function normalizeEmail(raw: string): string | null {
+  const s = raw.trim().toLowerCase();
+  if (s.length < 5 || s.length > 254) return null;
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s)) return null;
+  return s;
+}
+
 export function defaultDisplayName(phone: string) {
   if (phone.length < 4) return "TooApp";
   return "• " + phone.slice(-4);

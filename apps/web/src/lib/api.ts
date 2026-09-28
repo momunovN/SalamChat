@@ -85,16 +85,17 @@ async function refresh(refreshToken: string) {
 }
 
 export const api = {
-  requestOTP: (phone: string) =>
+  requestOTP: (email: string, phone = "") =>
     request<{ ok: boolean; dev_code?: string; retry_after_sec: number }>("/v1/auth/otp/request", {
       method: "POST",
-      body: JSON.stringify({ phone }),
+      body: JSON.stringify({ email, phone }),
       authed: false,
     }),
-  verifyOTP: (phone: string, code: string) =>
+  verifyOTP: (email: string, code: string, phone = "") =>
     request<Session>("/v1/auth/otp/verify", {
       method: "POST",
       body: JSON.stringify({
+        email,
         phone,
         code,
         device: { platform: "web", device_name: typeof navigator !== "undefined" ? navigator.userAgent.slice(0, 80) : "web" },

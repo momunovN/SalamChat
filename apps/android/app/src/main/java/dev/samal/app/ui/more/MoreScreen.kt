@@ -112,7 +112,7 @@ fun MoreScreen(session: SessionStore) {
             ) {
                 Text(name.ifBlank { user?.displayName.orEmpty() }, color = Text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
                 Text(
-                    listOfNotNull(user?.username?.let { "@$it" }, user?.phone).joinToString(" · "),
+                    listOfNotNull(user?.username?.let { "@$it" }, user?.phone?.takeIf { it.isNotBlank() }, user?.email).joinToString(" · "),
                     color = Muted,
                     fontSize = 14.sp,
                 )

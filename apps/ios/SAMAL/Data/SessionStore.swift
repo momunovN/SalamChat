@@ -84,8 +84,8 @@ final class SessionStore: ObservableObject {
         ws?.stop()
     }
 
-    func login(phone: String, code: String) async throws {
-        let sess = try await api.verifyOTP(phone: phone, code: code)
+    func login(email: String, phone: String, code: String) async throws {
+        let sess = try await api.verifyOTP(email: email, phone: phone, code: code)
         apply(sess)
     }
 

@@ -29,6 +29,9 @@ enum L10n {
     static var attachGeo: String { t("attach.geo") }
     static var phoneTitle: String { t("auth.phone_title") }
     static var phoneSubtitle: String { t("auth.phone_subtitle") }
+    static var emailPlaceholder: String { t("auth.email_placeholder") }
+    static var phoneOptional: String { t("auth.phone_optional") }
+    static var errEmail: String { t("auth.err_email") }
     static var countryKg: String { t("auth.country_kg") }
     static var countryRu: String { t("auth.country_ru") }
     static var continueCta: String { t("auth.continue") }

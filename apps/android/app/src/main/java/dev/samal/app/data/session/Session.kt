@@ -5,6 +5,7 @@ import org.json.JSONObject
 data class User(
     val id: String,
     val phone: String,
+    val email: String? = null,
     val displayName: String,
     val username: String? = null,
     val avatarUrl: String? = null,
@@ -28,6 +29,7 @@ data class Session(
             JSONObject()
                 .put("id", user.id)
                 .put("phone", user.phone)
+                .put("email", user.email)
                 .put("display_name", user.displayName)
                 .put("username", user.username)
                 .put("avatar_url", user.avatarUrl)
@@ -44,7 +46,8 @@ data class Session(
                 deviceId = o.getString("device_id"),
                 user = User(
                     id = u.getString("id"),
-                    phone = u.getString("phone"),
+                    phone = u.optString("phone"),
+                    email = u.optionalString("email"),
                     displayName = u.optString("display_name"),
                     username = u.optionalString("username"),
                     avatarUrl = u.optionalString("avatar_url"),

@@ -1125,8 +1125,13 @@ export function MessengerApp() {
               <div>
                 <p className="font-semibold text-ink">{session.user.display_name}</p>
                 <p className="text-sm text-muted">
-                  {session.user.username ? `@${session.user.username} · ` : ""}
-                  {formatPhone(session.user.phone)}
+                  {[
+                    session.user.username ? `@${session.user.username}` : "",
+                    formatPhone(session.user.phone),
+                    session.user.email || "",
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
                 </p>
               </div>
             </div>

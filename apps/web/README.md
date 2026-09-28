@@ -25,7 +25,7 @@ npm run dev
 
 OTP в dev приходит в ответе (`dev_code`). SMS никуда не уходит, ключ не нужен.
 
-Реальная SMS на РФ и Кыргызстан: `SMS_PROVIDER=p1sms` и `SMS_API_KEY` из кабинета [P1SMS](https://admin.p1sms.ru/) (раздел «Инструкция по API»). Пустой `SMS_SENDER` — общее имя VIRTA. В проде `TOOAPP_OTP_DEV=false`.
+Код входа приходит письмом: `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`. Почта обязательна, номер можно не указывать. Без SMTP код остаётся в логе. В проде `TOOAPP_OTP_DEV=false`.
 
 ## Приложения
 

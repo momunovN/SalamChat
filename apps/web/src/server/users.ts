@@ -16,7 +16,7 @@ export async function searchUsers(q: string) {
   const rows = await query<UserRow>(
     `SELECT id, phone, display_name, username, avatar_url, bio, created_at, updated_at, last_seen_at
      FROM users
-     WHERE ($1 <> '' AND (display_name ILIKE '%'||$1||'%' OR username ILIKE '%'||$1||'%'))
+     WHERE ($1 <> '' AND (display_name ILIKE '%'||$1||'%' OR username ILIKE '%'||$1||'%' OR email ILIKE '%'||$1||'%'))
         OR ($2 <> '' AND regexp_replace(phone, '[^0-9]', '', 'g') LIKE '%'||$2||'%')
         OR ($4 <> '' AND lower(username) = $4)
      ORDER BY

@@ -290,6 +290,7 @@ struct MoreView: View {
         var parts: [String] = []
         if let nick = session.user?.username, !nick.isEmpty { parts.append("@\(nick)") }
         if let phone = session.user?.phone, !phone.isEmpty { parts.append(phone) }
+        if let email = session.user?.email, !email.isEmpty { parts.append(email) }
         return parts.joined(separator: " · ")
     }
 

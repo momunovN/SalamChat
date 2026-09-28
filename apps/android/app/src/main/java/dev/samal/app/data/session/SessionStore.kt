@@ -53,13 +53,13 @@ class SessionStore(
         InboxService.stop(app)
     }
 
-    suspend fun requestOtp(phone: String): String? = withContext(Dispatchers.IO) {
-        api.requestOtp(phone)
+    suspend fun requestOtp(email: String, phone: String): String? = withContext(Dispatchers.IO) {
+        api.requestOtp(email, phone)
     }
 
-    suspend fun login(phone: String, code: String) {
+    suspend fun login(email: String, phone: String, code: String) {
         val sess = withContext(Dispatchers.IO) {
-            api.verifyOtp(phone, code, Build.MODEL.ifBlank { "Android" })
+            api.verifyOtp(email, phone, code, Build.MODEL.ifBlank { "Android" })
         }
         apply(sess)
     }
