@@ -25,7 +25,7 @@ npm run dev
 
 OTP в dev приходит в ответе (`dev_code`). SMS никуда не уходит, ключ не нужен.
 
-Код входа приходит письмом: `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`. Почта обязательна, номер можно не указывать. Без SMTP код остаётся в логе. В проде `TOOAPP_OTP_DEV=false`.
+Код входа приходит через Яндекс: `SMTP_HOST=smtp.yandex.ru`, `SMTP_PORT=465`, `SMTP_SECURE=true`, `SMTP_USER` — полный ящик, `SMTP_PASS` — пароль приложения, `SMTP_FROM` или `EMAIL_FROM` — `Salam <тот же ящик>`. Почта обязательна, номер можно не указывать. В проде `TOOAPP_OTP_DEV=false`.
 
 ## Приложения
 

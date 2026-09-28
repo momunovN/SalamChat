@@ -57,22 +57,29 @@ function html(code: string) {
 </html>`;
 }
 
+function mailbox(from: string) {
+  const wrapped = from.match(/<([^>]+)>/);
+  return (wrapped ? wrapped[1] : from).trim();
+}
+
 /** Sends the login code. Without SMTP settings the code stays in the server log. */
 export async function sendLoginCode(to: string, code: string) {
   const host = env("SMTP_HOST");
-  if (!host) {
+  const pass = env("SMTP_PASS");
+  const namedFrom = env("SMTP_FROM") || env("EMAIL_FROM");
+  const user = env("SMTP_USER") || (namedFrom ? mailbox(namedFrom) : "");
+  const from = namedFrom || (user ? `Salam <${user}>` : "");
+  const yandex = /(^|\.)yandex\.(ru|com)$/i.test(host);
+  if (!host || !pass || !user) {
     console.log(`Salam OTP email ${to} ${code}`);
     return "stub" as const;
   }
-  const port = Number(env("SMTP_PORT", "587")) || 587;
-  const user = env("SMTP_USER");
-  const pass = env("SMTP_PASS");
-  const from = env("SMTP_FROM", user ? `Salam <${user}>` : "Salam <noreply@salam-chat.ru>");
+  const port = Number(env("SMTP_PORT", yandex ? "465" : "587")) || (yandex ? 465 : 587);
   const transport = nodemailer.createTransport({
     host,
     port,
-    secure: envBool("SMTP_SECURE", port === 465),
-    auth: user ? { user, pass } : undefined,
+    secure: envBool("SMTP_SECURE", port === 465 || yandex),
+    auth: { user, pass },
   });
   await transport.sendMail({
     from,
