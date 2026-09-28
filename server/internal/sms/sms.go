@@ -52,7 +52,8 @@ func (s Stub) SendOTP(_ context.Context, phone, code string) error {
 }
 
 // P1 posts one OTP to https://admin.p1sms.ru/apiSms/create.
-// Digit channel uses a shared numeric sender. A moderated SMS_SENDER uses char.
+// The digit channel is promo and stays in moderation. OTP uses char and VIRTA,
+// the shared sender on a new P1SMS account, unless SMS_SENDER names another one.
 type P1 struct {
 	Key    string
 	Sender string
@@ -63,14 +64,15 @@ func (p P1) SendOTP(ctx context.Context, phone, code string) error {
 	if strings.TrimSpace(p.Key) == "" {
 		return fmt.Errorf("p1sms: SMS_API_KEY required")
 	}
+	sender := strings.TrimSpace(p.Sender)
+	if sender == "" || strings.EqualFold(sender, "TooApp") || strings.EqualFold(sender, "SAMAL") {
+		sender = "VIRTA"
+	}
 	item := map[string]string{
-		"channel": "digit",
+		"channel": "char",
+		"sender":  sender,
 		"phone":   digits(phone),
 		"text":    "Salam: " + code,
-	}
-	if sender := strings.TrimSpace(p.Sender); sender != "" && !strings.EqualFold(sender, "TooApp") && !strings.EqualFold(sender, "SAMAL") {
-		item["channel"] = "char"
-		item["sender"] = sender
 	}
 	raw, err := json.Marshal(map[string]any{
 		"apiKey": p.Key,

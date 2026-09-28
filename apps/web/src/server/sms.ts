@@ -30,18 +30,22 @@ function p1Message(body: P1Body, status: number) {
   return body.message || `p1sms ${body.status || status}`;
 }
 
-// Digit channel sends from a shared number and does not need a registered name.
-// A moderated name in SMS_SENDER uses the char channel.
+// Digit is the advertising channel: P1SMS marks it promo and holds it in moderation,
+// so the code never reaches the phone. OTP uses the shared sender VIRTA on char.
+function senderName() {
+  const from = env("SMS_SENDER", "").trim();
+  if (!from || ["tooapp", "samal"].includes(from.toLowerCase())) return "VIRTA";
+  return from;
+}
+
 async function sendP1(phone: string, code: string) {
   const key = env("SMS_API_KEY");
-  const from = env("SMS_SENDER", "").trim();
-  const named = from && !["tooapp", "samal"].includes(from.toLowerCase());
-  const sms: Record<string, string> = {
-    channel: named ? "char" : "digit",
+  const sms = {
+    channel: "char",
+    sender: senderName(),
     phone: digits(phone),
     text: text(code),
   };
-  if (named) sms.sender = from;
 
   const res = await fetch("https://admin.p1sms.ru/apiSms/create", {
     method: "POST",
