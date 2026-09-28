@@ -11,6 +11,7 @@ final class APIClient {
     var accessToken: String?
     var refreshToken: String?
     var onSession: ((APISession) -> Void)?
+    var onUnauthorized: (() -> Void)?
 
     private let decoder: JSONDecoder = {
         let d = JSONDecoder()
@@ -64,13 +65,92 @@ final class APIClient {
         return w.items
     }
 
-    func send(chatID: UUID, clientID: String, type: String, payloadJSON: String) async throws -> APIMessage {
+    func messagesPage(chatID: UUID, cursor: String = "") async throws -> (items: [APIMessage], cursor: String?) {
+        struct Page: Decodable { var items: [APIMessage]; var cursor: String? }
+        var path = "/v1/chats/\(chatID.uuidString)/messages?limit=50"
+        if !cursor.isEmpty {
+            path += "&cursor=\(cursor.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? cursor)"
+        }
+        let page: Page = try await get(path)
+        return (page.items, page.cursor)
+    }
+
+    func send(chatID: UUID, clientID: String, type: String, payloadJSON: String, uploadIDs: [String] = [], replyToID: String? = nil) async throws -> APIMessage {
         let payload = try JSONSerialization.jsonObject(with: Data(payloadJSON.utf8))
-        return try await post("/v1/chats/\(chatID.uuidString)/messages", body: [
-            "client_id": clientID,
-            "type": type,
-            "payload": payload
-        ])
+        var body: [String: Any] = ["client_id": clientID, "type": type, "payload": payload]
+        if !uploadIDs.isEmpty { body["upload_ids"] = uploadIDs }
+        if let replyToID, !replyToID.isEmpty { body["reply_to_id"] = replyToID }
+        return try await post("/v1/chats/\(chatID.uuidString)/messages", body: body)
+    }
+
+    func editMessage(id: UUID, text: String) async throws -> APIMessage {
+        try await send("/v1/messages/\(id.uuidString)", method: "PATCH", body: ["text": text], authed: true)
+    }
+
+    func deleteMessage(id: UUID) async throws {
+        let _: JSONValue = try await send("/v1/messages/\(id.uuidString)", method: "DELETE", body: nil, authed: true)
+    }
+
+    func hideChat(id: UUID) async throws {
+        let _: JSONValue = try await send("/v1/chats/\(id.uuidString)", method: "DELETE", body: nil, authed: true)
+    }
+
+    func renameChat(id: UUID, title: String) async throws {
+        let _: JSONValue = try await send("/v1/chats/\(id.uuidString)", method: "PATCH", body: ["title": title], authed: true)
+    }
+
+    func group(title: String, memberIDs: [String]) async throws -> APIChat {
+        try await post("/v1/chats/groups", body: ["title": title, "member_ids": memberIDs])
+    }
+
+    func members(chatID: UUID) async throws -> [APIChatMember] {
+        struct Wrap: Decodable { var items: [APIChatMember] }
+        let w: Wrap = try await get("/v1/chats/\(chatID.uuidString)/members")
+        return w.items
+    }
+
+    func addMembers(chatID: UUID, userIDs: [String]) async throws {
+        let _: JSONValue = try await post("/v1/chats/\(chatID.uuidString)/members", body: ["user_ids": userIDs])
+    }
+
+    func removeMember(chatID: UUID, userID: String) async throws {
+        let _: JSONValue = try await send("/v1/chats/\(chatID.uuidString)/members/\(userID)", method: "DELETE", body: nil, authed: true)
+    }
+
+    func calls() async throws -> [APICall] {
+        struct Wrap: Decodable { var items: [APICall] }
+        let w: Wrap = try await get("/v1/calls")
+        return w.items
+    }
+
+    func answerCall(id: UUID) async throws -> APICall { try await post("/v1/calls/\(id.uuidString)/answer", body: [:]) }
+    func rejectCall(id: UUID) async throws -> APICall { try await post("/v1/calls/\(id.uuidString)/reject", body: [:]) }
+    func hangupCall(id: UUID) async throws -> APICall { try await post("/v1/calls/\(id.uuidString)/hangup", body: [:]) }
+    func call(id: UUID) async throws -> APICall { try await get("/v1/calls/\(id.uuidString)") }
+
+    func callToken(id: UUID) async throws -> APIToken {
+        try await get("/v1/calls/\(id.uuidString)/token")
+    }
+
+    func typing(chatID: UUID) async throws {
+        let _: JSONValue = try await post("/v1/typing", body: ["chat_id": chatID.uuidString])
+    }
+
+    func upload(fileURL: URL, mime: String, kind: String) async throws -> String {
+        let size = (try? FileManager.default.attributesOfItem(atPath: fileURL.path)[.size] as? Int) ?? 0
+        struct Intent: Decodable { var id: String; var put_url: String }
+        let intent: Intent = try await post("/v1/uploads/intent", body: ["mime": mime, "kind": kind, "size_bytes": size])
+        var req = URLRequest(url: URL(string: intent.put_url)!)
+        req.httpMethod = "PUT"
+        req.setValue(mime, forHTTPHeaderField: "Content-Type")
+        if let token = accessToken { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        let (data, resp) = try await URLSession.shared.upload(for: req, fromFile: fileURL)
+        let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        guard (200..<300).contains(code) else {
+            throw APIError.http(code, String(data: data, encoding: .utf8) ?? "")
+        }
+        let _: JSONValue = try await post("/v1/uploads/\(intent.id)/complete", body: [:])
+        return intent.id
     }
 
     func receipts(ids: [UUID], status: String) async throws {
@@ -129,7 +209,20 @@ final class APIClient {
         try await send(path, method: "POST", body: body, authed: authed)
     }
 
-    private func send<T: Decodable>(_ path: String, method: String, body: [String: Any]?, authed: Bool) async throws -> T {
+    private func refreshSession() async -> Bool {
+        guard let token = refreshToken, !token.isEmpty else { return false }
+        do {
+            let sess: APISession = try await send("/v1/auth/refresh", method: "POST", body: ["refresh_token": token], authed: false, retry: false)
+            accessToken = sess.accessToken
+            refreshToken = sess.refreshToken
+            onSession?(sess)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    private func send<T: Decodable>(_ path: String, method: String, body: [String: Any]?, authed: Bool, retry: Bool = true) async throws -> T {
         var req = URLRequest(url: baseURL.appendingPathComponent(path).absoluteURL)
         // appendingPathComponent drops query; build manually
         req = URLRequest(url: URL(string: baseURL.absoluteString + path)!)
@@ -144,7 +237,13 @@ final class APIClient {
         }
         let (data, resp) = try await URLSession.shared.data(for: req)
         let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
-        if code == 401 { throw APIError.unauthorized }
+        if code == 401, authed, retry, !path.contains("/auth/refresh"), await refreshSession() {
+            return try await send(path, method: method, body: body, authed: authed, retry: false)
+        }
+        if code == 401 {
+            onUnauthorized?()
+            throw APIError.unauthorized
+        }
         guard (200..<300).contains(code) else {
             throw APIError.http(code, String(data: data, encoding: .utf8) ?? "")
         }
@@ -153,6 +252,22 @@ final class APIClient {
         } catch {
             throw APIError.decode
         }
+    }
+}
+
+private struct JSONValue: Decodable {
+    init(from decoder: Decoder) throws {
+        if var single = try? decoder.singleValueContainer() {
+            if single.decodeNil() { return }
+        }
+        _ = try? decoder.container(keyedBy: IgnoreKey.self)
+    }
+
+    private struct IgnoreKey: CodingKey {
+        var stringValue: String
+        var intValue: Int?
+        init?(stringValue: String) { self.stringValue = stringValue }
+        init?(intValue: Int) { self.stringValue = "\(intValue)"; self.intValue = intValue }
     }
 }
 

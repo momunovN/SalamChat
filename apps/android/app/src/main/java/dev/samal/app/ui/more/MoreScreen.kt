@@ -24,6 +24,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import android.app.Activity
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
@@ -36,6 +38,7 @@ import dev.samal.app.data.contacts.sanitizeUsername
 import dev.samal.app.data.session.SessionStore
 import dev.samal.app.ui.auth.AuthField
 import dev.samal.app.ui.theme.Accent
+import dev.samal.app.ui.theme.AppLang
 import dev.samal.app.ui.theme.Bg
 import dev.samal.app.ui.theme.Danger
 import dev.samal.app.ui.theme.Elevated
@@ -53,6 +56,8 @@ fun MoreScreen(session: SessionStore) {
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
+    val activity = LocalContext.current as Activity
+    val lang = AppLang.code(activity)
 
     fun save() {
         if (busy || user == null) return
@@ -155,6 +160,24 @@ fun MoreScreen(session: SessionStore) {
                 contentAlignment = Alignment.Center,
             ) {
                 Text(stringResource(R.string.save), color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            }
+            Spacer(Modifier.height(20.dp))
+            Text(stringResource(R.string.language), color = Muted, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+            Spacer(Modifier.height(8.dp))
+            Row {
+                listOf("ru" to "Русский", "ky" to "Кыргызча").forEach { (code, label) ->
+                    Text(
+                        label,
+                        color = if (lang == code) Text else Muted,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier
+                            .padding(end = 8.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(if (lang == code) Accent else Elevated)
+                            .clickable { AppLang.set(activity, code) }
+                            .padding(horizontal = 14.dp, vertical = 8.dp),
+                    )
+                }
             }
             Spacer(Modifier.height(20.dp))
             Text(

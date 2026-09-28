@@ -1,12 +1,18 @@
+import AVFoundation
 import SwiftUI
 
 struct ComposerView: View {
     @Binding var text: String
     @Binding var recording: Bool
-    var onAttach: () -> Void
+    var onAttach: (String) -> Void
     var onSend: () -> Void
+    var onVoice: (URL, Int, [Double]) -> Void
     @State private var drag: CGSize = .zero
     @State private var locked = false
+    @State private var recorder: AVAudioRecorder?
+    @State private var file: URL?
+    @State private var started = Date()
+    @State private var bars: [Double] = []
 
     var body: some View {
         VStack(spacing: 8) {
@@ -14,7 +20,7 @@ struct ComposerView: View {
                 voiceHUD
             }
             HStack(alignment: .bottom, spacing: 8) {
-                Button(action: onAttach) {
+                Button { onAttach("sheet") } label: {
                     Image(systemName: "plus")
                         .font(.system(size: 20, weight: .semibold))
                         .foregroundStyle(SamalColor.text)
@@ -31,10 +37,12 @@ struct ComposerView: View {
                     .padding(.vertical, 10)
                     .background(SamalColor.elevated, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
 
-                if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !locked {
                     mic
                 } else {
-                    Button(action: onSend) {
+                    Button {
+                        if locked { ship() } else { onSend() }
+                    } label: {
                         Image(systemName: "arrow.up")
                             .font(.system(size: 16, weight: .bold))
                             .foregroundStyle(.white)
@@ -60,18 +68,21 @@ struct ComposerView: View {
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { g in
+                        if !recording { begin() }
                         recording = true
                         drag = g.translation
+                        sample()
                         if g.translation.height < -56 { locked = true }
-                        if g.translation.width < -72 && !locked {
-                            cancel()
-                        }
+                        if g.translation.width < -72 && !locked { cancel() }
                     }
                     .onEnded { _ in
-                        if !locked { finish() }
+                        if locked {
+                            drag = .zero
+                        } else {
+                            ship()
+                        }
                     }
             )
-            .animation(.easeOut(duration: SamalMotion.fast), value: recording)
     }
 
     private var voiceHUD: some View {
@@ -82,25 +93,68 @@ struct ComposerView: View {
                 .foregroundStyle(SamalColor.muted)
             Spacer()
             if locked {
-                Button("OK") { finish() }
+                Button(L10n.cancel) { cancel() }
                     .font(SamalFont.caption())
-                    .foregroundStyle(SamalColor.accent)
+                    .foregroundStyle(SamalColor.danger)
             }
         }
         .padding(.horizontal, 4)
     }
 
+    private func begin() {
+        let session = AVAudioSession.sharedInstance()
+        try? session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker])
+        try? session.setActive(true)
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).m4a")
+        let rec = try? AVAudioRecorder(url: url, settings: [
+            AVFormatIDKey: kAudioFormatMPEG4AAC,
+            AVSampleRateKey: 44_100,
+            AVNumberOfChannelsKey: 1,
+            AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue
+        ])
+        rec?.isMeteringEnabled = true
+        rec?.record()
+        recorder = rec
+        file = url
+        started = Date()
+        bars = []
+    }
+
+    private func sample() {
+        guard let rec = recorder, bars.count < 64 else { return }
+        rec.updateMeters()
+        let power = rec.averagePower(forChannel: 0)
+        let amp = min(1, max(0.08, (power + 50) / 50))
+        bars.append(amp)
+    }
+
     private func cancel() {
+        recorder?.stop()
+        recorder = nil
+        if let file { try? FileManager.default.removeItem(at: file) }
+        file = nil
         recording = false
         locked = false
         drag = .zero
     }
 
-    private func finish() {
+    private func ship() {
+        recorder?.stop()
+        recorder = nil
+        let ms = Int(Date().timeIntervalSince(started) * 1000)
+        let url = file
+        let wave = bars
         recording = false
         locked = false
         drag = .zero
-        // Outbox voice upload is wired in UploadService; UI records the gesture contract now.
+        file = nil
+        guard let url else { return }
+        let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int) ?? 0
+        if ms < 500 || size < 80 {
+            try? FileManager.default.removeItem(at: url)
+            return
+        }
+        onVoice(url, ms, wave)
     }
 }
 

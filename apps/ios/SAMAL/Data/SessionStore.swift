@@ -1,33 +1,74 @@
+import AVFoundation
 import Foundation
 import SwiftUI
+import UserNotifications
+
+struct ActiveCall: Identifiable, Equatable {
+    var id: UUID
+    var title: String
+    var kind: String
+    var url: String
+    var token: String
+}
 
 @MainActor
 final class SessionStore: ObservableObject {
     @Published var user: APIUser?
     @Published var incomingCall: APICall?
+    @Published var activeCall: ActiveCall?
+    @Published var liveCall: APICall?
+    @Published var openChatID: String?
+    @Published var typingChatID: String?
+    @Published var onlineIDs = Set<String>()
+    @Published var language: String = UserDefaults.standard.string(forKey: "samal.lang")
+        ?? (Locale.current.language.languageCode?.identifier == "ky" ? "ky" : "ru")
 
     let api = APIClient()
     let db = AppDatabase.shared
     private var outboxTask: Task<Void, Never>?
     private var ws: RealtimeClient?
+    private var seenMessages = Set<String>()
 
     var isLoggedIn: Bool { user != nil }
 
     init() {
+        api.onSession = { [weak self] sess in
+            Task { @MainActor in self?.store(sess) }
+        }
+        api.onUnauthorized = { [weak self] in
+            Task { @MainActor in self?.logout() }
+        }
         if let data = UserDefaults.standard.data(forKey: "samal.session"),
            let sess = try? JSONDecoder().decode(APISession.self, from: data) {
             apply(sess)
         }
     }
 
+    func setLanguage(_ code: String) {
+        UserDefaults.standard.set(code, forKey: "samal.lang")
+        language = code
+    }
+
     func apply(_ sess: APISession) {
+        store(sess)
+        startWorkers()
+        askNotify()
+    }
+
+    private func store(_ sess: APISession) {
         user = sess.user
         api.accessToken = sess.accessToken
         api.refreshToken = sess.refreshToken
         if let data = try? JSONEncoder().encode(sess) {
             UserDefaults.standard.set(data, forKey: "samal.session")
         }
-        startWorkers()
+    }
+
+    private func askNotify() {
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            guard settings.authorizationStatus == .notDetermined else { return }
+            UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
+        }
     }
 
     func logout() {
@@ -84,8 +125,24 @@ final class SessionStore: ObservableObject {
                     self?.handle(type: type, body: body)
                 }
             }
+            client.onOpen = { [weak self] in
+                Task { @MainActor in
+                    await self?.catchUp()
+                }
+            }
             client.start()
             ws = client
+        }
+    }
+
+    private func catchUp() async {
+        guard let me = user else { return }
+        if let remote = try? await api.chats() {
+            try? db.replaceChats(remote)
+        }
+        if let open = openChatID, let id = UUID(uuidString: open),
+           let page = try? await api.messagesPage(chatID: id) {
+            try? db.upsertMessages(page.items, me: me.id)
         }
     }
 
@@ -95,9 +152,26 @@ final class SessionStore: ObservableObject {
         for row in rows {
             guard let chatID = UUID(uuidString: row.chatID) else { continue }
             do {
-                let msg = try await api.send(chatID: chatID, clientID: row.clientID, type: row.type, payloadJSON: row.payloadJSON)
+                var uploads: [String] = []
+                if !row.uploadPath.isEmpty {
+                    let id = try await api.upload(
+                        fileURL: URL(fileURLWithPath: row.uploadPath),
+                        mime: row.mime.isEmpty ? "application/octet-stream" : row.mime,
+                        kind: row.kind.isEmpty ? row.type : row.kind
+                    )
+                    uploads = [id]
+                }
+                let msg = try await api.send(
+                    chatID: chatID,
+                    clientID: row.clientID,
+                    type: row.type,
+                    payloadJSON: row.payloadJSON,
+                    uploadIDs: uploads,
+                    replyToID: row.replyTo
+                )
                 try db.markSent(clientID: row.clientID, server: msg)
                 try db.upsertMessages([msg], me: me.id)
+                if !row.uploadPath.isEmpty { try? FileManager.default.removeItem(atPath: row.uploadPath) }
             } catch {
                 try? db.bumpOutbox(clientID: row.clientID, attempts: row.attempts + 1)
             }
@@ -107,19 +181,68 @@ final class SessionStore: ObservableObject {
     private func handle(type: String, body: Data) {
         guard let me = user else { return }
         switch type {
-        case "message.created":
+        case "message.new", "message.created":
             if let msg = try? JSONDecoder.iso.decode(APIMessage.self, from: body) {
                 try? db.upsertMessages([msg], me: me.id)
+                let key = msg.id.uuidString
+                let fresh = seenMessages.insert(key).inserted
+                if seenMessages.count > 400 { seenMessages.removeAll(); seenMessages.insert(key) }
+                if !fresh { break }
                 Task { [weak self] in
                     if let remote = try? await self?.api.chats() {
-                        try? self?.db.upsertChats(remote)
+                        try? self?.db.replaceChats(remote)
                     }
                 }
                 if msg.authorID != me.id {
-                    Task { try? await api.receipts(ids: [msg.id], status: "delivered") }
+                    let looking = openChatID?.lowercased() == msg.chatID.uuidString.lowercased()
+                    Task { try? await api.receipts(ids: [msg.id], status: looking ? "read" : "delivered") }
+                    if looking {
+                        Chime.play()
+                    } else {
+                        Chime.notify(title: "Salam", body: msg.payload.text ?? msg.payload.caption ?? msg.type)
+                    }
                 }
             }
-        case "receipt.upserted":
+        case "message.ack":
+            if let obj = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
+               let rawID = obj["id"] as? String,
+               let clientID = obj["client_id"] as? String,
+               let serverID = UUID(uuidString: rawID)?.uuidString {
+                try? db.applyAck(clientID: clientID, serverID: serverID)
+            }
+        case "message.updated":
+            if let msg = try? JSONDecoder.iso.decode(APIMessage.self, from: body) {
+                try? db.upsertMessages([msg], me: me.id)
+            }
+        case "message.deleted":
+            if let obj = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
+               let id = obj["id"] as? String {
+                try? db.deleteLocal(id: id)
+            }
+        case "typing":
+            if let obj = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
+               let chat = obj["chat_id"] as? String,
+               (obj["user_id"] as? String)?.lowercased() != me.id.uuidString.lowercased() {
+                typingChatID = chat
+                Task { [weak self] in
+                    try? await Task.sleep(nanoseconds: 3_000_000_000)
+                    if self?.typingChatID == chat { self?.typingChatID = nil }
+                }
+            }
+        case "chat.updated":
+            Task { [weak self] in
+                if let remote = try? await self?.api.chats() {
+                    try? self?.db.replaceChats(remote)
+                }
+            }
+        case "presence":
+            if let obj = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
+               let id = (obj["user_id"] as? String)?.lowercased(), !id.isEmpty {
+                var next = onlineIDs
+                if (obj["online"] as? Bool) == true { next.insert(id) } else { next.remove(id) }
+                onlineIDs = next
+            }
+        case "receipt", "receipt.upserted":
             if let obj = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
                let id = obj["message_id"] as? String,
                let status = obj["status"] as? String {
@@ -127,17 +250,57 @@ final class SessionStore: ObservableObject {
                 try? db.applyReceipt(messageID: id, status: status)
             }
         case "call.updated":
-            incomingCall = try? JSONDecoder.iso.decode(APICall.self, from: body)
+            if let call = try? JSONDecoder.iso.decode(APICall.self, from: body) {
+                liveCall = call
+                let closed = call.status == "ended" || call.status == "missed" || call.status == "declined"
+                if closed {
+                    if incomingCall?.id == call.id { incomingCall = nil }
+                    if activeCall?.id == call.id { activeCall = nil }
+                } else if call.status == "ringing", call.initiatorID != me.id {
+                    incomingCall = call
+                }
+            }
         default:
             break
         }
     }
 }
 
+enum Chime {
+    static var player: AVAudioPlayer?
+
+    static func play() {
+        guard let url = Bundle.main.url(forResource: "alert-tone", withExtension: "mp3") else { return }
+        player = try? AVAudioPlayer(contentsOf: url)
+        player?.play()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
+            player?.stop()
+        }
+    }
+
+    static func notify(title: String, body: String) {
+        let note = UNMutableNotificationContent()
+        note.title = title
+        note.body = body
+        if Bundle.main.url(forResource: "alert-tone", withExtension: "mp3") != nil {
+            note.sound = UNNotificationSound(named: UNNotificationSoundName("alert-tone.mp3"))
+        } else {
+            note.sound = .default
+        }
+        let req = UNNotificationRequest(identifier: UUID().uuidString, content: note, trigger: nil)
+        UNUserNotificationCenter.current().add(req)
+    }
+}
+
 extension JSONDecoder {
     static let iso: JSONDecoder = {
         let d = JSONDecoder()
-        d.dateDecodingStrategy = .iso8601
+        d.dateDecodingStrategy = .custom { c in
+            let s = try c.singleValueContainer().decode(String.self)
+            if let date = ISO8601DateFormatter.full.date(from: s) { return date }
+            if let date = ISO8601DateFormatter.frac.date(from: s) { return date }
+            throw DecodingError.dataCorruptedError(in: c, debugDescription: s)
+        }
         return d
     }()
 }

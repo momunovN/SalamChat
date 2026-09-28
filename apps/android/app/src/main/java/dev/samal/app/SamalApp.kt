@@ -3,9 +3,11 @@ package dev.samal.app
 import android.app.Application
 import androidx.room.Room
 import dev.samal.app.data.api.SamalApi
+import dev.samal.app.data.db.MIGRATION_1_2
+import dev.samal.app.data.db.MIGRATION_2_3
 import dev.samal.app.data.db.SamalDb
 import dev.samal.app.data.session.SessionStore
-import dev.samal.app.data.sync.Inbox
+import dev.samal.app.data.sync.InboxService
 
 class SamalApp : Application() {
     lateinit var db: SamalDb
@@ -16,8 +18,10 @@ class SamalApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        db = Room.databaseBuilder(this, SamalDb::class.java, "samal.db").build()
+        db = Room.databaseBuilder(this, SamalDb::class.java, "samal.db")
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+            .build()
         session = SessionStore(this, api)
-        Inbox(api, db.dao(), session).start()
+        if (session.isLoggedIn) InboxService.start(this)
     }
 }

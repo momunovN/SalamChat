@@ -1,6 +1,10 @@
 import SwiftUI
 
 struct CallsView: View {
+    @EnvironmentObject var session: SessionStore
+    @State private var rows: [APICall] = []
+    @State private var titles: [String: String] = [:]
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 10) {
@@ -12,10 +16,39 @@ struct CallsView: View {
             }
             .padding(.horizontal, 16)
             .padding(.top, 8)
-            Spacer()
+            if rows.isEmpty {
+                Text(L10n.callsEmpty)
+                    .font(SamalFont.body())
+                    .foregroundStyle(SamalColor.muted)
+                    .padding(.horizontal, 16)
+                Spacer()
+            } else {
+                ScrollView {
+                    ForEach(rows) { call in
+                        HStack {
+                            Image(systemName: "phone.fill").foregroundStyle(SamalColor.accent)
+                            VStack(alignment: .leading) {
+                                Text(titles[call.chatID.uuidString] ?? L10n.tabCalls)
+                                    .foregroundStyle(SamalColor.text)
+                                Text("\(call.kind) · \(call.status)")
+                                    .font(SamalFont.caption())
+                                    .foregroundStyle(SamalColor.muted)
+                            }
+                            Spacer()
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                    }
+                }
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(SamalColor.bg)
+        .task {
+            rows = (try? await session.api.calls()) ?? []
+            let chats = (try? AppDatabase.shared.fetchChats(filter: "", query: "")) ?? []
+            titles = Dictionary(uniqueKeysWithValues: chats.map { ($0.id, $0.title) })
+        }
     }
 }
 
@@ -35,7 +68,9 @@ struct IncomingCallView: View {
                 .foregroundStyle(SamalColor.muted)
             HStack(spacing: 48) {
                 Button {
+                    let id = session.incomingCall?.id
                     session.incomingCall = nil
+                    if let id { Task { try? await session.api.rejectCall(id: id) } }
                 } label: {
                     VStack {
                         Circle().fill(SamalColor.danger).frame(width: 72, height: 72)
@@ -44,9 +79,14 @@ struct IncomingCallView: View {
                     }
                 }
                 Button {
-                    if var c = session.incomingCall {
-                        c.status = "active"
-                        session.incomingCall = c
+                    guard let call = session.incomingCall else { return }
+                    session.incomingCall = nil
+                    Task {
+                        _ = try? await session.api.answerCall(id: call.id)
+                        if let token = try? await session.api.callToken(id: call.id) {
+                            let title = (try? AppDatabase.shared.fetchChats(filter: "", query: ""))?.first { $0.id == call.chatID.uuidString }?.title ?? L10n.incomingAudio
+                            session.activeCall = ActiveCall(id: call.id, title: title, kind: call.kind, url: token.url, token: token.token)
+                        }
                     }
                 } label: {
                     VStack {
@@ -224,6 +264,11 @@ struct MoreView: View {
                     }
                     .buttonStyle(.plain)
                     .disabled(busy)
+                    Text(L10n.language).font(SamalFont.caption()).foregroundStyle(SamalColor.muted)
+                    HStack {
+                        langChip("ru", "Русский")
+                        langChip("ky", "Кыргызча")
+                    }
                     Button(L10n.logout) { session.logout() }
                         .foregroundStyle(SamalColor.danger)
                 }
@@ -246,6 +291,16 @@ struct MoreView: View {
         if let nick = session.user?.username, !nick.isEmpty { parts.append("@\(nick)") }
         if let phone = session.user?.phone, !phone.isEmpty { parts.append(phone) }
         return parts.joined(separator: " · ")
+    }
+
+    private func langChip(_ code: String, _ title: String) -> some View {
+        Button(title) { session.setLanguage(code) }
+            .font(SamalFont.subhead().weight(.semibold))
+            .foregroundStyle(session.language == code ? SamalColor.text : SamalColor.muted)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(session.language == code ? SamalColor.accent : SamalColor.elevated, in: Capsule())
+            .buttonStyle(.plain)
     }
 
     private func field(_ binding: Binding<String>) -> some View {

@@ -15,8 +15,12 @@ struct RootView: View {
             } else {
                 PhoneAuthView()
             }
-            if let call = session.incomingCall, call.status == "ringing" {
+            if let call = session.incomingCall, call.status == "ringing", session.activeCall == nil {
                 IncomingCallView(call: call)
+                    .transition(.opacity)
+            }
+            if session.activeCall != nil {
+                CallStageView()
                     .transition(.opacity)
             }
         }

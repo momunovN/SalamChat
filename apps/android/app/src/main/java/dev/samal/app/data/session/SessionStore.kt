@@ -2,11 +2,14 @@ package dev.samal.app.data.session
 
 import android.content.Context
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import dev.samal.app.data.api.SamalApi
 import dev.samal.app.data.contacts.BookContact
+import dev.samal.app.data.sync.InboxService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -15,7 +18,8 @@ class SessionStore(
     context: Context,
     private val api: SamalApi,
 ) {
-    private val prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    private val app = context.applicationContext
+    private val prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
     var user by mutableStateOf<User?>(null)
         private set
@@ -25,20 +29,28 @@ class SessionStore(
     init {
         val raw = prefs.getString(KEY, null)
         if (raw != null) {
-            runCatching { apply(Session.from(JSONObject(raw))) }
+            runCatching { apply(Session.from(JSONObject(raw)), startInbox = false) }
         }
     }
 
-    fun apply(sess: Session) {
+    fun apply(sess: Session, startInbox: Boolean = true) {
         user = sess.user
         api.token = sess.accessToken
+        api.refreshToken = sess.refreshToken
+        api.onSession = { next ->
+            Handler(Looper.getMainLooper()).post { apply(next) }
+        }
         prefs.edit().putString(KEY, sess.toJson().toString()).apply()
+        if (startInbox) InboxService.start(app)
     }
 
     fun logout() {
         user = null
         api.token = null
+        api.refreshToken = null
+        api.onSession = null
         prefs.edit().remove(KEY).apply()
+        InboxService.stop(app)
     }
 
     suspend fun requestOtp(phone: String): String? = withContext(Dispatchers.IO) {

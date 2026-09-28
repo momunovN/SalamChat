@@ -1,0 +1,90 @@
+package dev.samal.app.data.notify
+
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.content.Context
+import android.content.Intent
+import android.media.AudioAttributes
+import android.media.MediaPlayer
+import android.os.Handler
+import android.os.Looper
+import androidx.core.app.NotificationCompat
+import dev.samal.app.MainActivity
+import dev.samal.app.R
+
+object Notifier {
+    private const val ONGOING = "salam.ongoing"
+    private const val MESSAGES = "salam.messages"
+    private const val ONGOING_ID = 41
+
+    fun ensure(ctx: Context) {
+        val nm = ctx.getSystemService(NotificationManager::class.java)
+        if (nm.getNotificationChannel(ONGOING) == null) {
+            nm.createNotificationChannel(
+                NotificationChannel(ONGOING, ctx.getString(R.string.app_name), NotificationManager.IMPORTANCE_LOW),
+            )
+        }
+        if (nm.getNotificationChannel(MESSAGES) == null) {
+            val ch = NotificationChannel(MESSAGES, ctx.getString(R.string.tab_chats), NotificationManager.IMPORTANCE_HIGH)
+            ch.setSound(null, null)
+            nm.createNotificationChannel(ch)
+        }
+    }
+
+    fun ongoing(ctx: Context): Notification {
+        ensure(ctx)
+        return NotificationCompat.Builder(ctx, ONGOING)
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setContentTitle(ctx.getString(R.string.app_name))
+            .setContentText(ctx.getString(R.string.notify_listening))
+            .setOngoing(true)
+            .setSilent(true)
+            .build()
+    }
+
+    fun message(ctx: Context, chatId: String, title: String, body: String) {
+        ensure(ctx)
+        val open = Intent(ctx, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra("chat_id", chatId)
+        }
+        val pi = PendingIntent.getActivity(
+            ctx,
+            chatId.hashCode(),
+            open,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val note = NotificationCompat.Builder(ctx, MESSAGES)
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setContentTitle(title.ifBlank { ctx.getString(R.string.app_name) })
+            .setContentText(body.ifBlank { ctx.getString(R.string.composer) })
+            .setAutoCancel(true)
+            .setContentIntent(pi)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .build()
+        ctx.getSystemService(NotificationManager::class.java).notify(chatId.hashCode(), note)
+        chime(ctx)
+    }
+
+    fun chime(ctx: Context) {
+        Handler(Looper.getMainLooper()).post {
+            val player = runCatching { MediaPlayer.create(ctx.applicationContext, R.raw.alert_tone) }.getOrNull() ?: return@post
+            player.setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build(),
+            )
+            player.setOnCompletionListener { it.release() }
+            player.start()
+            Handler(Looper.getMainLooper()).postDelayed({
+                runCatching {
+                    if (player.isPlaying) player.stop()
+                    player.release()
+                }
+            }, 220)
+        }
+    }
+}

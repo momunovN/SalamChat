@@ -48,8 +48,50 @@ enum L10n {
     static var fieldBio: String { t("more.bio") }
     static var save: String { t("more.save") }
     static var logout: String { t("more.logout") }
+    static var reply: String { t("msg.reply") }
+    static var copy: String { t("msg.copy") }
+    static var edit: String { t("msg.edit") }
+    static var delete: String { t("msg.delete") }
+    static var deleted: String { t("msg.deleted") }
+    static var editedMark: String { t("msg.edited") }
+    static var retry: String { t("msg.retry") }
+    static var today: String { t("day.today") }
+    static var yesterday: String { t("day.yesterday") }
+    static var earlier: String { t("day.earlier") }
+    static var newChat: String { t("chat.new") }
+    static var newGroup: String { t("chat.group") }
+    static var groupTitle: String { t("chat.group_title") }
+    static var create: String { t("chat.create") }
+    static var cancel: String { t("chat.cancel") }
+    static var confirmHide: String { t("chat.confirm_hide") }
+    static var confirmHideMany: String { t("chat.confirm_hide_many") }
+    static var rename: String { t("chat.rename") }
+    static var select: String { t("chat.select") }
+    static var members: String { t("group.members") }
+    static var addMember: String { t("group.add") }
+    static var leave: String { t("group.leave") }
+    static var kick: String { t("group.kick") }
+    static var callFailed: String { t("call.failed") }
+    static var connecting: String { t("call.connecting") }
+    static var hangup: String { t("call.hangup") }
+    static var callsEmpty: String { t("calls.empty") }
+    static var voiceShort: String { t("voice.short") }
+    static var language: String { t("more.language") }
+    static var photo: String { t("media.photo") }
+    static var voice: String { t("media.voice") }
+    static var file: String { t("media.file") }
+    static var geo: String { t("media.geo") }
+
+    static var code: String {
+        UserDefaults.standard.string(forKey: "samal.lang")
+            ?? (Locale.current.language.languageCode?.identifier == "ky" ? "ky" : "ru")
+    }
 
     static func t(_ key: String) -> String {
-        NSLocalizedString(key, comment: "")
+        guard let path = Bundle.main.path(forResource: code, ofType: "lproj"),
+              let bundle = Bundle(path: path) else {
+            return NSLocalizedString(key, comment: "")
+        }
+        return bundle.localizedString(forKey: key, value: key, table: nil)
     }
 }

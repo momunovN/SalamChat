@@ -8,6 +8,8 @@ import androidx.room.OnConflictStrategy
 import androidx.room.PrimaryKey
 import androidx.room.Query
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.flow.Flow
 
 @Entity(tableName = "chats")
@@ -18,6 +20,8 @@ data class ChatEntity(
     val lastText: String,
     val lastAt: Long,
     val unread: Int,
+    val peerOnline: Boolean = false,
+    val peerId: String = "",
 )
 
 @Entity(tableName = "messages")
@@ -31,6 +35,12 @@ data class MessageEntity(
     val createdAt: Long,
     val status: String,
     val outgoing: Boolean,
+    val replyText: String = "",
+    val edited: Boolean = false,
+    val deleted: Boolean = false,
+    val mediaUrl: String = "",
+    val durationMs: Int = 0,
+    val waveform: String = "",
 )
 
 @Entity(tableName = "outbox")
@@ -48,8 +58,23 @@ interface SamalDao {
     @Query("SELECT * FROM chats WHERE (:type = '' OR type = :type) AND (:q = '' OR title LIKE '%'||:q||'%') ORDER BY lastAt DESC")
     fun chats(type: String, q: String): Flow<List<ChatEntity>>
 
+    @Query("SELECT * FROM chats WHERE id = :id")
+    suspend fun chat(id: String): ChatEntity?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertChats(items: List<ChatEntity>)
+
+    @Query("DELETE FROM chats WHERE id NOT IN (:ids)")
+    suspend fun deleteMissing(ids: List<String>)
+
+    @Query("DELETE FROM chats")
+    suspend fun deleteAllChats()
+
+    @Query("DELETE FROM chats WHERE id IN (:ids)")
+    suspend fun deleteChats(ids: List<String>)
+
+    @Query("UPDATE chats SET title = :title WHERE id = :id")
+    suspend fun renameLocal(id: String, title: String)
 
     @Query("SELECT * FROM messages WHERE chatId = :chatId AND (:q = '' OR text LIKE '%'||:q||'%') ORDER BY createdAt DESC")
     fun messages(chatId: String, q: String): Flow<List<MessageEntity>>
@@ -66,8 +91,29 @@ interface SamalDao {
     @Query("DELETE FROM outbox WHERE clientId = :id")
     suspend fun deleteOutbox(id: String)
 
-    @Query("UPDATE messages SET status = :status WHERE id = :id")
+    @Query("UPDATE outbox SET attempts = attempts + 1, nextRetry = :at WHERE clientId = :id")
+    suspend fun bumpOutbox(id: String, at: Long)
+
+    @Query("UPDATE outbox SET attempts = 0, nextRetry = 0 WHERE clientId = :id")
+    suspend fun retryOutbox(id: String)
+
+    @Query("UPDATE messages SET status = :status WHERE id = :id OR clientId = :id")
     suspend fun setStatus(id: String, status: String)
+
+    @Query("SELECT COUNT(*) FROM messages WHERE id = :id")
+    suspend fun countId(id: String): Int
+
+    @Query("SELECT createdAt FROM messages WHERE chatId = :id AND status != 'sending' ORDER BY createdAt DESC LIMIT 1")
+    suspend fun latestServerAt(id: String): Long?
+
+    @Query("UPDATE messages SET status = 'sent' WHERE id = :id AND status IN ('sending', 'failed')")
+    suspend fun markSentIfPending(id: String)
+
+    @Query("UPDATE messages SET id = :serverId, status = CASE WHEN status IN ('sending', 'failed') THEN 'sent' ELSE status END WHERE clientId = :clientId")
+    suspend fun rekey(clientId: String, serverId: String)
+
+    @Query("UPDATE chats SET peerOnline = :online WHERE lower(peerId) = lower(:userId)")
+    suspend fun setPeerOnline(userId: String, online: Boolean)
 
     @Query("DELETE FROM messages WHERE clientId = :clientId AND id != :keepId")
     suspend fun dropClientCopy(clientId: String, keepId: String)
@@ -77,9 +123,33 @@ interface SamalDao {
 
     @Query("UPDATE chats SET unread = 0 WHERE id = :id")
     suspend fun clearUnread(id: String)
+
+    @Query("UPDATE messages SET text = :text, edited = 1 WHERE id = :id")
+    suspend fun editLocal(id: String, text: String)
+
+    @Query("UPDATE messages SET deleted = 1, text = '' WHERE id = :id")
+    suspend fun deleteLocal(id: String)
 }
 
-@Database(entities = [ChatEntity::class, MessageEntity::class, OutboxEntity::class], version = 1)
+val MIGRATION_1_2 = object : Migration(1, 2) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE messages ADD COLUMN replyText TEXT NOT NULL DEFAULT ''")
+        db.execSQL("ALTER TABLE messages ADD COLUMN edited INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE messages ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE messages ADD COLUMN mediaUrl TEXT NOT NULL DEFAULT ''")
+        db.execSQL("ALTER TABLE messages ADD COLUMN durationMs INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE messages ADD COLUMN waveform TEXT NOT NULL DEFAULT ''")
+        db.execSQL("ALTER TABLE chats ADD COLUMN peerOnline INTEGER NOT NULL DEFAULT 0")
+    }
+}
+
+val MIGRATION_2_3 = object : Migration(2, 3) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE chats ADD COLUMN peerId TEXT NOT NULL DEFAULT ''")
+    }
+}
+
+@Database(entities = [ChatEntity::class, MessageEntity::class, OutboxEntity::class], version = 3)
 abstract class SamalDb : RoomDatabase() {
     abstract fun dao(): SamalDao
 }

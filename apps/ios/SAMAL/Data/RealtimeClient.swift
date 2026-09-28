@@ -2,6 +2,7 @@ import Foundation
 
 final class RealtimeClient: NSObject, URLSessionWebSocketDelegate {
     var onEvent: ((String, Data) -> Void)?
+    var onOpen: (() -> Void)?
     private let url: URL
     private var task: URLSessionWebSocketTask?
     private var session: URLSession!
@@ -14,12 +15,21 @@ final class RealtimeClient: NSObject, URLSessionWebSocketDelegate {
     }
 
     func start() {
+        ping?.invalidate()
         task = session.webSocketTask(with: url)
         task?.resume()
         listen()
         ping = Timer.scheduledTimer(withTimeInterval: 20, repeats: true) { [weak self] _ in
             self?.send(dict: ["type": "ping"])
         }
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        webSocketTask: URLSessionWebSocketTask,
+        didOpenWithProtocol protocol: String?
+    ) {
+        onOpen?()
     }
 
     func stop() {

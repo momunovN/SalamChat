@@ -70,12 +70,24 @@ struct APIMessage: Codable, Identifiable, Hashable {
     var deletedAt: Date?
     var attachments: [APIAttachment]
     var status: String?
+    var replyTo: ReplyPreview?
 
     struct Payload: Codable, Hashable {
         var text: String?
         var lat: Double?
         var lon: Double?
         var caption: String?
+        var durationMS: Int?
+        var waveform: [Double]?
+
+        enum CodingKeys: String, CodingKey {
+            case text, lat, lon, caption, waveform
+            case durationMS = "duration_ms"
+        }
+    }
+
+    struct ReplyPreview: Codable, Hashable {
+        var text: String?
     }
 
     enum CodingKeys: String, CodingKey {
@@ -84,6 +96,7 @@ struct APIMessage: Codable, Identifiable, Hashable {
         case authorID = "author_id"
         case clientID = "client_id"
         case replyToID = "reply_to_id"
+        case replyTo = "reply_to"
         case createdAt = "created_at"
         case editedAt = "edited_at"
         case deletedAt = "deleted_at"
@@ -98,6 +111,7 @@ struct APIMessage: Codable, Identifiable, Hashable {
         payload = (try? c.decode(Payload.self, forKey: .payload)) ?? Payload()
         clientID = try c.decode(String.self, forKey: .clientID)
         replyToID = try c.decodeIfPresent(UUID.self, forKey: .replyToID)
+        replyTo = try c.decodeIfPresent(ReplyPreview.self, forKey: .replyTo)
         createdAt = try c.decode(Date.self, forKey: .createdAt)
         editedAt = try c.decodeIfPresent(Date.self, forKey: .editedAt)
         deletedAt = try c.decodeIfPresent(Date.self, forKey: .deletedAt)
@@ -113,8 +127,12 @@ struct APIMessage: Codable, Identifiable, Hashable {
         self.payload = payload
         self.clientID = clientID
         self.createdAt = createdAt
+        self.replyToID = nil
+        self.editedAt = nil
+        self.deletedAt = nil
         self.attachments = []
         self.status = status
+        self.replyTo = nil
     }
 }
 
@@ -143,13 +161,29 @@ struct APICall: Codable, Identifiable {
     var kind: String
     var status: String
     var startedAt: Date
+    var answeredAt: Date?
+    var endedAt: Date?
 
     enum CodingKeys: String, CodingKey {
         case id, kind, status
         case chatID = "chat_id"
         case initiatorID = "initiator_id"
         case startedAt = "started_at"
+        case answeredAt = "answered_at"
+        case endedAt = "ended_at"
     }
+}
+
+struct APIChatMember: Codable, Identifiable, Hashable {
+    var user: APIUser
+    var role: String
+    var id: UUID { user.id }
+}
+
+struct APIToken: Codable {
+    var url: String
+    var token: String
+    var room: String?
 }
 
 struct Envelope: Codable {

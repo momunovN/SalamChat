@@ -25,6 +25,13 @@ struct LocalMessage: Codable, FetchableRecord, PersistableRecord, Identifiable, 
     var createdAt: Date
     var status: String
     var isOutgoing: Bool
+    var replyText: String = ""
+    var edited: Bool = false
+    var deleted: Bool = false
+    var mediaURL: String = ""
+    var durationMs: Int = 0
+    var waveform: String = ""
+    var localPath: String = ""
 }
 
 struct OutboxRow: Codable, FetchableRecord, PersistableRecord {
@@ -35,6 +42,10 @@ struct OutboxRow: Codable, FetchableRecord, PersistableRecord {
     var payloadJSON: String
     var attempts: Int
     var nextRetry: Date
+    var uploadPath: String = ""
+    var mime: String = ""
+    var kind: String = ""
+    var replyTo: String = ""
 }
 
 final class AppDatabase {
@@ -84,6 +95,23 @@ final class AppDatabase {
                 t.column("nextRetry", .datetime).notNull()
             }
         }
+        m.registerMigration("v2") { db in
+            try db.alter(table: "messages") { t in
+                t.add(column: "replyText", .text).notNull().defaults(to: "")
+                t.add(column: "edited", .boolean).notNull().defaults(to: false)
+                t.add(column: "deleted", .boolean).notNull().defaults(to: false)
+                t.add(column: "mediaURL", .text).notNull().defaults(to: "")
+                t.add(column: "durationMs", .integer).notNull().defaults(to: 0)
+                t.add(column: "waveform", .text).notNull().defaults(to: "")
+                t.add(column: "localPath", .text).notNull().defaults(to: "")
+            }
+            try db.alter(table: "outbox") { t in
+                t.add(column: "uploadPath", .text).notNull().defaults(to: "")
+                t.add(column: "mime", .text).notNull().defaults(to: "")
+                t.add(column: "kind", .text).notNull().defaults(to: "")
+                t.add(column: "replyTo", .text).notNull().defaults(to: "")
+            }
+        }
         return m
     }
 
@@ -122,44 +150,141 @@ final class AppDatabase {
 
     func upsertChats(_ chats: [APIChat]) throws {
         try dbQueue.write { db in
-            for c in chats {
-                try LocalChat(
-                    id: c.id.uuidString,
-                    type: c.type,
-                    title: c.title,
-                    avatarURL: c.avatarURL,
-                    peerID: c.peer?.id.uuidString,
-                    lastText: preview(c.lastMessage),
-                    lastAt: c.lastMessage?.createdAt ?? c.updatedAt,
-                    unread: c.unreadCount,
-                    memberCount: c.memberCount
-                ).save(db)
+            for c in chats { try saveChat(c, db: db) }
+        }
+    }
+
+    func replaceChats(_ chats: [APIChat]) throws {
+        try dbQueue.write { db in
+            let ids = chats.map(\.id.uuidString)
+            if ids.isEmpty {
+                try db.execute(sql: "DELETE FROM chats")
+            } else {
+                let marks = Array(repeating: "?", count: ids.count).joined(separator: ",")
+                try db.execute(sql: "DELETE FROM chats WHERE id NOT IN (\(marks))", arguments: StatementArguments(ids))
             }
+            for c in chats { try saveChat(c, db: db) }
+        }
+    }
+
+    func deleteChats(_ ids: [String]) throws {
+        guard !ids.isEmpty else { return }
+        try dbQueue.write { db in
+            let marks = Array(repeating: "?", count: ids.count).joined(separator: ",")
+            try db.execute(sql: "DELETE FROM chats WHERE id IN (\(marks))", arguments: StatementArguments(ids))
         }
     }
 
     func upsertMessages(_ msgs: [APIMessage], me: UUID) throws {
         try dbQueue.write { db in
             for m in msgs {
-                try LocalMessage(
-                    id: m.id.uuidString,
-                    chatID: m.chatID.uuidString,
-                    authorID: m.authorID?.uuidString,
-                    type: m.type,
-                    text: m.payload.text ?? m.payload.caption ?? mediaLabel(m.type),
-                    clientID: m.clientID,
-                    createdAt: m.createdAt,
-                    status: m.status ?? "sent",
-                    isOutgoing: m.authorID == me
-                ).save(db)
+                if !m.clientID.isEmpty {
+                    try db.execute(
+                        sql: "DELETE FROM messages WHERE clientID = ? AND id != ?",
+                        arguments: [m.clientID, m.id.uuidString]
+                    )
+                }
+                try localMessage(m, me: me).save(db)
             }
         }
     }
 
+    func applyAck(clientID: String, serverID: String) throws {
+        try dbQueue.write { db in
+            let n = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM messages WHERE id = ?", arguments: [serverID]) ?? 0
+            if n > 0 {
+                try db.execute(sql: "DELETE FROM messages WHERE clientID = ? AND id != ?", arguments: [clientID, serverID])
+                try db.execute(
+                    sql: "UPDATE messages SET status = 'sent' WHERE id = ? AND status IN ('sending', 'failed')",
+                    arguments: [serverID]
+                )
+            } else {
+                try db.execute(
+                    sql: "UPDATE messages SET id = ?, status = CASE WHEN status IN ('sending', 'failed') THEN 'sent' ELSE status END WHERE clientID = ?",
+                    arguments: [serverID, clientID]
+                )
+            }
+            try db.execute(sql: "DELETE FROM outbox WHERE clientID = ?", arguments: [clientID])
+        }
+    }
+
+    func editLocal(id: String, text: String) throws {
+        try dbQueue.write { db in
+            try db.execute(sql: "UPDATE messages SET text=?, edited=1 WHERE id=?", arguments: [text, id])
+        }
+    }
+
+    func deleteLocal(id: String) throws {
+        try dbQueue.write { db in
+            try db.execute(sql: "UPDATE messages SET deleted=1, text='' WHERE id=?", arguments: [id])
+        }
+    }
+
+    func retryOutbox(clientID: String) throws {
+        try dbQueue.write { db in
+            try db.execute(sql: "UPDATE outbox SET attempts=0, nextRetry=? WHERE clientID=?", arguments: [Date(), clientID])
+            try db.execute(sql: "UPDATE messages SET status='sending' WHERE clientID=?", arguments: [clientID])
+        }
+    }
+
+    private func localMessage(_ m: APIMessage, me: UUID) -> LocalMessage {
+        let att = m.attachments.first
+        let wave = (m.payload.waveform ?? []).prefix(64).map { String($0) }.joined(separator: ",")
+        let deleted = m.deletedAt != nil
+        return LocalMessage(
+            id: m.id.uuidString,
+            chatID: m.chatID.uuidString,
+            authorID: m.authorID?.uuidString,
+            type: m.type,
+            text: deleted ? "" : (m.payload.text ?? m.payload.caption ?? mediaLabel(m.type)),
+            clientID: m.clientID,
+            createdAt: m.createdAt,
+            status: m.status ?? "sent",
+            isOutgoing: m.authorID == me,
+            replyText: m.replyTo?.text ?? "",
+            edited: m.editedAt != nil,
+            deleted: deleted,
+            mediaURL: att?.url ?? "",
+            durationMs: att?.durationMS ?? m.payload.durationMS ?? 0,
+            waveform: wave
+        )
+    }
+
+    private func saveChat(_ c: APIChat, db: Database) throws {
+        try LocalChat(
+            id: c.id.uuidString,
+            type: c.type,
+            title: c.title,
+            avatarURL: c.avatarURL,
+            peerID: c.peer?.id.uuidString,
+            lastText: preview(c.lastMessage),
+            lastAt: c.lastMessage?.createdAt ?? c.updatedAt,
+            unread: c.unreadCount,
+            memberCount: c.memberCount
+        ).save(db)
+    }
+
     @discardableResult
-    func insertOutgoing(chatID: UUID, me: UUID, text: String, type: String = "text") throws -> LocalMessage {
+    func insertOutgoing(
+        chatID: UUID,
+        me: UUID,
+        text: String,
+        type: String = "text",
+        payload: [String: Any]? = nil,
+        uploadPath: String = "",
+        mime: String = "",
+        kind: String = "",
+        replyTo: String = "",
+        replyText: String = "",
+        mediaURL: String = "",
+        durationMs: Int = 0,
+        waveform: String = ""
+    ) throws -> LocalMessage {
         let clientID = UUID().uuidString.lowercased()
         let now = Date()
+        let body = payload ?? ["text": text]
+        let payloadData = try JSONSerialization.data(withJSONObject: body)
+        let payloadJSON = String(data: payloadData, encoding: .utf8) ?? "{}"
         let row = LocalMessage(
             id: clientID,
             chatID: chatID.uuidString,
@@ -169,22 +294,29 @@ final class AppDatabase {
             clientID: clientID,
             createdAt: now,
             status: "sending",
-            isOutgoing: true
+            isOutgoing: true,
+            replyText: replyText,
+            mediaURL: mediaURL.isEmpty ? uploadPath : mediaURL,
+            durationMs: durationMs,
+            waveform: waveform,
+            localPath: uploadPath
         )
-        let payloadData = try JSONSerialization.data(withJSONObject: ["text": text])
-        let payload = String(data: payloadData, encoding: .utf8) ?? "{}"
         try dbQueue.write { db in
             try row.insert(db)
             try OutboxRow(
                 clientID: clientID,
                 chatID: chatID.uuidString,
                 type: type,
-                payloadJSON: payload,
+                payloadJSON: payloadJSON,
                 attempts: 0,
-                nextRetry: now
+                nextRetry: now,
+                uploadPath: uploadPath,
+                mime: mime,
+                kind: kind,
+                replyTo: replyTo
             ).insert(db)
             if var chat = try LocalChat.fetchOne(db, key: chatID.uuidString) {
-                chat.lastText = text
+                chat.lastText = text.isEmpty ? mediaLabel(type) : text
                 chat.lastAt = now
                 try chat.update(db)
             }
@@ -211,6 +343,9 @@ final class AppDatabase {
         try dbQueue.write { db in
             try db.execute(sql: "UPDATE outbox SET attempts=?, nextRetry=? WHERE clientID=?",
                            arguments: [attempts, Date().addingTimeInterval(delay), clientID])
+            if attempts >= 3 {
+                try db.execute(sql: "UPDATE messages SET status='failed' WHERE clientID=?", arguments: [clientID])
+            }
         }
     }
 
