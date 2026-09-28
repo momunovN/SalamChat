@@ -11,6 +11,7 @@ import android.net.Uri
 import android.os.Build
 import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -283,11 +284,11 @@ fun ChatScreen(
             Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
                 AttachChip(stringResource(R.string.photo)) {
                     attach = false
-                    photoPick.launch(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                    photoPick.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
                 }
                 AttachChip(stringResource(R.string.video)) {
                     attach = false
-                    photoPick.launch(ActivityResultContracts.PickVisualMedia.VideoOnly)
+                    photoPick.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly))
                 }
                 AttachChip(stringResource(R.string.file)) {
                     attach = false
