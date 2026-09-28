@@ -1,5 +1,8 @@
+import path from "path";
 import nodemailer from "nodemailer";
 import { env, envBool } from "./env";
+
+const logoPath = path.join(process.cwd(), "src", "app", "apple-icon.png");
 
 function boxes(code: string) {
   return code
@@ -23,7 +26,9 @@ function html(code: string) {
             <td style="padding:28px 28px 8px;">
               <table role="presentation" cellpadding="0" cellspacing="0">
                 <tr>
-                  <td style="width:44px;height:44px;background:#0055E3;border-radius:14px;text-align:center;font-family:Georgia,serif;font-size:24px;font-weight:700;color:#ffffff;">S</td>
+                  <td style="width:44px;height:44px;line-height:0;font-size:0;">
+                    <img src="cid:salam-logo" width="44" height="44" alt="Salam" style="display:block;width:44px;height:44px;border:0;border-radius:14px;" />
+                  </td>
                   <td style="padding-left:12px;font-family:Segoe UI,Helvetica,Arial,sans-serif;font-size:18px;font-weight:700;color:#f4f6fb;">Salam</td>
                 </tr>
               </table>
@@ -87,6 +92,13 @@ export async function sendLoginCode(to: string, code: string) {
     subject: "Код для входа в Salam",
     text: `Код для входа в Salam: ${code}\nОн действует 5 минут. Если вы не запрашивали код, проигнорируйте письмо.`,
     html: html(code),
+    attachments: [
+      {
+        filename: "salam.png",
+        path: logoPath,
+        cid: "salam-logo",
+      },
+    ],
   });
   return "email" as const;
 }
