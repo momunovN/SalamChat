@@ -23,6 +23,7 @@ import { lastPreview } from "@/lib/chat";
 import { dict, type Lang } from "@/lib/i18n";
 import { needsDisplayName, sanitizeDisplayName, sanitizeUsername } from "@/lib/name";
 import {
+  armSoundUnlock,
   notifyCall,
   notifyMessage,
   playMessageChime,
@@ -154,22 +155,22 @@ export function MessengerApp() {
   }, [chats]);
 
   useEffect(() => {
-    const unlock = () => unlockSounds();
-    window.addEventListener("pointerdown", unlock, { once: true });
-    return () => window.removeEventListener("pointerdown", unlock);
+    armSoundUnlock();
   }, []);
 
   useEffect(() => {
-    if (incoming && !callBusy && !activeCall) {
+    const outgoing = activeCall?.status === "ringing" && activeCall.initiator_id === me;
+    const incomingRing = !!incoming && !callBusy && !activeCall;
+    if (incomingRing || outgoing) {
       startRingtone();
-      if (document.visibilityState !== "visible") {
+      if (incoming && document.visibilityState !== "visible") {
         const title = chatsRef.current.find((chat) => chat.id === incoming.chat_id)?.title;
         notifyCall(title || t.incomingAudio, incoming.kind === "video" ? t.incomingVideo : t.incomingAudio);
       }
       return () => stopRingtone();
     }
     stopRingtone();
-  }, [incoming, callBusy, activeCall, t.incomingAudio, t.incomingVideo]);
+  }, [incoming, callBusy, activeCall, me, t.incomingAudio, t.incomingVideo]);
 
   const refreshChats = useCallback(async () => {
     const userId = meRef.current;
@@ -370,9 +371,9 @@ export function MessengerApp() {
           });
           void refreshChats();
           if (!mine && msg.author_id) {
+            playMessageChime();
             const looking = document.visibilityState === "visible" && openId === msg.chat_id;
             if (!looking) {
-              playMessageChime();
               const title = chatsRef.current.find((chat) => chat.id === msg.chat_id)?.title || "Salam";
               const body = msg.payload?.text || msg.payload?.caption || "";
               notifyMessage(title, body);

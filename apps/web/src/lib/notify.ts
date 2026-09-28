@@ -2,79 +2,138 @@
 // The publisher offers this file as a free download for apps and programs.
 
 const SRC = "/sounds/alert-tone.mp3";
-const MESSAGE_MS = 220;
+const MESSAGE_SEC = 0.22;
 const RING_EVERY_MS = 2500;
 const PERM_KEY = "tooapp.perm.notify";
 
-let messageAudio: HTMLAudioElement | null = null;
-let ringAudio: HTMLAudioElement | null = null;
+let ctx: AudioContext | null = null;
+let buffer: AudioBuffer | null = null;
+let loading: Promise<AudioBuffer | null> | null = null;
 let ringTimer = 0;
-let messageTimer = 0;
+let ringWanted = false;
+let ringSource: AudioBufferSourceNode | null = null;
 let callNotice: Notification | null = null;
+let armed = false;
 
-function audio(which: "message" | "ring") {
-  const current = which === "message" ? messageAudio : ringAudio;
-  if (current) return current;
-  const created = new Audio(SRC);
-  created.preload = "auto";
-  if (which === "message") messageAudio = created;
-  else ringAudio = created;
-  return created;
+function context() {
+  if (!ctx) {
+    const Ctor = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    ctx = new Ctor();
+  }
+  return ctx;
+}
+
+function loadBuffer() {
+  if (buffer) return Promise.resolve(buffer);
+  const audio = context();
+  if (!loading) {
+    loading = fetch(SRC)
+      .then((res) => {
+        if (!res.ok) throw new Error("sound");
+        return res.arrayBuffer();
+      })
+      .then((raw) => audio.decodeAudioData(raw.slice(0)))
+      .then((decoded) => {
+        buffer = decoded;
+        return decoded;
+      })
+      .catch(() => {
+        loading = null;
+        return null;
+      });
+  }
+  return loading;
+}
+
+function playFromStart(seconds: number) {
+  const audio = context();
+  void audio.resume();
+  return loadBuffer().then((decoded) => {
+    if (!decoded) return null;
+    const source = audio.createBufferSource();
+    const gain = audio.createGain();
+    source.buffer = decoded;
+    source.connect(gain);
+    gain.connect(audio.destination);
+    const dur = Math.min(seconds, decoded.duration);
+    const now = audio.currentTime;
+    gain.gain.setValueAtTime(1, now);
+    const fadeAt = now + Math.max(0, dur - 0.02);
+    gain.gain.setValueAtTime(1, fadeAt);
+    gain.gain.linearRampToValueAtTime(0.0001, now + dur);
+    source.start(now, 0, dur);
+    source.onended = () => {
+      source.disconnect();
+      gain.disconnect();
+    };
+    return source;
+  });
 }
 
 export function unlockSounds() {
-  if (typeof Audio === "undefined") return;
-  for (const which of ["message", "ring"] as const) {
-    const node = audio(which);
-    const volume = node.volume;
-    node.volume = 0;
-    void node
-      .play()
-      .then(() => {
-        node.pause();
-        node.currentTime = 0;
-        node.volume = volume || 1;
-      })
-      .catch(() => {
-        node.volume = volume || 1;
-      });
-  }
+  if (typeof window === "undefined") return;
+  const audio = context();
+  void audio.resume().then(() => {
+    void loadBuffer().then(() => {
+      if (ringWanted) void ringOnce();
+    });
+  });
+}
+
+export function armSoundUnlock() {
+  if (armed || typeof window === "undefined") return;
+  armed = true;
+  const unlock = () => {
+    unlockSounds();
+    if (context().state === "running") window.removeEventListener("pointerdown", unlock);
+  };
+  window.addEventListener("pointerdown", unlock);
+  unlockSounds();
 }
 
 export function playMessageChime() {
-  if (ringTimer || typeof Audio === "undefined") return;
-  const node = audio("message");
-  if (messageTimer) window.clearTimeout(messageTimer);
-  node.pause();
-  node.currentTime = 0;
-  node.volume = 1;
-  void node.play().catch(() => undefined);
-  messageTimer = window.setTimeout(() => {
-    messageTimer = 0;
-    node.pause();
-    node.currentTime = 0;
-  }, MESSAGE_MS);
+  if (ringWanted || typeof window === "undefined") return;
+  void playFromStart(MESSAGE_SEC);
 }
 
 function ringOnce() {
-  const node = audio("ring");
-  node.pause();
-  node.currentTime = 0;
-  node.volume = 1;
-  void node.play().catch(() => undefined);
+  try {
+    ringSource?.stop();
+  } catch {
+    /* already stopped */
+  }
+  ringSource = null;
+  void playFromStart(2.4).then((source) => {
+    if (!ringWanted) {
+      try {
+        source?.stop();
+      } catch {
+        /* already stopped */
+      }
+      return;
+    }
+    ringSource = source;
+  });
 }
 
 export function startRingtone() {
-  if (typeof Audio === "undefined" || ringTimer) return;
+  if (typeof window === "undefined") return;
+  ringWanted = true;
+  if (ringTimer) return;
   ringOnce();
   ringTimer = window.setInterval(ringOnce, RING_EVERY_MS);
 }
 
 export function stopRingtone() {
+  ringWanted = false;
   if (ringTimer) window.clearInterval(ringTimer);
   ringTimer = 0;
-  ringAudio?.pause();
-  if (ringAudio) ringAudio.currentTime = 0;
+  try {
+    ringSource?.stop();
+  } catch {
+    /* already stopped */
+  }
+  ringSource = null;
   callNotice?.close();
   callNotice = null;
 }
