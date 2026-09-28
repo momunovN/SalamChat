@@ -11,6 +11,12 @@ function phoneSkipped(value: string) {
   return !digits || digits === "996" || digits === "7";
 }
 
+function clock(sec: number) {
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
 export function PhoneAuth({
   t,
   onSession,
@@ -27,6 +33,7 @@ export function PhoneAuth({
   const [hint, setHint] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [waited, setWaited] = useState(false);
+  const [left, setLeft] = useState(0);
 
   function pickCountry(next: "996" | "7") {
     setCc(next);
@@ -52,6 +59,30 @@ export function PhoneAuth({
     return msg || t.errLogin;
   }
 
+  async function sendCode() {
+    const sentPhone = phoneSkipped(phone) ? "" : phone;
+    await api.requestOTP(email.trim(), sentPhone);
+    setHint(email.trim());
+    setCode("");
+    setLeft(60);
+    setStep(1);
+  }
+
+  async function resend() {
+    if (busy || left > 0) return;
+    setBusy(true);
+    setWaited(false);
+    setError(null);
+    try {
+      await sendCode();
+    } catch (err) {
+      const e = err instanceof Error ? err : new Error("");
+      setError(mapErr(e.message, e.name));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function go(typed?: string) {
     if (busy) return;
     setBusy(true);
@@ -63,11 +94,7 @@ export function PhoneAuth({
           setError(t.errEmail);
           return;
         }
-        const sentPhone = phoneSkipped(phone) ? "" : phone;
-        await api.requestOTP(email.trim(), sentPhone);
-        setHint(email.trim());
-        setCode("");
-        setStep(1);
+        await sendCode();
       } else {
         const digits = (typed ?? code).replace(/\D/g, "");
         if (digits.length !== 6) {
@@ -95,6 +122,14 @@ export function PhoneAuth({
     const id = window.setTimeout(() => setWaited(true), 2500);
     return () => window.clearTimeout(id);
   }, [busy]);
+
+  useEffect(() => {
+    if (left <= 0) return;
+    const id = window.setInterval(() => {
+      setLeft((n) => (n <= 1 ? 0 : n - 1));
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [left > 0]);
 
   const fieldClass =
     "h-[52px] w-full rounded-[14px] bg-elevated px-3.5 text-base text-ink outline-none ring-accent/0 focus:ring-2 focus:ring-accent";
@@ -172,6 +207,16 @@ export function PhoneAuth({
         {busy && waited ? <p className="mt-3 text-xs font-medium text-muted">{t.connecting}</p> : null}
         {hint ? <p className="mt-3 text-sm font-semibold tracking-[0.08em] text-success">{hint}</p> : null}
         {error ? <p className="mt-2 text-xs font-medium text-danger">{error}</p> : null}
+        {step === 1 ? (
+          <button
+            type="button"
+            disabled={busy || left > 0}
+            onClick={() => void resend()}
+            className="mt-3 text-sm font-semibold text-accent disabled:text-muted"
+          >
+            {left > 0 ? t.resendIn.replace("%s", clock(left)) : t.resend}
+          </button>
+        ) : null}
         <button
           type="button"
           disabled={busy}

@@ -30,6 +30,8 @@
     <string name="auth_continue">Продолжить</string>
     <string name="auth_otp_title">Код из письма</string>
     <string name="auth_otp_subtitle">Введите 6 цифр из письма</string>
+    <string name="auth_resend">Отправить повторно</string>
+    <string name="auth_resend_in">Отправить повторно через %1$s</string>
     <string name="name_title">Как вас зовут?</string>
     <string name="name_subtitle">Имя увидят в чатах и при поиске</string>
     <string name="nick_optional">Ник (необязательно)</string>

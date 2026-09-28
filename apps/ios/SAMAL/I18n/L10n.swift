@@ -37,6 +37,10 @@ enum L10n {
     static var continueCta: String { t("auth.continue") }
     static var otpTitle: String { t("auth.otp_title") }
     static var otpSubtitle: String { t("auth.otp_subtitle") }
+    static var resend: String { t("auth.resend") }
+    static func resendIn(_ time: String) -> String {
+        t("auth.resend_in").replacingOccurrences(of: "%s", with: time)
+    }
     static var emptyChats: String { t("chats.empty") }
     static var nameTitle: String { t("auth.name_title") }
     static var nameSubtitle: String { t("auth.name_subtitle") }

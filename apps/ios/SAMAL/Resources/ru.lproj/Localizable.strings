@@ -34,6 +34,8 @@
 "auth.continue" = "Продолжить";
 "auth.otp_title" = "Код из письма";
 "auth.otp_subtitle" = "Введите 6 цифр из письма";
+"auth.resend" = "Отправить повторно";
+"auth.resend_in" = "Отправить повторно через %s";
 "chats.empty" = "Пока нет чатов";
 "auth.name_title" = "Как вас зовут?";
 "auth.name_subtitle" = "Имя увидят в чатах и при поиске";

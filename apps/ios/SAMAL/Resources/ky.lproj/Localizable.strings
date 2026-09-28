@@ -34,6 +34,8 @@
 "auth.continue" = "Улантуу";
 "auth.otp_title" = "Каттан келген код";
 "auth.otp_subtitle" = "Каттагы 6 санды жазыңыз";
+"auth.resend" = "Кайра жөнөтүү";
+"auth.resend_in" = "Кайра жөнөтүү %s кийин";
 "chats.empty" = "Чаттар жок";
 "auth.name_title" = "Атыңыз ким?";
 "auth.name_subtitle" = "Атыңыз чаттарда жана издөөдө көрүнөт";

@@ -10,6 +10,7 @@ struct PhoneAuthView: View {
     @State private var busy = false
     @State private var hint: String?
     @State private var failed = false
+    @State private var left = 0
 
     var body: some View {
         GeometryReader { geo in
@@ -53,6 +54,15 @@ struct PhoneAuthView: View {
             }
             .disabled(busy)
             .buttonStyle(.plain)
+            if step == 1 {
+                Button(action: resend) {
+                    Text(left > 0 ? L10n.resendIn(clock(left)) : L10n.resend)
+                        .font(SamalFont.subhead().weight(.semibold))
+                        .foregroundStyle(left > 0 || busy ? SamalColor.muted : SamalColor.accent)
+                }
+                .disabled(busy || left > 0)
+                .buttonStyle(.plain)
+            }
         }
         .padding(.horizontal, geo.size.width < 360 ? 16 : 24)
         .padding(.vertical, 16)
@@ -62,6 +72,11 @@ struct PhoneAuthView: View {
         }
         }
         .background(SamalColor.bg.ignoresSafeArea())
+        .task(id: left) {
+            guard left > 0 else { return }
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            if left > 0 { left -= 1 }
+        }
     }
 
     private func countryChip(_ id: String, _ title: String, _ prefix: String) -> some View {
@@ -92,6 +107,30 @@ struct PhoneAuthView: View {
             .background(SamalColor.elevated, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
+    private func clock(_ sec: Int) -> String {
+        String(format: "%d:%02d", sec / 60, sec % 60)
+    }
+
+    private func resend() {
+        if busy || left > 0 { return }
+        busy = true
+        failed = false
+        let sentPhone = skippedPhone(phone) ? "" : phone
+        let address = email.trimmingCharacters(in: .whitespaces)
+        Task {
+            defer { busy = false }
+            do {
+                _ = try await session.api.requestOTP(email: address, phone: sentPhone)
+                hint = address
+                code = ""
+                left = 60
+            } catch {
+                hint = error.localizedDescription
+                failed = true
+            }
+        }
+    }
+
     private func skippedPhone(_ value: String) -> Bool {
         let digits = value.filter(\.isNumber)
         return digits.isEmpty || digits == "996" || digits == "7"
@@ -112,6 +151,8 @@ struct PhoneAuthView: View {
                 if step == 0 {
                     _ = try await session.api.requestOTP(email: email.trimmingCharacters(in: .whitespaces), phone: sentPhone)
                     hint = email.trimmingCharacters(in: .whitespaces)
+                    code = ""
+                    left = 60
                     step = 1
                 } else {
                     try await session.login(email: email.trimmingCharacters(in: .whitespaces), phone: sentPhone, code: code)

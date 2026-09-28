@@ -30,6 +30,8 @@
     <string name="auth_continue">Улантуу</string>
     <string name="auth_otp_title">Каттан келген код</string>
     <string name="auth_otp_subtitle">Каттагы 6 санды жазыңыз</string>
+    <string name="auth_resend">Кайра жөнөтүү</string>
+    <string name="auth_resend_in">Кайра жөнөтүү %1$s кийин</string>
     <string name="field_name">Аты</string>
     <string name="field_nick">Ник</string>
     <string name="field_bio">Жөнүндө</string>

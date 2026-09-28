@@ -25,6 +25,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -51,6 +52,7 @@ import dev.samal.app.ui.theme.Elevated
 import dev.samal.app.ui.theme.Muted
 import dev.samal.app.ui.theme.Success
 import dev.samal.app.ui.theme.Text
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -64,8 +66,15 @@ fun PhoneAuthScreen(session: SessionStore) {
     var busy by remember { mutableStateOf(false) }
     var hint by remember { mutableStateOf<String?>(null) }
     var hintError by remember { mutableStateOf(false) }
+    var left by remember { mutableIntStateOf(0) }
     val scope = rememberCoroutineScope()
     val errEmail = stringResource(R.string.auth_err_email)
+
+    LaunchedEffect(left) {
+        if (left <= 0) return@LaunchedEffect
+        delay(1000)
+        left -= 1
+    }
 
     fun skippedPhone(value: String): Boolean {
         val digits = value.filter(Char::isDigit)
@@ -88,6 +97,8 @@ fun PhoneAuthScreen(session: SessionStore) {
                     session.requestOtp(email.trim(), sentPhone)
                     hint = email.trim()
                     hintError = false
+                    code = ""
+                    left = 60
                     step = 1
                 } else {
                     session.login(email.trim(), sentPhone, code)
@@ -100,6 +111,29 @@ fun PhoneAuthScreen(session: SessionStore) {
             }
         }
     }
+
+    fun resend() {
+        if (busy || left > 0) return
+        busy = true
+        hint = null
+        scope.launch {
+            try {
+                val sentPhone = if (skippedPhone(phone)) "" else phone
+                session.requestOtp(email.trim(), sentPhone)
+                hint = email.trim()
+                hintError = false
+                code = ""
+                left = 60
+            } catch (e: Exception) {
+                hint = e.message
+                hintError = true
+            } finally {
+                busy = false
+            }
+        }
+    }
+
+    fun clock(sec: Int) = "%d:%02d".format(sec / 60, sec % 60)
 
     Box(
         Modifier
@@ -207,6 +241,16 @@ fun PhoneAuthScreen(session: SessionStore) {
                 color = Color.White,
                 fontSize = 17.sp,
                 fontWeight = FontWeight.SemiBold,
+            )
+        }
+        if (step == 1) {
+            Spacer(Modifier.height(14.dp))
+            Text(
+                if (left > 0) stringResource(R.string.auth_resend_in, clock(left)) else stringResource(R.string.auth_resend),
+                color = if (left > 0 || busy) Muted else Accent,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.clickable(enabled = left == 0 && !busy, onClick = ::resend),
             )
         }
         Spacer(Modifier.height(24.dp))
