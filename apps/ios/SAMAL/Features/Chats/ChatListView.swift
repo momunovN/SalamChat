@@ -96,6 +96,14 @@ struct ChatListView: View {
             }
         }
         .onAppear { vm.start(session: session) }
+        .onChange(of: session.pendingChatID) { _, id in
+            guard let id else { return }
+            let rows = (try? AppDatabase.shared.fetchChats(filter: "", query: "")) ?? vm.chats
+            if let chat = rows.first(where: { $0.id.caseInsensitiveCompare(id) == .orderedSame }) {
+                open = chat
+            }
+            session.pendingChatID = nil
+        }
         .onDisappear { vm.stop() }
         .onChange(of: vm.segment) { _, _ in
             vm.reload()

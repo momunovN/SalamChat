@@ -115,6 +115,13 @@ final class AppDatabase {
         return m
     }
 
+    func chat(id: String) throws -> LocalChat? {
+        try dbQueue.read { db in
+            if let row = try LocalChat.fetchOne(db, key: id) { return row }
+            return try LocalChat.fetchOne(db, sql: "SELECT * FROM chats WHERE id = ? COLLATE NOCASE", arguments: [id])
+        }
+    }
+
     func fetchChats(filter: String, query: String) throws -> [LocalChat] {
         try dbQueue.read { db in
             var sql = "SELECT * FROM chats WHERE 1=1"

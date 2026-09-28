@@ -16,7 +16,7 @@ import dev.samal.app.R
 
 object Notifier {
     private const val ONGOING = "salam.ongoing"
-    private const val MESSAGES = "salam.messages"
+    private const val MESSAGES = "salam.messages.v2"
     private const val ONGOING_ID = 41
 
     fun ensure(ctx: Context) {
@@ -28,7 +28,8 @@ object Notifier {
         }
         if (nm.getNotificationChannel(MESSAGES) == null) {
             val ch = NotificationChannel(MESSAGES, ctx.getString(R.string.tab_chats), NotificationManager.IMPORTANCE_HIGH)
-            ch.setSound(null, null)
+            ch.enableVibration(true)
+            ch.lockscreenVisibility = Notification.VISIBILITY_PUBLIC
             nm.createNotificationChannel(ch)
         }
     }
@@ -56,16 +57,20 @@ object Notifier {
             open,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
+        val text = body.ifBlank { ctx.getString(R.string.composer) }
         val note = NotificationCompat.Builder(ctx, MESSAGES)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle(title.ifBlank { ctx.getString(R.string.app_name) })
-            .setContentText(body.ifBlank { ctx.getString(R.string.composer) })
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setAutoCancel(true)
             .setContentIntent(pi)
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setDefaults(NotificationCompat.DEFAULT_ALL)
             .build()
         ctx.getSystemService(NotificationManager::class.java).notify(chatId.hashCode(), note)
-        chime(ctx)
     }
 
     fun chime(ctx: Context) {

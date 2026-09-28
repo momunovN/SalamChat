@@ -18,6 +18,7 @@ final class SessionStore: ObservableObject {
     @Published var activeCall: ActiveCall?
     @Published var liveCall: APICall?
     @Published var openChatID: String?
+    @Published var pendingChatID: String?
     @Published var typingChatID: String?
     @Published var onlineIDs = Set<String>()
     @Published var language: String = UserDefaults.standard.string(forKey: "samal.lang")
@@ -41,6 +42,10 @@ final class SessionStore: ObservableObject {
         if let data = UserDefaults.standard.data(forKey: "samal.session"),
            let sess = try? JSONDecoder().decode(APISession.self, from: data) {
             apply(sess)
+        }
+        NotificationCenter.default.addObserver(forName: .salamOpenChat, object: nil, queue: .main) { [weak self] note in
+            guard let id = note.object as? String else { return }
+            Task { @MainActor in self?.pendingChatID = id }
         }
     }
 
@@ -199,7 +204,8 @@ final class SessionStore: ObservableObject {
                     if looking {
                         Chime.play()
                     } else {
-                        Chime.notify(title: "Salam", body: msg.payload.text ?? msg.payload.caption ?? msg.type)
+                        let title = (try? db.chat(id: msg.chatID.uuidString))?.title ?? L10n.appName
+                        Chime.notify(id: msg.id.uuidString, title: title, body: noteBody(msg), chatID: msg.chatID.uuidString)
                     }
                 }
             }
@@ -266,6 +272,18 @@ final class SessionStore: ObservableObject {
     }
 }
 
+private func noteBody(_ msg: APIMessage) -> String {
+    if let text = msg.payload.text, !text.isEmpty { return text }
+    if let text = msg.payload.caption, !text.isEmpty { return text }
+    switch msg.type {
+    case "photo": return L10n.photo
+    case "voice": return L10n.voice
+    case "file": return L10n.file
+    case "location": return L10n.geo
+    default: return L10n.appName
+    }
+}
+
 enum Chime {
     static var player: AVAudioPlayer?
 
@@ -278,16 +296,13 @@ enum Chime {
         }
     }
 
-    static func notify(title: String, body: String) {
+    static func notify(id: String, title: String, body: String, chatID: String) {
         let note = UNMutableNotificationContent()
         note.title = title
         note.body = body
-        if Bundle.main.url(forResource: "alert-tone", withExtension: "mp3") != nil {
-            note.sound = UNNotificationSound(named: UNNotificationSoundName("alert-tone.mp3"))
-        } else {
-            note.sound = .default
-        }
-        let req = UNNotificationRequest(identifier: UUID().uuidString, content: note, trigger: nil)
+        note.sound = .default
+        note.userInfo = ["chat_id": chatID]
+        let req = UNNotificationRequest(identifier: id, content: note, trigger: nil)
         UNUserNotificationCenter.current().add(req)
     }
 }
