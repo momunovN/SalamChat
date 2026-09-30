@@ -42,7 +42,9 @@ import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.DoneAll
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.Icon
@@ -130,6 +132,7 @@ fun ChatScreen(
     var reply by remember { mutableStateOf<MessageEntity?>(null) }
     var editing by remember { mutableStateOf<MessageEntity?>(null) }
     var menu by remember { mutableStateOf<MessageEntity?>(null) }
+    var stage by remember { mutableStateOf<MessageEntity?>(null) }
     var attach by remember { mutableStateOf(false) }
     var members by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -225,7 +228,7 @@ fun ChatScreen(
             itemsIndexed(messages, key = { _, msg -> msg.id }) { index, msg ->
                 val older = messages.getOrNull(index + 1)
                 val showDay = older == null || !sameInstantDay(msg.createdAt, older.createdAt)
-                Bubble(msg, showDay) { menu = msg }
+                Bubble(msg, showDay, onOpen = { stage = msg }, onMenu = { menu = msg })
             }
             if (hasOlder) {
                 item {
@@ -468,6 +471,12 @@ fun ChatScreen(
     }
 
     if (members) MembersSheet(api, chat, me, onLeave = { members = false; onBack() }, onClose = { members = false })
+    stage?.let { msg ->
+        val kind = openKind(msg.type, msg.text, msg.mediaUrl, msg.deleted)
+        if (kind != null) {
+            MediaStage(msg.mediaUrl, msg.text.ifBlank { stringResource(R.string.file) }, kind) { stage = null }
+        }
+    }
 
     // silence unused ordered if reverse layout uses messages directly
     if (ordered.isEmpty()) Unit
@@ -489,14 +498,17 @@ private fun AttachChip(label: String, onClick: () -> Unit) {
 }
 
 @Composable
-private fun Bubble(msg: MessageEntity, showDay: Boolean, onMenu: () -> Unit) {
+private fun Bubble(msg: MessageEntity, showDay: Boolean, onOpen: () -> Unit, onMenu: () -> Unit) {
     val ctx = LocalContext.current
     val time = remember(msg.createdAt) { SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(msg.createdAt)) }
     val day = dayLabel(msg.createdAt, stringResource(R.string.today), stringResource(R.string.yesterday))
     Column(Modifier.fillMaxWidth().pointerInput(msg.id) {
         detectTapGestures(
             onLongPress = { onMenu() },
-            onTap = { if (msg.status == "failed") onMenu() },
+            onTap = {
+                if (openKind(msg.type, msg.text, msg.mediaUrl, msg.deleted) != null) onOpen()
+                else if (msg.status == "failed") onMenu()
+            },
         )
     }) {
         if (showDay) {
@@ -511,16 +523,30 @@ private fun Bubble(msg: MessageEntity, showDay: Boolean, onMenu: () -> Unit) {
                     .padding(horizontal = 12.dp, vertical = 8.dp),
             ) {
                 if (msg.replyText.isNotBlank()) Text(msg.replyText, color = Accent, fontSize = 12.sp, maxLines = 2)
+                val kind = openKind(msg.type, msg.text, msg.mediaUrl, msg.deleted)
                 when {
                     msg.deleted -> Text(stringResource(R.string.deleted), color = Muted)
-                    msg.type == "photo" && msg.mediaUrl.isNotBlank() -> AsyncImage(
-                        model = msg.mediaUrl,
-                        contentDescription = null,
+                    kind == "image" -> AsyncImage(
+                        model = coilModel(msg.mediaUrl),
+                        contentDescription = stringResource(R.string.photo),
                         modifier = Modifier.size(220.dp).clip(RoundedCornerShape(12.dp)),
                         contentScale = ContentScale.Crop,
                     )
                     msg.type == "voice" -> VoiceBubble(msg)
-                    msg.type == "file" || msg.type == "video" -> Text(msg.text.ifBlank { previewLabel(previewText(msg.type, "", false)) }, color = Text)
+                    kind != null -> Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            if (kind == "video") Icons.Default.PlayArrow else Icons.Default.Description,
+                            contentDescription = null,
+                            tint = Accent,
+                            modifier = Modifier.size(22.dp),
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            msg.text.ifBlank { stringResource(if (kind == "video") R.string.video else R.string.file) },
+                            color = Text,
+                            fontSize = 16.sp,
+                        )
+                    }
                     msg.type == "location" -> Text(msg.text.ifBlank { stringResource(R.string.geo) }, color = Text)
                     else -> Text(msg.text, color = Text, fontSize = 16.sp)
                 }
@@ -642,7 +668,21 @@ private suspend fun enqueueFile(ctx: Context, dao: SamalDao, chatId: String, me:
         val i = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
         if (i >= 0 && c.moveToFirst()) c.getString(i) else null
     } ?: "file"
-    val dest = File(ctx.cacheDir, "out/${UUID.randomUUID()}-$name")
+    val named = if (name.contains('.')) name else {
+        val ext = when (mime) {
+            "image/jpeg" -> "jpg"
+            "image/png" -> "png"
+            "image/webp" -> "webp"
+            "image/gif" -> "gif"
+            "video/mp4" -> "mp4"
+            "video/webm" -> "webm"
+            "video/quicktime" -> "mov"
+            "application/pdf" -> "pdf"
+            else -> ""
+        }
+        if (ext.isEmpty()) name else "$name.$ext"
+    }
+    val dest = File(ctx.cacheDir, "out/${UUID.randomUUID()}-$named")
     dest.parentFile?.mkdirs()
     ctx.contentResolver.openInputStream(uri)?.use { input -> dest.outputStream().use { input.copyTo(it) } } ?: return
     val kind = when {

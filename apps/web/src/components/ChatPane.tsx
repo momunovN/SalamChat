@@ -109,6 +109,7 @@ export function ChatPane({
   const [elapsed, setElapsed] = useState(0);
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const [liveWave, setLiveWave] = useState<number[]>([]);
+  const [openDoc, setOpenDoc] = useState<OpenDoc | null>(null);
   const meterRef = useRef<number>(0);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const samplesRef = useRef<number[]>([]);
@@ -468,6 +469,8 @@ export function ChatPane({
   async function sendFile(file: File, kind: "photo" | "file") {
     setAttach(false);
     const clientId = crypto.randomUUID();
+    const localUrl = URL.createObjectURL(file);
+    const mime = file.type || "application/octet-stream";
     const optimistic: Message = {
       id: clientId,
       chat_id: chat.id,
@@ -480,6 +483,15 @@ export function ChatPane({
       status: "sending",
       reply_to_id: replyTo?.id,
       reply_to: replyTo,
+      attachments: [
+        {
+          id: clientId,
+          kind: mime.startsWith("image/") ? "photo" : mime.startsWith("video/") ? "video" : kind,
+          url: localUrl,
+          mime,
+          filename: file.name,
+        },
+      ],
     };
     const quoted = replyTo;
     setReplyTo(null);
@@ -490,6 +502,7 @@ export function ChatPane({
       const uploadId = await api.upload(file, kind);
       const msg = await api.send(chat.id, clientId, kind, { caption: file.name }, [uploadId], quoted?.id);
       setMessages((prev) => prev.map((m) => (m.client_id === clientId ? msg : m)));
+      queueMicrotask(() => URL.revokeObjectURL(localUrl));
       onLocal(msg);
       onRefreshChats();
     } catch {
@@ -645,20 +658,17 @@ export function ChatPane({
                               waveform={m.payload?.waveform}
                             />
                           )
-                        ) : a.kind === "photo" ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img key={a.id} src={a.url} alt="" className="mb-1 max-h-64 rounded-lg" />
                         ) : (
-                          <a
+                          <ChatFile
                             key={a.id}
-                            href={a.url}
-                            className="mb-1 block text-sm underline"
-                            target="_blank"
-                            rel="noreferrer"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            {a.filename || a.kind}
-                          </a>
+                            url={a.url}
+                            name={a.filename || ""}
+                            mime={a.mime || ""}
+                            kind={a.kind}
+                            photoLabel={t.photo}
+                            fileLabel={t.file}
+                            onOpen={setOpenDoc}
+                          />
                         ),
                       )}
                       {m.type === "voice" ? null : m.payload?.text || (m.type !== "text" ? m.payload?.caption : "")}
@@ -974,6 +984,15 @@ export function ChatPane({
           onCancel={() => setMicAsk(false)}
         />
       ) : null}
+      {openDoc ? (
+        <FileStage
+          doc={openDoc}
+          closeLabel={t.cancel}
+          openLabel={t.openFile}
+          failLabel={t.previewFail}
+          onClose={() => setOpenDoc(null)}
+        />
+      ) : null}
     </div>
   );
 
@@ -1013,6 +1032,144 @@ export function ChatPane({
     setMembersOpen(false);
     onHide();
   }
+}
+
+type OpenDoc = {
+  url: string;
+  name: string;
+  mime: string;
+  mode: "image" | "video" | "pdf" | "text" | "file";
+};
+
+function docMode(kind: string, mime: string, name: string): OpenDoc["mode"] {
+  const type = (mime || "").split(";")[0].toLowerCase();
+  const file = name.toLowerCase();
+  if (kind === "photo" || type.startsWith("image/") || /\.(jpe?g|png|gif|webp|heic|bmp)$/.test(file)) return "image";
+  if (kind === "video" || type.startsWith("video/") || /\.(mp4|mov|webm|m4v|mkv)$/.test(file)) return "video";
+  if (type === "application/pdf" || file.endsWith(".pdf")) return "pdf";
+  if (type.startsWith("text/") || /\.(txt|md|csv|json|log|xml)$/.test(file)) return "text";
+  return "file";
+}
+
+function ChatFile({
+  url,
+  name,
+  mime,
+  kind,
+  photoLabel,
+  fileLabel,
+  onOpen,
+}: {
+  url: string;
+  name: string;
+  mime: string;
+  kind: string;
+  photoLabel: string;
+  fileLabel: string;
+  onOpen: (doc: OpenDoc) => void;
+}) {
+  if (!url) return null;
+  const mode = docMode(kind, mime, name);
+  const title = name || (mode === "image" ? photoLabel : fileLabel);
+  const open = (e: { stopPropagation: () => void }) => {
+    e.stopPropagation();
+    onOpen({ url, name: title, mime, mode });
+  };
+  if (mode === "image") {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img src={url} alt={title} onClick={open} className="mb-1 max-h-64 cursor-zoom-in rounded-lg" />
+    );
+  }
+  return (
+    <button type="button" onClick={open} className="mb-1 flex items-center gap-2 text-left text-sm underline">
+      {title}
+    </button>
+  );
+}
+
+function FileStage({
+  doc,
+  closeLabel,
+  openLabel,
+  failLabel,
+  onClose,
+}: {
+  doc: OpenDoc;
+  closeLabel: string;
+  openLabel: string;
+  failLabel: string;
+  onClose: () => void;
+}) {
+  const [zoom, setZoom] = useState(1);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex flex-col bg-black/92" onClick={onClose}>
+      <div className="flex items-center gap-3 px-3 py-3 text-white" onClick={(e) => e.stopPropagation()}>
+        <button type="button" onClick={onClose} aria-label={closeLabel} className="flex h-9 w-9 items-center justify-center rounded-full bg-white/15">
+          <X size={18} />
+        </button>
+        <p className="min-w-0 flex-1 truncate text-sm">{doc.name}</p>
+      </div>
+      <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-3" onClick={(e) => e.stopPropagation()}>
+        {doc.mode === "image" ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={doc.url}
+            alt={doc.name}
+            onClick={() => setZoom((v) => (v > 1 ? 1 : 2))}
+            style={{ transform: `scale(${zoom})` }}
+            className="max-h-full max-w-full cursor-zoom-in object-contain"
+          />
+        ) : doc.mode === "video" ? (
+          <video src={doc.url} controls autoPlay className="max-h-full max-w-full" />
+        ) : doc.mode === "pdf" ? (
+          <iframe title={doc.name} src={doc.url} className="h-full w-full bg-white" />
+        ) : doc.mode === "text" ? (
+          <TextBody key={doc.url} url={doc.url} failLabel={failLabel} />
+        ) : (
+          <div className="flex flex-col items-center gap-4 text-white">
+            <p className="max-w-sm text-center text-sm">{doc.name}</p>
+            <a href={doc.url} target="_blank" rel="noreferrer" className="rounded-full bg-accent px-5 py-2 text-sm text-white">
+              {openLabel}
+            </a>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function TextBody({ url, failLabel }: { url: string; failLabel: string }) {
+  const [text, setText] = useState<string | null>(null);
+  const [fail, setFail] = useState(false);
+  useEffect(() => {
+    let gone = false;
+    fetch(url)
+      .then((r) => {
+        if (!r.ok) throw new Error("bad");
+        return r.text();
+      })
+      .then((body) => {
+        if (!gone) setText(body.slice(0, 200_000));
+      })
+      .catch(() => {
+        if (!gone) setFail(true);
+      });
+    return () => {
+      gone = true;
+    };
+  }, [url]);
+  if (fail) return <p className="text-sm text-white">{failLabel}</p>;
+  if (text == null) return null;
+  return <pre className="h-full w-full overflow-auto whitespace-pre-wrap text-sm text-white">{text}</pre>;
 }
 
 function voiceFile(blob: Blob) {

@@ -83,3 +83,4 @@
 "media.voice" = "Голос";
 "media.file" = "Файл";
 "media.geo" = "Гео";
+"media.fail" = "Не открылось";

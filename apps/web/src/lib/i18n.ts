@@ -142,6 +142,8 @@ const ru = {
   voiceDenied: "Нет доступа к микрофону",
   voiceUnsupported: "Браузер не пишет голос",
   voiceFail: "Не отправилось",
+  openFile: "Открыть",
+  previewFail: "Не открылось",
 };
 
 const ky: typeof ru = {
@@ -286,6 +288,8 @@ const ky: typeof ru = {
   voiceDenied: "Микрофонго уруксат жок",
   voiceUnsupported: "Браузер үн жазбайт",
   voiceFail: "Жөнөтүлгөн жок",
+  openFile: "Ачуу",
+  previewFail: "Ачылган жок",
 };
 
 export const dict = { ru, ky };

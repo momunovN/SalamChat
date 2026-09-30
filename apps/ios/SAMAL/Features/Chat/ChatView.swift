@@ -2,6 +2,7 @@ import AVFoundation
 import CoreLocation
 import GRDB
 import PhotosUI
+import QuickLook
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -182,6 +183,10 @@ struct ChatView: View {
     @State private var photoMatch: PHPickerFilter = .images
     @State private var photoItem: PhotosPickerItem?
     @State private var pickFile = false
+    @State private var viewer: ChatMedia?
+    @State private var previewURL: URL?
+    @State private var openingFile = false
+    @State private var openFailed = false
     @StateObject private var locator = Locator()
 
     init(chat: LocalChat) {
@@ -228,6 +233,21 @@ struct ChatView: View {
         }
         .background(SamalColor.bg.ignoresSafeArea())
         .navigationBarHidden(true)
+        .fullScreenCover(item: $viewer) { item in
+            MediaCover(item: item) { viewer = nil }
+        }
+        .quickLookPreview($previewURL)
+        .alert(L10n.mediaFail, isPresented: $openFailed) {
+            Button(L10n.cancel, role: .cancel) {}
+        }
+        .overlay {
+            if openingFile {
+                ProgressView()
+                    .tint(.white)
+                    .padding(16)
+                    .background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 12))
+            }
+        }
         .onAppear { vm.start(session: session) }
         .onDisappear { vm.stop(session: session) }
         .sheet(isPresented: $vm.attachOpen) {
@@ -351,7 +371,11 @@ struct ChatView: View {
                         .id(msg.id)
                         .onLongPressGesture { vm.menu = msg }
                         .onTapGesture {
-                            if msg.status == "failed" { vm.menu = msg }
+                            if chatMediaKind(msg) != nil {
+                                openMedia(msg)
+                            } else if msg.status == "failed" {
+                                vm.menu = msg
+                            }
                         }
                 }
             }
@@ -370,6 +394,27 @@ struct ChatView: View {
         let f = DateFormatter()
         f.dateFormat = "d MMMM"
         return f.string(from: date)
+    }
+
+    private func openMedia(_ message: LocalMessage) {
+        guard let kind = chatMediaKind(message) else { return }
+        let raw = message.mediaURL.isEmpty ? message.localPath : message.mediaURL
+        guard let url = resolveMedia(raw) else { return }
+        let name = message.text.isEmpty ? (kind == "image" ? L10n.photo : L10n.file) : message.text
+        if kind == "image" || kind == "video" {
+            viewer = ChatMedia(url: url, name: name, kind: kind)
+            return
+        }
+        openingFile = true
+        Task {
+            let local = await materializeMedia(url, name: name)
+            openingFile = false
+            if let local {
+                previewURL = local
+            } else {
+                openFailed = true
+            }
+        }
     }
 
     private func startCall(_ kind: String) {
@@ -416,8 +461,8 @@ struct BubbleView: View {
     @ViewBuilder private var content: some View {
         if message.deleted {
             Text(L10n.deleted).foregroundStyle(SamalColor.muted)
-        } else if message.type == "photo", !message.mediaURL.isEmpty {
-            AsyncImage(url: URL(string: message.mediaURL)) { image in
+        } else if chatMediaKind(message) == "image" {
+            AsyncImage(url: resolveMedia(message.mediaURL.isEmpty ? message.localPath : message.mediaURL)) { image in
                 image.resizable().scaledToFill()
             } placeholder: {
                 Color.gray.opacity(0.2)
@@ -434,6 +479,15 @@ struct BubbleView: View {
                 }
             }
             .buttonStyle(.plain)
+        } else if let kind = chatMediaKind(message) {
+            HStack(spacing: 8) {
+                Image(systemName: kind == "video" ? "play.rectangle.fill" : "doc.fill")
+                    .foregroundStyle(SamalColor.accent)
+                Text(message.text.isEmpty ? L10n.file : message.text)
+                    .font(SamalFont.body())
+                    .foregroundStyle(SamalColor.text)
+                    .lineLimit(2)
+            }
         } else {
             Text(message.text.isEmpty ? fallback : message.text)
                 .font(SamalFont.body())

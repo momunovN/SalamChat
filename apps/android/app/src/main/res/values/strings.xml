@@ -86,4 +86,6 @@
     <string name="notify_listening">Сообщения приходят</string>
     <string name="incoming_audio">Входящий звонок</string>
     <string name="confirm_delete_msg">Удалить сообщение?</string>
+    <string name="open_file">Открыть</string>
+    <string name="preview_fail">Не открылось</string>
 </resources>

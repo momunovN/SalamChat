@@ -80,4 +80,6 @@
     <string name="notify_listening">Билдирүүлөр келет</string>
     <string name="incoming_audio">Кирүүчү чалуу</string>
     <string name="confirm_delete_msg">Билдирүүнү өчүрөсүзбү?</string>
+    <string name="open_file">Ачуу</string>
+    <string name="preview_fail">Ачылган жок</string>
 </resources>
