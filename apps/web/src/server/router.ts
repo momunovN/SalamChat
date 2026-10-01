@@ -1,6 +1,8 @@
 import {
   getUser,
   logout,
+  requestEmailAttach,
+  verifyEmailAttach,
   parseAccess,
   refreshSession,
   requestOTP,
@@ -214,6 +216,14 @@ async function dispatch(method: string, parts: string[], req: Request, url: URL)
   }
   if (method === "GET" && p("me")) {
     return json(200, await getUser(auth.userId));
+  }
+  if (method === "POST" && p("me/email/request")) {
+    const body = await readJSON<{ email?: string }>(req);
+    return json(200, await requestEmailAttach(auth.userId, body.email || ""));
+  }
+  if (method === "POST" && p("me/email/verify")) {
+    const body = await readJSON<{ email?: string; code?: string }>(req);
+    return json(200, await verifyEmailAttach(auth.userId, body.email || "", body.code || ""));
   }
   if (method === "PATCH" && p("me")) {
     const body = await readJSON<{

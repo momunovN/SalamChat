@@ -87,6 +87,15 @@ export function otpDev() {
   return v === "1" || v.toLowerCase() === "true" || v.toLowerCase() === "yes";
 }
 
+/**
+ * Until an SMS key is set, a phone login shows its code on screen.
+ * Numbers that already have a confirmed email get the code by email instead.
+ * Set TOOAPP_PHONE_CODE_ON_SCREEN=false to turn this off.
+ */
+export function phoneCodeOnScreen() {
+  return envBool("TOOAPP_PHONE_CODE_ON_SCREEN", true);
+}
+
 export function publicBase(req?: Request) {
   const fromEnv = envFirst("", "TOOAPP_PUBLIC_URL", "SAMAL_PUBLIC_URL");
   if (fromEnv) return fromEnv.replace(/\/$/, "");

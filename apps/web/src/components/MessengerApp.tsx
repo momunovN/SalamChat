@@ -41,6 +41,7 @@ import { Avatar } from "./Avatar";
 import { BrandMark } from "./BrandMark";
 import { CallRoom, IncomingCall } from "./CallRoom";
 import { ChatPane } from "./ChatPane";
+import { EmailAttach } from "./EmailAttach";
 import { NameOnboarding } from "./NameOnboarding";
 import { PeopleResults, PersonRow, useUserSearch } from "./PeopleSearch";
 import { PermitToast } from "./PermitToast";
@@ -118,6 +119,7 @@ export function MessengerApp() {
   const [renameNick, setRenameNick] = useState("");
   const [profileSaved, setProfileSaved] = useState(false);
   const [profileBusy, setProfileBusy] = useState(false);
+  const [emailEdit, setEmailEdit] = useState(false);
   const activeIdRef = useRef<string | null>(null);
   const meRef = useRef<string | undefined>(undefined);
   const activeCallIdRef = useRef<string | null>(null);
@@ -1201,6 +1203,33 @@ export function MessengerApp() {
     return status;
   }
 
+  function attachEmail(user: User) {
+    if (!session) return;
+    const next = { ...session, user };
+    saveSession(next);
+    setSession(next);
+    setEmailEdit(false);
+  }
+
+  // A phone-only account must confirm an email before using the app: it is the way back in.
+  if (!session.user.email) {
+    return (
+      <div className="min-h-dvh overflow-y-auto bg-bg px-4 pt-[max(1.25rem,env(safe-area-inset-top))] pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:px-6">
+        <div className="mx-auto w-full max-w-md">
+          <div className="mb-8 sm:mb-10">
+            <BrandMark alt="" className="mb-5 h-14 w-14 sm:h-16 sm:w-16" />
+            <h1 className="text-[28px] font-bold tracking-tight text-ink sm:text-[32px]">{t.emailAttachTitle}</h1>
+            <p className="mt-2 text-sm leading-6 text-muted">{t.emailAttachSubtitle}</p>
+          </div>
+          <EmailAttach t={t} onDone={attachEmail} />
+          <button type="button" onClick={logout} className="mt-6 h-11 w-full rounded-2xl text-sm font-semibold text-muted hover:bg-elevated">
+            {t.logout}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   const navBtn = (id: Tab, icon: ReactNode, label: string) => (
     <button
       type="button"
@@ -1505,6 +1534,25 @@ export function MessengerApp() {
               onChange={(e) => setAddress(e.target.value)}
               className="mt-1 h-11 w-full rounded-xl bg-elevated px-3 text-ink outline-none focus:ring-2 focus:ring-accent"
             />
+            <label className="mt-3 block text-xs font-medium text-muted">{t.emailField}</label>
+            {emailEdit ? (
+              <div className="mt-1">
+                <EmailAttach t={t} initial="" onDone={attachEmail} onCancel={() => setEmailEdit(false)} />
+              </div>
+            ) : (
+              <div className="mt-1 flex h-11 items-center gap-2 rounded-xl bg-elevated pr-1 pl-3">
+                <span className={`min-w-0 flex-1 truncate ${session.user.email ? "text-ink" : "text-muted"}`}>
+                  {session.user.email || t.emailMissing}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setEmailEdit(true)}
+                  className="h-9 shrink-0 rounded-lg px-3 text-sm font-semibold text-accent hover:bg-bg"
+                >
+                  {t.changeEmail}
+                </button>
+              </div>
+            )}
             {profileError ? <p className="mt-2 text-xs font-medium text-danger">{profileError}</p> : null}
             <button
               type="button"

@@ -18,6 +18,15 @@ export function saveSession(s: Session | null) {
   else localStorage.setItem(SESSION_KEY, JSON.stringify(s));
 }
 
+/** via "screen": no SMS provider yet, the code comes back in dev_code to show under the input. */
+export type OtpSent = {
+  ok: boolean;
+  via?: "email" | "sms" | "screen" | "stub";
+  hint?: string;
+  dev_code?: string;
+  retry_after_sec: number;
+};
+
 type ApiError = { error?: { code?: string; message?: string } };
 
 async function request<T>(path: string, init: RequestInit & { authed?: boolean; session?: Session | null; timeoutMs?: number } = {}): Promise<T> {
@@ -101,7 +110,7 @@ async function refresh(refreshToken: string) {
 
 export const api = {
   requestOTP: (email: string, phone = "") =>
-    request<{ ok: boolean; via?: string; dev_code?: string; retry_after_sec: number }>("/v1/auth/otp/request", {
+    request<OtpSent>("/v1/auth/otp/request", {
       method: "POST",
       body: JSON.stringify({ email, phone }),
       authed: false,
@@ -118,6 +127,10 @@ export const api = {
       authed: false,
     }),
   me: () => request<User>("/v1/me"),
+  requestEmailAttach: (email: string) =>
+    request<OtpSent>("/v1/me/email/request", { method: "POST", body: JSON.stringify({ email }) }),
+  verifyEmailAttach: (email: string, code: string) =>
+    request<User>("/v1/me/email/verify", { method: "POST", body: JSON.stringify({ email, code }) }),
   patchMe: (
     body: Partial<
       Pick<User, "display_name" | "username" | "bio" | "avatar_url" | "birth_date" | "address" | "username_hidden">

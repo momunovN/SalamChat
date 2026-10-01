@@ -15,7 +15,27 @@ function boxes(code: string) {
     .join(`<td style="width:8px;font-size:0;">&nbsp;</td>`);
 }
 
-function html(code: string) {
+type MailKind = "login" | "attach";
+
+const WORDS: Record<MailKind, { subject: string; title: string; lead: string; text: string; ignore: string }> = {
+  login: {
+    subject: "Код для входа в Salam",
+    title: "Код для входа",
+    lead: "Введите эти 6 цифр в Salam. Код действует 5 минут.",
+    text: "Код для входа в Salam",
+    ignore: "Если вы не входили в Salam, просто удалите это письмо. Никому не пересылайте код.",
+  },
+  attach: {
+    subject: "Подтвердите почту в Salam",
+    title: "Подтверждение почты",
+    lead: "Введите эти 6 цифр в Salam, чтобы привязать почту к аккаунту. Код действует 5 минут.",
+    text: "Код подтверждения почты в Salam",
+    ignore: "Если вы не привязывали почту в Salam, просто удалите это письмо. Никому не пересылайте код.",
+  },
+};
+
+function html(code: string, kind: MailKind = "login") {
+  const w = WORDS[kind];
   return `<!doctype html>
 <html lang="ru">
 <body style="margin:0;padding:0;background:#07080c;">
@@ -36,10 +56,10 @@ function html(code: string) {
             </td>
           </tr>
           <tr>
-            <td style="padding:18px 28px 0;font-family:Segoe UI,Helvetica,Arial,sans-serif;font-size:22px;line-height:1.3;font-weight:700;color:#f4f6fb;">Код для входа</td>
+            <td style="padding:18px 28px 0;font-family:Segoe UI,Helvetica,Arial,sans-serif;font-size:22px;line-height:1.3;font-weight:700;color:#f4f6fb;">${w.title}</td>
           </tr>
           <tr>
-            <td style="padding:8px 28px 0;font-family:Segoe UI,Helvetica,Arial,sans-serif;font-size:15px;line-height:1.5;color:#9aa3b5;">Введите эти 6 цифр в Salam. Код действует 5 минут.</td>
+            <td style="padding:8px 28px 0;font-family:Segoe UI,Helvetica,Arial,sans-serif;font-size:15px;line-height:1.5;color:#9aa3b5;">${w.lead}</td>
           </tr>
           <tr>
             <td style="padding:22px 28px 8px;">
@@ -50,7 +70,7 @@ function html(code: string) {
             <td style="padding:8px 28px 0;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:20px;letter-spacing:0.35em;color:#7eb0ff;">${code}</td>
           </tr>
           <tr>
-            <td style="padding:18px 28px 0;font-family:Segoe UI,Helvetica,Arial,sans-serif;font-size:13px;line-height:1.5;color:#6d7688;">Если вы не входили в Salam, просто удалите это письмо. Никому не пересылайте код.</td>
+            <td style="padding:18px 28px 0;font-family:Segoe UI,Helvetica,Arial,sans-serif;font-size:13px;line-height:1.5;color:#6d7688;">${w.ignore}</td>
           </tr>
           <tr>
             <td style="padding:14px 28px 28px;font-family:Segoe UI,Helvetica,Arial,sans-serif;font-size:13px;line-height:1.5;color:#6d7688;">Кирүү коду — 5 мүнөткө жарактуу.</td>
@@ -69,7 +89,8 @@ function mailbox(from: string) {
 }
 
 /** Sends the login code. Without SMTP settings the code stays in the server log. */
-export async function sendLoginCode(to: string, code: string) {
+export async function sendLoginCode(to: string, code: string, kind: MailKind = "login") {
+  const w = WORDS[kind];
   const host = env("SMTP_HOST");
   const pass = env("SMTP_PASS");
   const namedFrom = env("SMTP_FROM") || env("EMAIL_FROM");
@@ -90,9 +111,9 @@ export async function sendLoginCode(to: string, code: string) {
   await transport.sendMail({
     from,
     to,
-    subject: "Код для входа в Salam",
-    text: `Код для входа в Salam: ${code}\nОн действует 5 минут. Если вы не запрашивали код, проигнорируйте письмо.`,
-    html: html(code),
+    subject: w.subject,
+    text: `${w.text}: ${code}\nОн действует 5 минут. Если вы не запрашивали код, проигнорируйте письмо.`,
+    html: html(code, kind),
     attachments: existsSync(logoPath)
       ? [
           {

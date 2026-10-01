@@ -2,7 +2,7 @@ import { createHash, randomBytes, randomInt } from "crypto";
 import { SignJWT, jwtVerify } from "jose";
 import { query, queryOne } from "./db";
 import { forgetName } from "./valkey";
-import { jwtSecret, otpDev } from "./env";
+import { jwtSecret, otpDev, phoneCodeOnScreen } from "./env";
 import { sendOTP } from "./sms";
 import { HttpError } from "./http";
 import { sanitizeDisplayName, sanitizeUsername } from "@/lib/name";
@@ -145,9 +145,10 @@ export async function requestOTP(emailRaw: string, phoneRaw = "") {
     [phone || "", email, hash],
   );
 
-  let via: "email" | "sms" | "stub";
+  let via: "email" | "sms" | "screen" | "stub";
+  let hint: string | undefined;
+  const { sendLoginCode } = await import("./mail");
   if (email) {
-    const { sendLoginCode } = await import("./mail");
     try {
       via = await sendLoginCode(email, code);
     } catch (err) {
@@ -156,25 +157,121 @@ export async function requestOTP(emailRaw: string, phoneRaw = "") {
       throw new HttpError(502, "bad_gateway", "Не удалось отправить письмо");
     }
   } else {
+    let sent: "p1sms" | "stub";
     try {
-      const sent = await sendOTP(phone || "", code);
-      via = sent === "p1sms" ? "sms" : "stub";
+      sent = await sendOTP(phone || "", code);
     } catch (err) {
       await dropCode(hash);
       console.error("login sms", err);
       throw new HttpError(502, "bad_gateway", "Не удалось отправить SMS");
     }
+    if (sent === "p1sms") {
+      via = "sms";
+    } else {
+      // No SMS provider yet. A number that already has a confirmed email gets the code there,
+      // otherwise anyone could type that number and read the code off the screen.
+      const owner = await userByPhone(phone || "");
+      if (owner?.email) {
+        try {
+          via = await sendLoginCode(owner.email, code);
+        } catch (err) {
+          await dropCode(hash);
+          console.error("login email (phone owner)", err);
+          throw new HttpError(502, "bad_gateway", "Не удалось отправить письмо");
+        }
+        hint = maskEmail(owner.email);
+      } else {
+        via = phoneCodeOnScreen() ? "screen" : "stub";
+      }
+    }
   }
   if (via === "stub" && !deliverStub()) {
     await dropCode(hash);
-    throw new HttpError(502, "bad_gateway", email ? "Почта не настроена" : "SMS не настроено");
+    throw new HttpError(502, "bad_gateway", email || hint ? "Почта не настроена" : "SMS не настроено");
   }
   return {
     ok: true,
     retry_after_sec: 60,
     via,
-    ...(via === "stub" ? { dev_code: code } : {}),
+    ...(hint ? { hint } : {}),
+    ...(via === "stub" || via === "screen" ? { dev_code: code } : {}),
   };
+}
+
+/** a***@mail.ru: enough to recognise your own mailbox, not enough to learn someone else's. */
+export function maskEmail(email: string) {
+  const [name, domain] = email.split("@");
+  if (!domain) return email;
+  const head = name.slice(0, Math.min(2, Math.max(1, name.length - 1)));
+  return `${head}***@${domain}`;
+}
+
+/** Sends a code that confirms the mailbox before it is tied to the signed-in account. */
+export async function requestEmailAttach(userId: string, emailRaw: string) {
+  const email = normalizeEmail(emailRaw || "");
+  if (!email) throw new HttpError(400, "bad_request", "invalid email");
+  const taken = await queryOne<{ id: string }>(`SELECT id FROM users WHERE lower(email)=lower($1) AND id<>$2`, [email, userId]);
+  if (taken) throw new HttpError(409, "conflict", "email taken");
+  const recent = await queryOne<{ count: string }>(
+    `SELECT COUNT(*)::text AS count FROM otp_challenges
+     WHERE purpose='attach' AND user_id=$1 AND created_at > now() - interval '1 minute'`,
+    [userId],
+  );
+  if (Number(recent?.count || 0) > 0) throw new HttpError(400, "bad_request", "too many otp requests");
+  const code = String(randomInt(0, 1_000_000)).padStart(6, "0");
+  const hash = hmacCode(`attach:${userId}:${email}`, code);
+  await query(
+    `INSERT INTO otp_challenges (phone, email, code_hash, expires_at, purpose, user_id)
+     VALUES ('', $1, $2, now() + interval '5 minutes', 'attach', $3)`,
+    [email, hash, userId],
+  );
+  const { sendLoginCode } = await import("./mail");
+  let via: "email" | "stub";
+  try {
+    via = await sendLoginCode(email, code, "attach");
+  } catch (err) {
+    await dropCode(hash);
+    console.error("attach email", err);
+    throw new HttpError(502, "bad_gateway", "Не удалось отправить письмо");
+  }
+  if (via === "stub" && !deliverStub()) {
+    await dropCode(hash);
+    throw new HttpError(502, "bad_gateway", "Почта не настроена");
+  }
+  return { ok: true, retry_after_sec: 60, via, ...(via === "stub" ? { dev_code: code } : {}) };
+}
+
+export async function verifyEmailAttach(userId: string, emailRaw: string, code: string) {
+  const email = normalizeEmail(emailRaw || "");
+  if (!email) throw new HttpError(400, "bad_request", "invalid email");
+  const digits = String(code || "").replace(/\D/g, "");
+  if (digits.length !== 6) throw new HttpError(400, "bad_request", "invalid code");
+  const ch = await queryOne<{ id: string; code_hash: string; attempts: number; expires_at: Date | string }>(
+    `SELECT id, code_hash, attempts, expires_at FROM otp_challenges
+     WHERE purpose='attach' AND user_id=$1 AND lower(email)=lower($2) AND consumed_at IS NULL
+     ORDER BY created_at DESC LIMIT 1`,
+    [userId, email],
+  );
+  if (!ch) throw new HttpError(400, "bad_request", "no otp");
+  if (Date.now() > new Date(ch.expires_at).getTime()) throw new HttpError(400, "bad_request", "otp expired");
+  if (ch.attempts >= 5) throw new HttpError(400, "bad_request", "too many attempts");
+  if (hmacCode(`attach:${userId}:${email}`, digits) !== ch.code_hash) {
+    await query(`UPDATE otp_challenges SET attempts=attempts+1 WHERE id=$1`, [ch.id]);
+    throw new HttpError(400, "bad_request", "wrong code");
+  }
+  const used = await query<{ id: string }>(
+    `UPDATE otp_challenges SET consumed_at=now() WHERE id=$1 AND consumed_at IS NULL RETURNING id`,
+    [ch.id],
+  );
+  if (!used.length) throw new HttpError(400, "bad_request", "no otp");
+  try {
+    await query(`UPDATE users SET email=$1, updated_at=now() WHERE id=$2`, [email, userId]);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "";
+    if (/duplicate key/i.test(msg)) throw new HttpError(409, "conflict", "email taken");
+    throw err;
+  }
+  return getUser(userId);
 }
 
 type DeviceIn = { platform?: string; device_name?: string; push_token?: string };
@@ -239,12 +336,12 @@ export async function verifyOTP(emailRaw: string, code: string, device: DeviceIn
 
   const ch = email
     ? await queryOne<{ id: string; code_hash: string; attempts: number; expires_at: Date | string; phone: string }>(
-        `SELECT id, code_hash, attempts, expires_at, phone FROM otp_challenges WHERE lower(email)=lower($1) AND consumed_at IS NULL ORDER BY created_at DESC LIMIT 1`,
+        `SELECT id, code_hash, attempts, expires_at, phone FROM otp_challenges WHERE lower(email)=lower($1) AND purpose='login' AND consumed_at IS NULL ORDER BY created_at DESC LIMIT 1`,
         [email],
       )
     : await queryOne<{ id: string; code_hash: string; attempts: number; expires_at: Date | string; phone: string }>(
         `SELECT id, code_hash, attempts, expires_at, phone FROM otp_challenges
-         WHERE phone=$1 AND coalesce(email, '') = '' AND consumed_at IS NULL
+         WHERE phone=$1 AND coalesce(email, '') = '' AND purpose='login' AND consumed_at IS NULL
          ORDER BY created_at DESC LIMIT 1`,
         [phone],
       );
