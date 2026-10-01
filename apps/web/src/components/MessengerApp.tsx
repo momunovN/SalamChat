@@ -25,6 +25,7 @@ import { dict, type Lang } from "@/lib/i18n";
 import { needsDisplayName, sanitizeDisplayName, sanitizeUsername } from "@/lib/name";
 import {
   armSoundUnlock,
+  enableWebPush,
   notifyCall,
   notifyMessage,
   playMessageChime,
@@ -64,6 +65,15 @@ export function MessengerApp() {
   const [ready, setReady] = useState(false);
   const [lang, setLang] = useState<Lang>("ru");
   const t = dict[lang];
+
+  function chooseLang(next: Lang) {
+    setLang(next);
+    try {
+      localStorage.setItem("tooapp.lang", next);
+    } catch {
+      /* private mode */
+    }
+  }
 
   const [tab, setTab] = useState<Tab>("chats");
   const [seg, setSeg] = useState<Seg>("all");
@@ -1096,6 +1106,16 @@ export function MessengerApp() {
     };
   }, [pathname, ready, session]);
 
+  useEffect(() => {
+    document.documentElement.lang = lang === "ky" ? "ky" : "ru";
+  }, [lang]);
+
+  useEffect(() => {
+    if (!session?.access_token) return;
+    if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
+    enableWebPush(lang);
+  }, [session?.access_token, lang]);
+
   const isTyping = !!(activeId && (typing[activeId] || 0) > typingNow);
 
   useEffect(() => {
@@ -1112,6 +1132,8 @@ export function MessengerApp() {
       <div className="min-h-dvh bg-bg">
         <PhoneAuth
           t={t}
+          lang={lang}
+          onLang={chooseLang}
           onSession={(s) => {
             setSession(s);
             setName(s.user.display_name);
@@ -1128,6 +1150,8 @@ export function MessengerApp() {
       <div className="min-h-dvh bg-bg">
         <NameOnboarding
           t={t}
+          lang={lang}
+          onLang={chooseLang}
           onDone={(user) => {
             const next = { ...session, user };
             saveSession(next);
@@ -1430,10 +1454,7 @@ export function MessengerApp() {
                   <button
                     key={l}
                     type="button"
-                    onClick={() => {
-                      setLang(l);
-                      localStorage.setItem("tooapp.lang", l);
-                    }}
+                    onClick={() => chooseLang(l)}
                     className={`rounded-full px-3 py-1 text-sm font-semibold ${lang === l ? "bg-accent text-ink" : "text-muted"}`}
                   >
                     {l.toUpperCase()}
@@ -1448,7 +1469,6 @@ export function MessengerApp() {
             >
               <LogOut size={16} /> {t.logout}
             </button>
-            <p className="mt-8 text-xs text-muted">{t.apiHint}</p>
           </div>
         ) : null}
       </div>
@@ -1745,7 +1765,10 @@ export function MessengerApp() {
               return;
             }
             void Notification.requestPermission()
-              .then((permission) => rememberNotify(permission === "granted" ? "granted" : permission === "denied" ? "denied" : "skip"))
+              .then((permission) => {
+                rememberNotify(permission === "granted" ? "granted" : permission === "denied" ? "denied" : "skip");
+                if (permission === "granted") enableWebPush(lang);
+              })
               .catch(() => rememberNotify("skip"));
           }}
           onCancel={() => {

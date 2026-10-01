@@ -86,7 +86,7 @@ async function refresh(refreshToken: string) {
 
 export const api = {
   requestOTP: (email: string, phone = "") =>
-    request<{ ok: boolean; dev_code?: string; retry_after_sec: number }>("/v1/auth/otp/request", {
+    request<{ ok: boolean; via?: string; dev_code?: string; retry_after_sec: number }>("/v1/auth/otp/request", {
       method: "POST",
       body: JSON.stringify({ email, phone }),
       authed: false,
@@ -109,6 +109,8 @@ export const api = {
     >,
   ) => request<User>("/v1/me", { method: "PATCH", body: JSON.stringify(body) }),
   logout: () => request<{ ok: boolean }>("/v1/auth/logout", { method: "POST" }),
+  subscribePush: (body: { endpoint: string; keys: { p256dh: string; auth: string }; lang: string }) =>
+    request<{ ok: boolean }>("/v1/push/subscribe", { method: "POST", body: JSON.stringify(body) }),
   chats: (q = "", type = "") => {
     const p = new URLSearchParams();
     if (q) p.set("q", q);

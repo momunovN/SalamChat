@@ -2,7 +2,8 @@ import { createHash, randomBytes, randomInt } from "crypto";
 import { SignJWT, jwtVerify } from "jose";
 import { query, queryOne } from "./db";
 import { forgetName } from "./valkey";
-import { jwtSecret } from "./env";
+import { jwtSecret, otpDev } from "./env";
+import { sendOTP } from "./sms";
 import { HttpError } from "./http";
 import { sanitizeDisplayName, sanitizeUsername } from "@/lib/name";
 import { nickTaken } from "./nicks";
@@ -106,32 +107,67 @@ function mapUser(r: UserRow, online?: boolean): User {
   };
 }
 
+function deliverStub() {
+  return process.env.NODE_ENV !== "production" && otpDev();
+}
+
+async function dropCode(hash: string) {
+  await query(`DELETE FROM otp_challenges WHERE code_hash=$1`, [hash]);
+}
+
 export async function requestOTP(emailRaw: string, phoneRaw = "") {
+  const emailTyped = emailRaw.trim().length > 0;
   const email = normalizeEmail(emailRaw);
-  if (!email) throw new HttpError(400, "bad_request", "invalid email");
+  if (emailTyped && !email) throw new HttpError(400, "bad_request", "invalid email");
   const parsed = optionalPhone(phoneRaw || "");
   if (parsed.invalid) throw new HttpError(400, "bad_request", "invalid phone");
-  const recent = await queryOne<{ count: string }>(
-    `SELECT COUNT(*)::text AS count FROM otp_challenges WHERE lower(email)=lower($1) AND created_at > now() - interval '1 minute'`,
-    [email],
-  );
+  const phone = parsed.phone;
+  if (!email && !phone) throw new HttpError(400, "bad_request", "email or phone required");
+
+  const recent = email
+    ? await queryOne<{ count: string }>(
+        `SELECT COUNT(*)::text AS count FROM otp_challenges WHERE lower(email)=lower($1) AND created_at > now() - interval '1 minute'`,
+        [email],
+      )
+    : await queryOne<{ count: string }>(
+        `SELECT COUNT(*)::text AS count FROM otp_challenges
+         WHERE phone=$1 AND coalesce(email, '') = '' AND created_at > now() - interval '1 minute'`,
+        [phone],
+      );
   if (Number(recent?.count || 0) > 0) {
     throw new HttpError(400, "bad_request", "too many otp requests");
   }
   const code = String(randomInt(0, 1_000_000)).padStart(6, "0");
-  const hash = hmacCode(email, code);
+  const key = email || phone || "";
+  const hash = hmacCode(key, code);
   await query(
     `INSERT INTO otp_challenges (phone, email, code_hash, expires_at) VALUES ($1, $2, $3, now() + interval '5 minutes')`,
-    [parsed.phone || "", email, hash],
+    [phone || "", email, hash],
   );
-  const { sendLoginCode } = await import("./mail");
-  let via: "email" | "stub";
-  try {
-    via = await sendLoginCode(email, code);
-  } catch (err) {
-    await query(`DELETE FROM otp_challenges WHERE lower(email)=lower($1) AND code_hash=$2`, [email, hash]);
-    console.error("login email", err);
-    throw new HttpError(502, "bad_gateway", "Не удалось отправить письмо");
+
+  let via: "email" | "sms" | "stub";
+  if (email) {
+    const { sendLoginCode } = await import("./mail");
+    try {
+      via = await sendLoginCode(email, code);
+    } catch (err) {
+      await dropCode(hash);
+      console.error("login email", err);
+      throw new HttpError(502, "bad_gateway", "Не удалось отправить письмо");
+    }
+  } else {
+    try {
+      const sent = await sendOTP(phone || "", code);
+      via = sent === "p1sms" ? "sms" : "stub";
+    } catch (err) {
+      await dropCode(hash);
+      console.error("login sms", err);
+      throw new HttpError(502, "bad_gateway", "Не удалось отправить SMS");
+    }
+  }
+  if (via === "stub" && !deliverStub()) {
+    await dropCode(hash);
+    throw new HttpError(502, "bad_gateway", email ? "Почта не настроена" : "SMS не настроено");
   }
   return {
     ok: true,
@@ -165,31 +201,84 @@ async function userByEmail(email: string) {
   return queryOne<UserRow>(`SELECT ${USER_COLS} FROM users WHERE lower(email)=lower($1)`, [email]);
 }
 
+async function userByPhone(phone: string) {
+  return queryOne<UserRow>(`SELECT ${USER_COLS} FROM users WHERE phone=$1`, [phone]);
+}
+
+async function ensurePhoneUser(phone: string) {
+  let userRow = await userByPhone(phone);
+  if (userRow) return userRow;
+  const id = crypto.randomUUID();
+  try {
+    userRow = await queryOne<UserRow>(
+      `INSERT INTO users (id, phone, email, display_name) VALUES ($1,$2,NULL,$3)
+       RETURNING ${USER_COLS}`,
+      [id, phone, defaultDisplayName(phone)],
+    );
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "";
+    if (/duplicate key/i.test(msg)) userRow = await userByPhone(phone);
+    else throw err;
+  }
+  if (!userRow) throw new HttpError(500, "internal", "user create failed");
+  return userRow;
+}
+
 export async function verifyOTP(emailRaw: string, code: string, device: DeviceIn = {}, phoneRaw = "") {
+  const emailTyped = emailRaw.trim().length > 0;
   const email = normalizeEmail(emailRaw);
-  if (!email) throw new HttpError(400, "bad_request", "invalid email");
+  if (emailTyped && !email) throw new HttpError(400, "bad_request", "invalid email");
   const parsed = optionalPhone(phoneRaw || "");
   if (parsed.invalid) throw new HttpError(400, "bad_request", "invalid phone");
   const phone = parsed.phone;
+  if (!email && !phone) throw new HttpError(400, "bad_request", "email or phone required");
   const digits = String(code || "").replace(/\D/g, "");
   if (digits.length !== 6) throw new HttpError(400, "bad_request", "invalid code");
   let platform = device.platform || "web";
   if (!["ios", "android", "web"].includes(platform)) platform = "web";
 
-  const ch = await queryOne<{ id: string; code_hash: string; attempts: number; expires_at: Date | string; phone: string }>(
-    `SELECT id, code_hash, attempts, expires_at, phone FROM otp_challenges WHERE lower(email)=lower($1) AND consumed_at IS NULL ORDER BY created_at DESC LIMIT 1`,
-    [email],
-  );
+  const ch = email
+    ? await queryOne<{ id: string; code_hash: string; attempts: number; expires_at: Date | string; phone: string }>(
+        `SELECT id, code_hash, attempts, expires_at, phone FROM otp_challenges WHERE lower(email)=lower($1) AND consumed_at IS NULL ORDER BY created_at DESC LIMIT 1`,
+        [email],
+      )
+    : await queryOne<{ id: string; code_hash: string; attempts: number; expires_at: Date | string; phone: string }>(
+        `SELECT id, code_hash, attempts, expires_at, phone FROM otp_challenges
+         WHERE phone=$1 AND coalesce(email, '') = '' AND consumed_at IS NULL
+         ORDER BY created_at DESC LIMIT 1`,
+        [phone],
+      );
   if (!ch) throw new HttpError(400, "bad_request", "no otp");
   if (Date.now() > new Date(ch.expires_at).getTime()) throw new HttpError(400, "bad_request", "otp expired");
   if (ch.attempts >= 5) throw new HttpError(400, "bad_request", "too many attempts");
-  if (hmacCode(email, digits) !== ch.code_hash) {
+  const hmacKey = email || phone || "";
+  if (hmacCode(hmacKey, digits) !== ch.code_hash) {
     await query(`UPDATE otp_challenges SET attempts=attempts+1 WHERE id=$1`, [ch.id]);
     throw new HttpError(400, "bad_request", "wrong code");
   }
   const savedPhone = phone || (ch.phone ? optionalPhone(ch.phone).phone : null);
 
   // No transaction: Neon often drops idle-in-transaction sockets, which blocked login.
+  if (!email) {
+    const userRow = await ensurePhoneUser(phone || "");
+    const { raw, hash } = randomToken();
+    const deviceId = crypto.randomUUID();
+    const deviceName = (device.device_name || "web").slice(0, 120);
+    try {
+      await query(
+        `INSERT INTO devices (id, user_id, platform, device_name, push_token, refresh_token_hash)
+         VALUES ($1,$2,$3,$4,NULLIF($5,''),$6)
+         ON CONFLICT (id) DO UPDATE SET last_seen_at = now()`,
+        [deviceId, userRow.id, platform, deviceName, device.push_token || "", hash],
+      );
+      await query(`UPDATE otp_challenges SET consumed_at=now() WHERE id=$1`, [ch.id]);
+    } catch (err) {
+      console.error("verifyOTP persist", err);
+      throw err;
+    }
+    return issueSession(mapUser(userRow), deviceId, raw);
+  }
+
   let userRow = await userByEmail(email);
   if (!userRow && savedPhone) {
     const byPhone = await queryOne<UserRow>(`SELECT ${USER_COLS} FROM users WHERE phone=$1`, [savedPhone]);

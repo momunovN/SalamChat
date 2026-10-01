@@ -36,6 +36,10 @@
 | `TOOAPP_OTP_DEV` | `false` в проде |
 | `DATABASE_URL` | строка Postgres |
 | `TOOAPP_DATABASE_URL` | та же строка |
+| `SMTP_HOST` `SMTP_PORT` `SMTP_USER` `SMTP_PASS` `SMTP_FROM` | Яндекс, иначе код на почту не уйдёт |
+| `SMS_PROVIDER` `SMS_API_KEY` | `p1sms` и ключ кабинета, иначе вход только по почте |
+| `LIVEKIT_URL` `LIVEKIT_API_KEY` `LIVEKIT_API_SECRET` | звонки. Пустые ключи дают токен-заглушку |
+| `TURN_URL` `TURN_USERNAME` `TURN_CREDENTIAL` | необязательно. Пусто: TURN отдаёт LiveKit Cloud |
 
 База: либо **База данных** в RelaxDev (тогда `DATABASE_URL` появится сам), либо ваш Neon.
 
@@ -47,7 +51,9 @@
 
 ```
 GET https://<имя>.relaxdev.ru/healthz
-→ {"ok":true,"name":"tooapp"}
+→ {"ok":true,"name":"salam","valkey":"up"}
 ```
+
+`valkey` равен `down`, пока в панели не подключён Redis. Один процесс при этом чат ведёт, второй инстанс сообщения соседу не разнесёт.
 
 Приложения: база API = `https://<имя>.relaxdev.ru`.

@@ -22,6 +22,7 @@ import {
   type Message,
   type ReplyPreview,
 } from "./chats";
+import { pushToUsers } from "./push";
 import { openPayload, sealPayload } from "./seal";
 
 type MsgRow = {
@@ -329,6 +330,22 @@ function fanoutNew(chatId: string, members: string[], msg: Message) {
         chat_id: chatId,
         created_at: msg.created_at,
       }),
+    );
+    const payload = msg.payload;
+    const text =
+      payload && typeof payload === "object" && "text" in payload && typeof (payload as { text?: unknown }).text === "string"
+        ? (payload as { text: string }).text
+        : "";
+    void pushToUsers(
+      members.filter((id) => id !== msg.author_id),
+      {
+        author: msg.author_name || "Salam",
+        kind: "message",
+        type: msg.type,
+        text,
+        tag: `chat-${chatId}`,
+        url: "/",
+      },
     );
   }
 }

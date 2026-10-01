@@ -1,10 +1,12 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { api, saveSession } from "@/lib/api";
-import type { Dict } from "@/lib/i18n";
+import type { Dict, Lang } from "@/lib/i18n";
 import type { Session } from "@/lib/types";
 import { BrandMark } from "./BrandMark";
+import { LangSwitch } from "./LangSwitch";
 
 function phoneSkipped(value: string) {
   const digits = value.replace(/\D/g, "");
@@ -19,15 +21,20 @@ function clock(sec: number) {
 
 export function PhoneAuth({
   t,
+  lang,
+  onLang,
   onSession,
 }: {
   t: Dict;
+  lang: Lang;
+  onLang: (lang: Lang) => void;
   onSession: (s: Session) => void;
 }) {
   const [cc, setCc] = useState<"996" | "7">("996");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("+996");
   const [code, setCode] = useState("");
+  const [channel, setChannel] = useState<"email" | "sms">("email");
   const [step, setStep] = useState<0 | 1>(0);
   const [busy, setBusy] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
@@ -44,6 +51,11 @@ export function PhoneAuth({
 
   function mapErr(msg: string, name = "") {
     const blob = `${name} ${msg}`;
+    if (msg.includes("Почта не настроена")) return t.errMailDown;
+    if (msg.includes("отправить письмо")) return t.errMail;
+    if (msg.includes("SMS не настроено")) return t.errSmsDown;
+    if (msg.includes("отправить SMS")) return t.errSms;
+    if (msg.includes("email or phone")) return t.errChannel;
     if (msg.includes("invalid email")) return t.errEmail;
     if (msg.includes("phone taken")) return t.errPhoneTaken;
     if (msg.includes("invalid phone")) return t.errPhone;
@@ -59,10 +71,21 @@ export function PhoneAuth({
     return msg || t.errLogin;
   }
 
-  async function sendCode() {
+  function destination() {
+    const mail = email.trim();
     const sentPhone = phoneSkipped(phone) ? "" : phone;
-    await api.requestOTP(email.trim(), sentPhone);
-    setHint(email.trim());
+    if (mail && !mail.includes("@")) return null;
+    if (mail) return { email: mail, phone: sentPhone, channel: "email" as const, hint: mail };
+    if (sentPhone) return { email: "", phone: sentPhone, channel: "sms" as const, hint: sentPhone };
+    return null;
+  }
+
+  async function sendCode() {
+    const next = destination();
+    if (!next) throw new Error("email or phone required");
+    await api.requestOTP(next.email, next.phone);
+    setChannel(next.channel);
+    setHint(next.hint);
     setCode("");
     setLeft(60);
     setStep(1);
@@ -90,8 +113,9 @@ export function PhoneAuth({
     setError(null);
     try {
       if (step === 0) {
-        if (!email.trim().includes("@")) {
-          setError(t.errEmail);
+        const next = destination();
+        if (!next) {
+          setError(email.trim() ? t.errEmail : t.errChannel);
           return;
         }
         await sendCode();
@@ -139,10 +163,11 @@ export function PhoneAuth({
       <div className="mx-auto w-full max-w-md">
         <div className="mb-8 sm:mb-10">
           <BrandMark alt="" className="mb-5 h-14 w-14 sm:h-16 sm:w-16" />
-          <p className="text-xs font-semibold tracking-[0.28em] text-accent">KG · RU</p>
+          <LangSwitch lang={lang} onLang={onLang} />
           <h1 className="mt-2 text-[32px] font-bold tracking-tight text-ink sm:text-[40px]">{t.app}</h1>
-          <p className="mt-3 text-[17px] font-semibold text-ink">{step === 0 ? t.phoneTitle : t.otpTitle}</p>
-          <p className="mt-1 text-sm text-muted">{step === 0 ? t.phoneSubtitle : t.otpSubtitle}</p>
+          <p className="mt-1 text-sm text-muted">{t.tagline}</p>
+          <p className="mt-3 text-[17px] font-semibold text-ink">{step === 0 ? t.phoneTitle : channel === "sms" ? t.otpTitleSms : t.otpTitle}</p>
+          <p className="mt-1 text-sm text-muted">{step === 0 ? t.phoneSubtitle : channel === "sms" ? t.otpSubtitleSms : t.otpSubtitle}</p>
         </div>
         {step === 0 ? (
           <div className="space-y-3">
@@ -225,7 +250,14 @@ export function PhoneAuth({
         >
           {t.continue}
         </button>
-        <p className="mt-8 text-center text-xs text-muted">{t.apiHint}</p>
+        <p className="mt-8 flex justify-center gap-4 text-center text-xs text-muted">
+          <Link className="underline decoration-white/20 underline-offset-2" href="/about">
+            {t.about}
+          </Link>
+          <Link className="underline decoration-white/20 underline-offset-2" href="/privacy">
+            {t.privacy}
+          </Link>
+        </p>
       </div>
     </div>
   );

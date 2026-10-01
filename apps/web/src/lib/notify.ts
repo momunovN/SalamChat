@@ -1,3 +1,6 @@
+import { api } from "./api";
+import type { Lang } from "./i18n";
+
 // Alert Tone (3), https://sound-pack.ru/download/Sound_11086.mp3
 // The publisher offers this file as a free download for apps and programs.
 
@@ -146,6 +149,44 @@ export function shouldAskNotify() {
   } catch {
     return false;
   }
+}
+
+function keyBytes(value: string) {
+  const pad = "=".repeat((4 - (value.length % 4)) % 4);
+  const raw = atob((value + pad).replace(/-/g, "+").replace(/_/g, "/"));
+  const out = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+  return out;
+}
+
+export function enableWebPush(lang: Lang) {
+  void subscribePush(lang).catch(() => undefined);
+}
+
+async function subscribePush(lang: Lang) {
+  if (typeof window === "undefined" || !("serviceWorker" in navigator) || !("PushManager" in window)) return;
+  if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
+  const registration = await navigator.serviceWorker.register("/sw.js");
+  const ready = await navigator.serviceWorker.ready;
+  const keyRes = await fetch("/v1/push/vapid");
+  if (!keyRes.ok) return;
+  const body = (await keyRes.json()) as { public_key?: string };
+  if (!body.public_key) return;
+  let subscription = await ready.pushManager.getSubscription();
+  if (!subscription) {
+    subscription = await ready.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: keyBytes(body.public_key),
+    });
+  }
+  const json = subscription.toJSON();
+  if (!json.endpoint || !json.keys?.p256dh || !json.keys.auth) return;
+  await api.subscribePush({
+    endpoint: json.endpoint,
+    keys: { p256dh: json.keys.p256dh, auth: json.keys.auth },
+    lang,
+  });
+  void registration.update();
 }
 
 export function rememberNotify(choice: "granted" | "skip" | "denied") {

@@ -4,6 +4,7 @@ import { env } from "./env";
 import { envelope, hub } from "./hub";
 import { HttpError, iso } from "./http";
 import { memberIds, mustMember } from "./chats";
+import { pushToUsers } from "./push";
 
 export type Call = {
   id: string;
@@ -60,9 +61,31 @@ function noteEvent(id: string, userId: string, event: string) {
 }
 
 // The join token belongs to one participant. The ring sent to the chat must not include it.
+export type IceServer = { urls: string[]; username?: string; credential?: string };
+
+export function iceServers(): IceServer[] {
+  const stun: IceServer = { urls: ["stun:stun.l.google.com:19302"] };
+  const raw = env("TURN_URL") || env("TURN_URLS");
+  const urls = raw
+    .split(/[\s,]+/)
+    .map((item) => item.trim())
+    .filter((item) => /^(turns?|stun):/i.test(item));
+  if (!urls.length) return [stun];
+  const username = env("TURN_USERNAME");
+  const credential = env("TURN_CREDENTIAL");
+  const turn: IceServer = { urls };
+  if (username) turn.username = username;
+  if (credential) turn.credential = credential;
+  return [stun, turn];
+}
+
+function withIce<T extends { url: string; token: string; room: string }>(signed: T) {
+  return { ...signed, ice_servers: iceServers() };
+}
+
 async function withCreds(call: Call, userId: string) {
   const signed = await signLiveKitToken(userId, call.sfu_room || "");
-  return { ...call, url: signed.url, token: signed.token, room: signed.room };
+  return { ...call, ...withIce(signed) };
 }
 
 export async function startCall(userId: string, chatId: string, kind: string) {
@@ -83,7 +106,19 @@ export async function startCall(userId: string, chatId: string, kind: string) {
   const [signed, members] = await Promise.all([credsPromise, membersPromise]);
   noteEvent(id, userId, "invite");
   hub.publishMany(members, envelope("call.updated", call));
-  return { ...call, url: signed.url, token: signed.token, room: signed.room };
+  const peers = members.filter((member) => member !== userId);
+  void (async () => {
+    const row = await queryOne<{ display_name: string }>(`SELECT display_name FROM users WHERE id=$1`, [userId]).catch(() => null);
+    await pushToUsers(peers, {
+      author: row?.display_name || "Salam",
+      kind: "call",
+      type: kind,
+      text: "",
+      tag: `call-${id}`,
+      url: "/",
+    });
+  })();
+  return { ...call, ...withIce(signed) };
 }
 
 export async function listCalls(userId: string) {
@@ -136,7 +171,7 @@ export async function answerCall(userId: string, id: string) {
   const [members, signed] = await Promise.all([memberIds(call.chat_id), signLiveKitToken(userId, call.sfu_room || "")]);
   noteEvent(id, userId, "join");
   hub.publishMany(members, envelope("call.updated", call));
-  return { ...call, url: signed.url, token: signed.token, room: signed.room };
+  return { ...call, ...withIce(signed) };
 }
 
 export async function rejectCall(userId: string, id: string) {
@@ -162,7 +197,7 @@ export async function callToken(userId: string, id: string) {
   const call = await getCall(userId, id);
   const room = call.sfu_room || "";
   const signed = await signLiveKitToken(userId, room);
-  return { ...signed, ice_servers: ["stun:stun.l.google.com:19302"] };
+  return withIce(signed);
 }
 
 export async function signLiveKitToken(identity: string, room: string) {

@@ -1,3 +1,4 @@
+import { existsSync } from "fs";
 import path from "path";
 import nodemailer from "nodemailer";
 import { env, envBool } from "./env";
@@ -92,13 +93,15 @@ export async function sendLoginCode(to: string, code: string) {
     subject: "Код для входа в Salam",
     text: `Код для входа в Salam: ${code}\nОн действует 5 минут. Если вы не запрашивали код, проигнорируйте письмо.`,
     html: html(code),
-    attachments: [
-      {
-        filename: "salam.png",
-        path: logoPath,
-        cid: "salam-logo",
-      },
-    ],
+    attachments: existsSync(logoPath)
+      ? [
+          {
+            filename: "salam.png",
+            path: logoPath,
+            cid: "salam-logo",
+          },
+        ]
+      : [],
   });
   return "email" as const;
 }

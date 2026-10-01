@@ -37,6 +37,7 @@ import { listContacts, syncContacts } from "./contacts";
 import { profileLibrary } from "./profile";
 import { getUserPublic, lookupPhones, resolveSlug, searchUsers } from "./users";
 import { completeUpload, createIntent, mediaType, putUpload, readMedia, readSealedUpload } from "./uploads";
+import { dropPushSubscription, savePushSubscription, vapidPublicKey } from "./push";
 import { openBytes } from "./seal";
 import { sseResponse } from "./stream";
 import { markTyping, valkeyReady } from "./valkey";
@@ -97,7 +98,7 @@ export async function handleRequest(req: Request): Promise<Response> {
     const url = new URL(req.url);
     const pathname = url.pathname.replace(/\/$/, "") || "/";
     if (pathname === "/healthz") {
-      return json(200, { ok: true, name: "tooapp", valkey: valkeyReady() ? "up" : "down" });
+      return json(200, { ok: true, name: "salam", valkey: valkeyReady() ? "up" : "down" });
     }
     if (pathname.startsWith("/media/id/")) {
       const id = decodeURIComponent(pathname.slice("/media/id/".length)).split("/")[0];
@@ -156,6 +157,9 @@ async function dispatch(method: string, parts: string[], req: Request, url: URL)
     const body = await readJSON<{ refresh_token?: string }>(req);
     return json(200, await refreshSession(body.refresh_token || ""));
   }
+  if (method === "GET" && p("push/vapid")) {
+    return json(200, { public_key: vapidPublicKey() });
+  }
 
   const auth = await requireUser(req);
 
@@ -164,6 +168,14 @@ async function dispatch(method: string, parts: string[], req: Request, url: URL)
   }
   if (method === "POST" && p("auth/logout")) {
     return json(200, await logout(auth.deviceId));
+  }
+  if (method === "POST" && p("push/subscribe")) {
+    const body = await readJSON<{ endpoint?: string; keys?: { p256dh?: string; auth?: string }; lang?: string }>(req);
+    return json(200, await savePushSubscription(auth.userId, body));
+  }
+  if (method === "DELETE" && p("push/subscribe")) {
+    const body = await readJSON<{ endpoint?: string }>(req);
+    return json(200, await dropPushSubscription(auth.userId, body.endpoint || ""));
   }
   if (method === "GET" && p("me")) {
     return json(200, await getUser(auth.userId));

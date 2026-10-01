@@ -68,7 +68,7 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger) (http.Handler
 	}))
 
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
-		httpx.JSON(w, 200, map[string]any{"ok": true, "name": "tooapp"})
+		httpx.JSON(w, 200, map[string]any{"ok": true, "name": "salam"})
 	})
 
 	r.Route("/v1", func(r chi.Router) {

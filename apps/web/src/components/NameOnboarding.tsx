@@ -2,16 +2,21 @@
 
 import { useEffect, useState } from "react";
 import { api, loadSession, saveSession } from "@/lib/api";
-import type { Dict } from "@/lib/i18n";
+import type { Dict, Lang } from "@/lib/i18n";
 import { sanitizeDisplayName, sanitizeUsername } from "@/lib/name";
 import type { Session, User } from "@/lib/types";
 import { BrandMark } from "./BrandMark";
+import { LangSwitch } from "./LangSwitch";
 
 export function NameOnboarding({
   t,
+  lang,
+  onLang,
   onDone,
 }: {
   t: Dict;
+  lang: Lang;
+  onLang: (lang: Lang) => void;
   onDone: (user: User) => void;
 }) {
   const [name, setName] = useState("");
@@ -68,7 +73,7 @@ export function NameOnboarding({
       <div className="mx-auto w-full max-w-md">
         <div className="mb-8 sm:mb-10">
           <BrandMark alt="" className="mb-5 h-14 w-14 sm:h-16 sm:w-16" />
-          <p className="text-xs font-semibold tracking-[0.28em] text-accent">KG · RU</p>
+          <LangSwitch lang={lang} onLang={onLang} />
           <h1 className="mt-2 text-[32px] font-bold tracking-tight text-ink sm:text-[40px]">{t.app}</h1>
           <p className="mt-3 text-[17px] font-semibold text-ink">{t.nameTitle}</p>
           <p className="mt-1 text-sm text-muted">{t.nameSubtitle}</p>

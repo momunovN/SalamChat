@@ -19,7 +19,18 @@ import { Avatar } from "./Avatar";
 const HANGUP = "hangup";
 const HANGUP_TOPIC = "tooapp.call";
 
-type Creds = { url: string; token: string; room: string };
+type IceServer = { urls: string | string[]; username?: string; credential?: string };
+type Creds = { url: string; token: string; room: string; ice_servers?: IceServer[] };
+
+function callConnectOptions(creds: Creds) {
+  const servers = creds.ice_servers || [];
+  const hasTurn = servers.some((server) => {
+    const urls = Array.isArray(server.urls) ? server.urls : [server.urls];
+    return urls.some((url) => url.startsWith("turn:") || url.startsWith("turns:"));
+  });
+  if (!hasTurn) return undefined;
+  return { rtcConfig: { iceServers: servers } };
+}
 
 // 720p H.264, without a second codec in the offer. A VP8 fallback is used only if H.264 is rejected.
 const videoPublish = {
@@ -202,7 +213,9 @@ export function CallRoom({
           if (!ready.url || ready.token.startsWith("stub-")) throw new Error("livekit");
           await room.prepareConnection(ready.url, ready.token);
           if (cancelled || ended) return;
-          await room.connect(ready.url, ready.token);
+          const ice = callConnectOptions(ready);
+          if (ice) await room.connect(ready.url, ready.token, ice);
+          else await room.connect(ready.url, ready.token);
         })();
         const readyMedia = await media;
         got = readyMedia;
