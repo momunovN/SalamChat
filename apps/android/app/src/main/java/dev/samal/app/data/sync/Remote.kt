@@ -32,12 +32,13 @@ fun messageEntity(o: JSONObject, me: String): MessageEntity {
         ?: payload?.optInt("duration_ms")
         ?: 0
     val reply = o.optJSONObject("reply_to")?.optString("text").orEmpty()
+    val type = o.optString("type", "text")
     return MessageEntity(
         id = o.getString("id"),
         chatId = o.getString("chat_id"),
         authorId = author,
-        type = o.optString("type", "text"),
-        text = if (deleted) "" else messageText(payload),
+        type = type,
+        text = if (deleted) "" else if (type == "photo") payload?.optString("text").orEmpty() else messageText(payload),
         clientId = o.optString("client_id"),
         createdAt = parseIso(o.optString("created_at")),
         status = o.optString("status").ifBlank { "sent" },
@@ -59,7 +60,9 @@ fun chatEntity(o: JSONObject): ChatEntity {
     val last = o.optJSONObject("last_message")
     val deleted = last?.optString("deleted_at").orEmpty().isNotBlank()
     val type = last?.optString("type").orEmpty().ifBlank { "text" }
-    val text = previewText(type, messageText(last?.optJSONObject("payload")), deleted)
+    val lastPayload = last?.optJSONObject("payload")
+    val raw = if (type == "photo") lastPayload?.optString("text").orEmpty() else messageText(lastPayload)
+    val text = previewText(type, raw, deleted)
     val at = parseIso(last?.optString("created_at").orEmpty().ifBlank { o.optString("updated_at") })
     return ChatEntity(
         id = o.getString("id"),

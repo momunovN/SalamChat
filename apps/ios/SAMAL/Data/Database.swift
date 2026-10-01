@@ -243,7 +243,7 @@ final class AppDatabase {
             chatID: m.chatID.uuidString,
             authorID: m.authorID?.uuidString,
             type: m.type,
-            text: deleted ? "" : (m.payload.text ?? m.payload.caption ?? mediaLabel(m.type)),
+            text: deleted ? "" : (m.type == "photo" ? (m.payload.text ?? mediaLabel(m.type)) : (m.payload.text ?? m.payload.caption ?? mediaLabel(m.type))),
             clientID: m.clientID,
             createdAt: m.createdAt,
             status: m.status ?? "sent",

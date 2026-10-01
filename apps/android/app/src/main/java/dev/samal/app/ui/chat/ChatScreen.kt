@@ -691,9 +691,11 @@ private suspend fun enqueueFile(ctx: Context, dao: SamalDao, chatId: String, me:
         else -> "file"
     }
     val type = if (kind == "video") "file" else kind
+    val payload = JSONObject()
+    if (kind != "photo" && name.isNotBlank()) payload.put("caption", name)
     sendPayload(
         dao, chatId, me, type,
-        JSONObject().put("caption", name),
+        payload,
         reply, dest.absolutePath, mime, kind,
     )
 }

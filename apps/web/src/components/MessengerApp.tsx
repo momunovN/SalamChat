@@ -382,7 +382,7 @@ export function MessengerApp() {
             const looking = document.visibilityState === "visible" && openId === msg.chat_id;
             if (!looking) {
               const title = chatsRef.current.find((chat) => chat.id === msg.chat_id)?.title || "Salam";
-              const body = msg.payload?.text || msg.payload?.caption || "";
+              const body = msg.type === "photo" ? msg.payload?.text || "" : msg.payload?.text || msg.payload?.caption || "";
               notifyMessage(title, body);
             }
           }

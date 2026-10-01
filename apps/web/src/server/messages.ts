@@ -62,7 +62,7 @@ function previewFrom(m: Message): ReplyPreview {
     author_id: m.author_id,
     author_name: m.author_name,
     type: m.type,
-    text: String(payload.text || payload.caption || ""),
+    text: String(payload.text || (m.type === "photo" ? "" : payload.caption || "")),
     deleted: !!m.deleted_at,
   };
 }

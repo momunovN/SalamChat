@@ -145,12 +145,13 @@ final class ChatViewModel: ObservableObject {
         guard let me = session.user, let id = UUID(uuidString: chat.id) else { return }
         let kind = mime.hasPrefix("image/") ? "photo" : (mime.hasPrefix("video/") ? "video" : "file")
         let type = kind == "photo" ? "photo" : "file"
+        let showName = kind != "photo"
         _ = try? AppDatabase.shared.insertOutgoing(
             chatID: id,
             me: me.id,
-            text: name,
+            text: showName ? name : "",
             type: type,
-            payload: ["caption": name],
+            payload: showName ? ["caption": name] as [String: Any] : [String: Any](),
             uploadPath: url.path,
             mime: mime,
             kind: kind,

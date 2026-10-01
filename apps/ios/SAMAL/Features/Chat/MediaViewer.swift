@@ -69,10 +69,12 @@ struct MediaCover: View {
                             .frame(width: 36, height: 36)
                             .background(.white.opacity(0.16), in: Circle())
                     }
-                    Text(item.name)
-                        .font(SamalFont.caption())
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
+                    if item.kind != "image" {
+                        Text(item.name)
+                            .font(SamalFont.caption())
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+                    }
                     Spacer()
                 }
                 .padding(.horizontal, 12)

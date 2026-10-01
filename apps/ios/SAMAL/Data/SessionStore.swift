@@ -274,7 +274,7 @@ final class SessionStore: ObservableObject {
 
 private func noteBody(_ msg: APIMessage) -> String {
     if let text = msg.payload.text, !text.isEmpty { return text }
-    if let text = msg.payload.caption, !text.isEmpty { return text }
+    if msg.type != "photo", let text = msg.payload.caption, !text.isEmpty { return text }
     switch msg.type {
     case "photo": return L10n.photo
     case "voice": return L10n.voice

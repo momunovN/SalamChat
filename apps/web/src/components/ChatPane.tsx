@@ -477,7 +477,7 @@ export function ChatPane({
       author_id: me,
       author_name: t.you,
       type: kind,
-      payload: { caption: file.name },
+      payload: kind === "photo" || !file.name ? {} : { caption: file.name },
       client_id: clientId,
       created_at: new Date().toISOString(),
       status: "sending",
@@ -500,7 +500,14 @@ export function ChatPane({
     onLocal(optimistic);
     try {
       const uploadId = await api.upload(file, kind);
-      const msg = await api.send(chat.id, clientId, kind, { caption: file.name }, [uploadId], quoted?.id);
+      const msg = await api.send(
+        chat.id,
+        clientId,
+        kind,
+        kind === "photo" || !file.name ? {} : { caption: file.name },
+        [uploadId],
+        quoted?.id,
+      );
       setMessages((prev) => prev.map((m) => (m.client_id === clientId ? msg : m)));
       queueMicrotask(() => URL.revokeObjectURL(localUrl));
       onLocal(msg);
@@ -636,7 +643,11 @@ export function ChatPane({
                             {m.reply_to.author_id === me ? t.you : m.reply_to.author_name || t.replyTo}
                           </p>
                           <p className="truncate">
-                            {m.reply_to.deleted ? t.deletedMsg : m.reply_to.text || messageBody({ ...m, type: m.reply_to.type, payload: { text: m.reply_to.text } }, t)}
+                            {m.reply_to.deleted
+                              ? t.deletedMsg
+                              : m.reply_to.type === "photo"
+                                ? messageBody({ ...m, type: "photo", payload: {} }, t)
+                                : m.reply_to.text || messageBody({ ...m, type: m.reply_to.type, payload: { text: m.reply_to.text } }, t)}
                           </p>
                         </div>
                       ) : null}
@@ -671,7 +682,7 @@ export function ChatPane({
                           />
                         ),
                       )}
-                      {m.type === "voice" ? null : m.payload?.text || (m.type !== "text" ? m.payload?.caption : "")}
+                      {bubbleLine(m)}
                     </div>
                     {menuId === m.id ? (
                       <div
@@ -1041,6 +1052,19 @@ type OpenDoc = {
   mode: "image" | "video" | "pdf" | "text" | "file";
 };
 
+function bubbleLine(m: Message): string {
+  if (m.type === "voice" || m.type === "photo") return "";
+  const text = m.payload?.text?.trim() || "";
+  if (text) return text;
+  if (m.type === "text") return "";
+  const atts = m.attachments || [];
+  if (atts.length > 0 && atts.every((a) => docMode(a.kind, a.mime || "", a.filename || "") === "image")) return "";
+  const caption = m.payload?.caption?.trim() || "";
+  if (!caption) return "";
+  if (atts.some((a) => (a.filename || "").trim() === caption)) return "";
+  return caption;
+}
+
 function docMode(kind: string, mime: string, name: string): OpenDoc["mode"] {
   const type = (mime || "").split(";")[0].toLowerCase();
   const file = name.toLowerCase();
@@ -1070,7 +1094,7 @@ function ChatFile({
 }) {
   if (!url) return null;
   const mode = docMode(kind, mime, name);
-  const title = name || (mode === "image" ? photoLabel : fileLabel);
+  const title = mode === "image" ? photoLabel : name || fileLabel;
   const open = (e: { stopPropagation: () => void }) => {
     e.stopPropagation();
     onOpen({ url, name: title, mime, mode });
