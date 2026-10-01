@@ -154,6 +154,7 @@ export const api = {
     request<Chat>(`/v1/chats/${chatId}`, { method: "PATCH", body: JSON.stringify({ title }) }),
   users: (q: string) =>
     request<{ items: User[] }>(`/v1/users?q=${encodeURIComponent(q)}`).then((r) => ({ items: r.items ?? [] })),
+  user: (id: string) => request<User>(`/v1/users/${id}`),
   contacts: () =>
     request<{ items: User[]; synced?: boolean }>("/v1/contacts").then((r) => ({
       items: r.items ?? [],

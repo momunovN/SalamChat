@@ -41,6 +41,7 @@ data class MessageEntity(
     val mediaUrl: String = "",
     val durationMs: Int = 0,
     val waveform: String = "",
+    val authorName: String = "",
 )
 
 @Entity(tableName = "outbox")
@@ -149,7 +150,13 @@ val MIGRATION_2_3 = object : Migration(2, 3) {
     }
 }
 
-@Database(entities = [ChatEntity::class, MessageEntity::class, OutboxEntity::class], version = 3)
+val MIGRATION_3_4 = object : Migration(3, 4) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE messages ADD COLUMN authorName TEXT NOT NULL DEFAULT ''")
+    }
+}
+
+@Database(entities = [ChatEntity::class, MessageEntity::class, OutboxEntity::class], version = 4)
 abstract class SamalDb : RoomDatabase() {
     abstract fun dao(): SamalDao
 }

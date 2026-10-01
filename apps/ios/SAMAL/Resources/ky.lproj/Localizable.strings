@@ -19,6 +19,8 @@
 "call.answer" = "Жооп берүү";
 "call.in_progress" = "Чалуу жүрүп жатат";
 "presence.online" = "тармакка";
+"presence.last_seen" = "жакында болгон";
+"profile.write" = "Жазуу";
 "presence.typing" = "жазып жатат…";
 "attach.photo" = "Сүрөт";
 "attach.video" = "Видео";

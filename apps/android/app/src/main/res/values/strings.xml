@@ -89,4 +89,6 @@
     <string name="sealed">Зашифровано</string>
     <string name="open_file">Открыть</string>
     <string name="preview_fail">Не открылось</string>
+    <string name="last_seen">был(а) недавно</string>
+    <string name="write_user">Написать</string>
 </resources>

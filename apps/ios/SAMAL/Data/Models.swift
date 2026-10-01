@@ -72,6 +72,7 @@ struct APIMessage: Codable, Identifiable, Hashable {
     var attachments: [APIAttachment]
     var status: String?
     var replyTo: ReplyPreview?
+    var authorName: String?
 
     struct Payload: Codable, Hashable {
         var text: String?
@@ -101,6 +102,7 @@ struct APIMessage: Codable, Identifiable, Hashable {
         case createdAt = "created_at"
         case editedAt = "edited_at"
         case deletedAt = "deleted_at"
+        case authorName = "author_name"
     }
 
     init(from decoder: Decoder) throws {
@@ -118,6 +120,7 @@ struct APIMessage: Codable, Identifiable, Hashable {
         deletedAt = try c.decodeIfPresent(Date.self, forKey: .deletedAt)
         attachments = (try? c.decode([APIAttachment].self, forKey: .attachments)) ?? []
         status = try c.decodeIfPresent(String.self, forKey: .status)
+        authorName = try c.decodeIfPresent(String.self, forKey: .authorName)
     }
 
     init(id: UUID, chatID: UUID, authorID: UUID?, type: String, payload: Payload, clientID: String, createdAt: Date, status: String?) {
@@ -134,6 +137,7 @@ struct APIMessage: Codable, Identifiable, Hashable {
         self.attachments = []
         self.status = status
         self.replyTo = nil
+        self.authorName = nil
     }
 }
 

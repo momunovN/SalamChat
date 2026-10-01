@@ -49,6 +49,7 @@ fun messageEntity(o: JSONObject, me: String): MessageEntity {
         mediaUrl = attachment?.optString("url").orEmpty(),
         durationMs = duration,
         waveform = waveString(wave),
+        authorName = o.optString("author_name"),
     )
 }
 

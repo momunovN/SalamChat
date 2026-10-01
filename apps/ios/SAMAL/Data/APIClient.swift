@@ -202,6 +202,10 @@ final class APIClient {
         let _: Ok = try await post("/v1/contacts/sync", body: ["enabled": enabled, "items": payload])
     }
 
+    func user(id: String) async throws -> APIUser {
+        try await get("/v1/users/\(id)")
+    }
+
     func users(q: String) async throws -> [APIUser] {
         struct Wrap: Decodable { var items: [APIUser] }
         let enc = q.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? q

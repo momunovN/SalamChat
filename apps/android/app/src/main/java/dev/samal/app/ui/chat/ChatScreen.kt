@@ -72,12 +72,14 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import coil.compose.AsyncImage
 import dev.samal.app.R
 import dev.samal.app.data.api.SamalApi
+import dev.samal.app.data.sync.chatEntity
 import dev.samal.app.data.db.ChatEntity
 import dev.samal.app.data.db.MessageEntity
 import dev.samal.app.data.db.OutboxEntity
@@ -118,6 +120,7 @@ fun ChatScreen(
     me: String,
     onBack: () -> Unit,
     onCall: (String) -> Unit,
+    onOpenChat: (ChatEntity) -> Unit,
 ) {
     val ctx = LocalContext.current
     val messages by dao.messages(chat.id, "").collectAsState(initial = emptyList())
@@ -136,6 +139,7 @@ fun ChatScreen(
     var stage by remember { mutableStateOf<MessageEntity?>(null) }
     var attach by remember { mutableStateOf(false) }
     var members by remember { mutableStateOf(false) }
+    var profile by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var older by remember(chat.id) { mutableStateOf<String?>(null) }
     var hasOlder by remember(chat.id) { mutableStateOf(true) }
@@ -201,12 +205,17 @@ fun ChatScreen(
     Column(Modifier.fillMaxSize().background(Bg)) {
         Row(Modifier.fillMaxWidth().padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = Text) }
+            Row(
+                Modifier.weight(1f).clickable {
+                    if (current.type == "group") members = true
+                    else if (current.peerId.isNotBlank()) profile = current.peerId
+                },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
             Box(Modifier.size(36.dp).clip(CircleShape).background(Elevated), contentAlignment = Alignment.Center) {
                 Text(current.title.take(1).uppercase(), color = Text)
             }
-            Column(
-                Modifier.padding(start = 8.dp).weight(1f).clickable(enabled = current.type == "group") { members = true },
-            ) {
+            Column(Modifier.padding(start = 8.dp).weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Default.Lock, stringResource(R.string.sealed), tint = Muted, modifier = Modifier.size(12.dp))
                     Spacer(Modifier.width(4.dp))
@@ -218,6 +227,7 @@ fun ChatScreen(
                     else -> ""
                 }
                 if (sub.isNotEmpty()) Text(sub, color = if (typing || current.peerOnline) Success else Muted, fontSize = 12.sp)
+            }
             }
             IconButton(onClick = { onCall("audio") }) { Icon(Icons.Default.Call, null, tint = Text) }
             IconButton(onClick = { onCall("video") }) { Icon(Icons.Default.Videocam, null, tint = Text) }
@@ -233,7 +243,15 @@ fun ChatScreen(
             itemsIndexed(messages, key = { _, msg -> msg.id }) { index, msg ->
                 val older = messages.getOrNull(index + 1)
                 val showDay = older == null || !sameInstantDay(msg.createdAt, older.createdAt)
-                Bubble(msg, showDay, onOpen = { stage = msg }, onMenu = { menu = msg })
+                val showAuthor = current.type == "group" && !msg.outgoing && msg.authorName.isNotBlank() && older?.authorId != msg.authorId
+                Bubble(
+                    msg,
+                    showDay,
+                    showAuthor,
+                    onOpen = { stage = msg },
+                    onMenu = { menu = msg },
+                    onAuthor = { msg.authorId?.let { profile = it } },
+                )
             }
             if (hasOlder) {
                 item {
@@ -475,7 +493,32 @@ fun ChatScreen(
         )
     }
 
-    if (members) MembersSheet(api, chat, me, onLeave = { members = false; onBack() }, onClose = { members = false })
+    if (members) {
+        MembersSheet(
+            api,
+            chat,
+            me,
+            onLeave = { members = false; onBack() },
+            onClose = { members = false },
+            onOpenUser = { members = false; profile = it },
+        )
+    }
+    profile?.let { userId ->
+        val canWrite = !userId.equals(me, true) && !(current.type == "direct" && userId.equals(current.peerId, true))
+        ProfileSheet(api, userId, onClose = { profile = null }, onWrite = if (canWrite) {
+            {
+                scope.launch {
+                    val raw = withContext(Dispatchers.IO) { runCatching { api.direct(userId) }.getOrNull() } ?: return@launch
+                    val entity = chatEntity(raw)
+                    withContext(Dispatchers.IO) { dao.upsertChats(listOf(entity)) }
+                    profile = null
+                    onOpenChat(entity)
+                }
+            }
+        } else {
+            null
+        })
+    }
     stage?.let { msg ->
         val kind = openKind(msg.type, msg.text, msg.mediaUrl, msg.deleted)
         if (kind != null) {
@@ -503,23 +546,39 @@ private fun AttachChip(label: String, onClick: () -> Unit) {
 }
 
 @Composable
-private fun Bubble(msg: MessageEntity, showDay: Boolean, onOpen: () -> Unit, onMenu: () -> Unit) {
+private fun Bubble(
+    msg: MessageEntity,
+    showDay: Boolean,
+    showAuthor: Boolean,
+    onOpen: () -> Unit,
+    onMenu: () -> Unit,
+    onAuthor: () -> Unit,
+) {
     val ctx = LocalContext.current
     val time = remember(msg.createdAt) { SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(msg.createdAt)) }
     val day = dayLabel(msg.createdAt, stringResource(R.string.today), stringResource(R.string.yesterday))
-    Column(Modifier.fillMaxWidth().pointerInput(msg.id) {
-        detectTapGestures(
-            onLongPress = { onMenu() },
-            onTap = {
-                if (openKind(msg.type, msg.text, msg.mediaUrl, msg.deleted) != null) onOpen()
-                else if (msg.status == "failed") onMenu()
-            },
-        )
-    }) {
+    Column(Modifier.fillMaxWidth()) {
         if (showDay) {
             Text(day, color = Muted, fontSize = 11.sp, modifier = Modifier.align(Alignment.CenterHorizontally).padding(vertical = 2.dp))
         }
-        Row(Modifier.fillMaxWidth()) {
+        if (showAuthor) {
+            Text(
+                msg.authorName,
+                color = Accent,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.clickable(onClick = onAuthor).padding(start = 8.dp, bottom = 2.dp),
+            )
+        }
+        Row(Modifier.fillMaxWidth().pointerInput(msg.id) {
+            detectTapGestures(
+                onLongPress = { onMenu() },
+                onTap = {
+                    if (openKind(msg.type, msg.text, msg.mediaUrl, msg.deleted) != null) onOpen()
+                    else if (msg.status == "failed") onMenu()
+                },
+            )
+        }) {
             if (msg.outgoing) Spacer(Modifier.weight(1f))
             Column(
                 Modifier
@@ -832,7 +891,14 @@ private object VoicePlayer {
 }
 
 @Composable
-private fun MembersSheet(api: SamalApi, chat: ChatEntity, me: String, onLeave: () -> Unit, onClose: () -> Unit) {
+private fun MembersSheet(
+    api: SamalApi,
+    chat: ChatEntity,
+    me: String,
+    onLeave: () -> Unit,
+    onClose: () -> Unit,
+    onOpenUser: (String) -> Unit,
+) {
     var items by remember { mutableStateOf(listOf<JSONObject>()) }
     var q by remember { mutableStateOf("") }
     var found by remember { mutableStateOf(listOf<JSONObject>()) }
@@ -877,7 +943,11 @@ private fun MembersSheet(api: SamalApi, chat: ChatEntity, me: String, onLeave: (
                     val user = row.optJSONObject("user") ?: return@forEach
                     val id = user.optString("id")
                     Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text(user.optString("display_name"), color = Text, modifier = Modifier.weight(1f))
+                        Text(
+                            user.optString("display_name"),
+                            color = Text,
+                            modifier = Modifier.weight(1f).clickable { if (id.isNotBlank() && id != me) onOpenUser(id) },
+                        )
                         if (id != me) {
                             Text(stringResource(R.string.kick), color = Danger, modifier = Modifier.clickable {
                                 scope.launch {

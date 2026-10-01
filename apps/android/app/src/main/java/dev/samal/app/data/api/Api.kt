@@ -201,6 +201,8 @@ class SamalApi(
     fun users(q: String): JSONArray =
         get("/v1/users?q=${enc(q)}").optJSONArray("items") ?: JSONArray()
 
+    fun user(id: String): JSONObject = get("/v1/users/$id")
+
     fun direct(userId: String): JSONObject =
         post("/v1/chats/direct", JSONObject().put("user_id", userId), true)
 

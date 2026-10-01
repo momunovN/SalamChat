@@ -31,6 +31,7 @@ import { dayKey, dayLabel, formatClock, membersPhrase, messageBody, payloadText 
 import type { Dict, Lang } from "@/lib/i18n";
 import type { Chat, ChatMember, Message, ReplyPreview, User } from "@/lib/types";
 import { Avatar } from "./Avatar";
+import { ProfileSheet } from "./ProfileSheet";
 import { PermitToast } from "./PermitToast";
 import { PeopleResults, useUserSearch } from "./PeopleSearch";
 import { VoiceNote } from "./VoiceNote";
@@ -111,6 +112,7 @@ export function ChatPane({
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const [liveWave, setLiveWave] = useState<number[]>([]);
   const [openDoc, setOpenDoc] = useState<OpenDoc | null>(null);
+  const [profileId, setProfileId] = useState<string | null>(null);
   const meterRef = useRef<number>(0);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const samplesRef = useRef<number[]>([]);
@@ -564,7 +566,10 @@ export function ChatPane({
         <button
           type="button"
           className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
-          onClick={() => group && setMembersOpen(true)}
+          onClick={() => {
+            if (group) setMembersOpen(true);
+            else if (chat.peer?.id) setProfileId(chat.peer.id);
+          }}
         >
           <Avatar name={chat.title} src={chat.avatar_url} size={36} online={chat.peer?.online} />
           <div className="min-w-0 flex-1">
@@ -623,8 +628,17 @@ export function ChatPane({
                 ) : null}
                 <div className={`mb-1 flex ${mine ? "justify-end" : "justify-start"}`}>
                   <div className={`max-w-[78%] ${mine ? "items-end" : "items-start"} flex flex-col`}>
-                    {showName ? (
-                      <p className="mb-0.5 px-1 text-[12px] font-semibold text-accent">{m.author_name || ""}</p>
+                    {showName && m.author_name ? (
+                      <button
+                        type="button"
+                        className="mb-0.5 px-1 text-left text-[12px] font-semibold text-accent"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (m.author_id) setProfileId(m.author_id);
+                        }}
+                      >
+                        {m.author_name}
+                      </button>
                     ) : null}
                     <div
                       onClick={(e) => {
@@ -949,8 +963,7 @@ export function ChatPane({
                         className="flex w-full items-center gap-3 px-2 py-2 text-left hover:bg-bg/60"
                         onClick={() => {
                           if (m.user.id === me) return;
-                          setMembersOpen(false);
-                          onOpenDirect(m.user.id);
+                          setProfileId(m.user.id);
                         }}
                       >
                         <Avatar name={m.user.display_name} src={m.user.avatar_url} size={40} online={m.user.online} />
@@ -1002,6 +1015,29 @@ export function ChatPane({
       ) : null}
       {openDoc ? (
         <FileStage doc={openDoc} closeLabel={t.cancel} failLabel={t.previewFail} onClose={() => setOpenDoc(null)} />
+      ) : null}
+      {profileId ? (
+        <ProfileSheet
+          key={profileId}
+          userId={profileId}
+          seed={
+            chat.peer?.id === profileId
+              ? chat.peer
+              : members.find((m) => m.user.id === profileId)?.user
+          }
+          t={t}
+          onWrite={
+            profileId !== me && !(chat.type !== "group" && chat.peer?.id === profileId)
+              ? () => {
+                  const id = profileId;
+                  setProfileId(null);
+                  setMembersOpen(false);
+                  onOpenDirect(id);
+                }
+              : undefined
+          }
+          onClose={() => setProfileId(null)}
+        />
       ) : null}
     </div>
   );

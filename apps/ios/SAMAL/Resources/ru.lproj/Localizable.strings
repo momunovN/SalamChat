@@ -19,6 +19,8 @@
 "call.answer" = "Ответить";
 "call.in_progress" = "Идёт звонок";
 "presence.online" = "в сети";
+"presence.last_seen" = "был(а) недавно";
+"profile.write" = "Написать";
 "presence.typing" = "печатает…";
 "attach.photo" = "Фото";
 "attach.video" = "Видео";

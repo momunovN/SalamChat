@@ -186,6 +186,10 @@ struct ChatView: View {
     @State private var viewer: ChatMedia?
     @State private var openingFile = false
     @State private var openFailed = false
+    @State private var profile: ProfileTarget?
+    @State private var nextChat: LocalChat?
+    @State private var pendingProfile: String?
+    @State private var pendingChat: LocalChat?
     @StateObject private var locator = Locator()
 
     init(chat: LocalChat) {
@@ -313,10 +317,56 @@ struct ChatView: View {
                 }
             }
         }
-        .sheet(isPresented: $vm.membersOpen) {
-            MembersSheet(chatID: vm.chat.id) { dismiss() }
+        .sheet(isPresented: $vm.membersOpen, onDismiss: {
+            if let id = pendingProfile {
+                pendingProfile = nil
+                showProfile(id)
+            }
+        }) {
+            MembersSheet(chatID: vm.chat.id, onSelect: { user in
+                pendingProfile = user.id.uuidString
+                vm.membersOpen = false
+            }) { dismiss() }
                 .environmentObject(session)
         }
+        .sheet(item: $profile, onDismiss: {
+            if let chat = pendingChat {
+                pendingChat = nil
+                nextChat = chat
+            }
+        }) { target in
+            ProfileSheet(userID: target.id, canWrite: target.canWrite) { user in
+                Task { await openProfileChat(user) }
+            }
+            .environmentObject(session)
+        }
+        .navigationDestination(item: $nextChat) { chat in
+            ChatView(chat: chat)
+        }
+    }
+
+    private func showProfile(_ id: String) {
+        let mine = session.user?.id.uuidString.lowercased() == id.lowercased()
+        let currentPeer = vm.chat.type == "direct" && vm.chat.peerID?.lowercased() == id.lowercased()
+        profile = ProfileTarget(id: id, canWrite: !mine && !currentPeer)
+    }
+
+    private func openProfileChat(_ user: APIUser) async {
+        guard let chat = try? await session.api.direct(userID: user.id) else { return }
+        try? AppDatabase.shared.upsertChats([chat])
+        let local = LocalChat(
+            id: chat.id.uuidString,
+            type: chat.type,
+            title: chat.title.isEmpty ? user.displayName : chat.title,
+            avatarURL: chat.avatarURL ?? user.avatarURL,
+            peerID: chat.peer?.id.uuidString ?? user.id.uuidString,
+            lastText: "",
+            lastAt: chat.updatedAt,
+            unread: chat.unreadCount,
+            memberCount: chat.memberCount
+        )
+        pendingChat = local
+        profile = nil
     }
 
     private var header: some View {
@@ -327,23 +377,34 @@ struct ChatView: View {
                     .foregroundStyle(SamalColor.text)
                     .frame(width: 36, height: 36)
             }
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 4) {
-                    Image(systemName: "lock.fill")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(SamalColor.muted)
-                        .accessibilityLabel(L10n.sealed)
-                    Text(vm.chat.title).font(SamalFont.headline()).foregroundStyle(SamalColor.text).lineLimit(1)
+            Button {
+                if vm.chat.type == "group" {
+                    vm.membersOpen = true
+                } else if let id = vm.chat.peerID, !id.isEmpty {
+                    showProfile(id)
                 }
-                if session.typingChatID?.lowercased() == vm.chat.id.lowercased() {
-                    Text(L10n.typing).font(SamalFont.caption()).foregroundStyle(SamalColor.success)
-                } else if vm.chat.type == "direct",
-                          let peer = vm.chat.peerID?.lowercased(),
-                          session.onlineIDs.contains(peer) {
-                    Text(L10n.online).font(SamalFont.caption()).foregroundStyle(SamalColor.success)
+            } label: {
+                HStack(spacing: 8) {
+                    headerAvatar
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "lock.fill")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(SamalColor.muted)
+                                .accessibilityLabel(L10n.sealed)
+                            Text(vm.chat.title).font(SamalFont.headline()).foregroundStyle(SamalColor.text).lineLimit(1)
+                        }
+                        if session.typingChatID?.lowercased() == vm.chat.id.lowercased() {
+                            Text(L10n.typing).font(SamalFont.caption()).foregroundStyle(SamalColor.success)
+                        } else if vm.chat.type == "direct",
+                                  let peer = vm.chat.peerID?.lowercased(),
+                                  session.onlineIDs.contains(peer) {
+                            Text(L10n.online).font(SamalFont.caption()).foregroundStyle(SamalColor.success)
+                        }
+                    }
                 }
             }
-            .onTapGesture { if vm.chat.type == "group" { vm.membersOpen = true } }
+            .buttonStyle(.plain)
             Spacer()
             Button { startCall("audio") } label: {
                 Image(systemName: "phone.fill").foregroundStyle(SamalColor.text).frame(width: 36, height: 36)
@@ -354,6 +415,31 @@ struct ChatView: View {
         }
         .padding(.horizontal, 8)
         .frame(height: 56)
+    }
+
+    private var headerAvatar: some View {
+        let raw = vm.chat.avatarURL ?? ""
+        return Group {
+            if let url = resolveMedia(raw), raw.hasPrefix("http") {
+                AsyncImage(url: url) { image in
+                    image.resizable().scaledToFill()
+                } placeholder: {
+                    headerLetter
+                }
+                .frame(width: 36, height: 36)
+                .clipShape(Circle())
+            } else {
+                headerLetter
+            }
+        }
+    }
+
+    private var headerLetter: some View {
+        Text(String(vm.chat.title.first ?? "?").uppercased())
+            .font(SamalFont.caption())
+            .foregroundStyle(SamalColor.text)
+            .frame(width: 36, height: 36)
+            .background(SamalColor.elevated, in: Circle())
     }
 
     private var messageList: some View {
@@ -371,16 +457,29 @@ struct ChatView: View {
                     if older == nil || !Calendar.current.isDate(older!.createdAt, inSameDayAs: msg.createdAt) {
                         Text(dayText(msg.createdAt)).font(SamalFont.caption()).foregroundStyle(SamalColor.muted).padding(.top, 8)
                     }
-                    BubbleView(message: msg)
-                        .id(msg.id)
-                        .onLongPressGesture { vm.menu = msg }
-                        .onTapGesture {
-                            if chatMediaKind(msg) != nil {
-                                openMedia(msg)
-                            } else if msg.status == "failed" {
-                                vm.menu = msg
+                    VStack(alignment: .leading, spacing: 2) {
+                        if vm.chat.type == "group", !msg.isOutgoing, !msg.authorName.isEmpty,
+                           older == nil || older?.authorID != msg.authorID {
+                            Button {
+                                if let id = msg.authorID { showProfile(id) }
+                            } label: {
+                                Text(msg.authorName)
+                                    .font(SamalFont.caption())
+                                    .foregroundStyle(SamalColor.accent)
                             }
+                            .buttonStyle(.plain)
                         }
+                        BubbleView(message: msg)
+                            .onLongPressGesture { vm.menu = msg }
+                            .onTapGesture {
+                                if chatMediaKind(msg) != nil {
+                                    openMedia(msg)
+                                } else if msg.status == "failed" {
+                                    vm.menu = msg
+                                }
+                            }
+                    }
+                    .id(msg.id)
                 }
             }
             .padding(.horizontal, 12)
@@ -578,10 +677,100 @@ final class Locator: NSObject, ObservableObject, CLLocationManagerDelegate {
     }
 }
 
+struct ProfileTarget: Identifiable, Hashable {
+    let id: String
+    var canWrite: Bool
+}
+
+struct ProfileSheet: View {
+    @EnvironmentObject var session: SessionStore
+    let userID: String
+    var canWrite: Bool
+    var onWrite: (APIUser) -> Void
+    @State private var user: APIUser?
+    @State private var failed = false
+
+    var body: some View {
+        VStack(spacing: 10) {
+            Capsule().fill(SamalColor.muted.opacity(0.4)).frame(width: 36, height: 4).padding(.top, 8)
+            profileAvatar
+            if let name = user?.displayName, !name.isEmpty {
+                Text(name).font(SamalFont.title()).foregroundStyle(SamalColor.text).multilineTextAlignment(.center)
+            }
+            if let nick = user?.username, !nick.isEmpty {
+                Text("@\(nick)").font(SamalFont.body()).foregroundStyle(SamalColor.accent)
+            }
+            if user?.online == true {
+                Text(L10n.online).font(SamalFont.caption()).foregroundStyle(SamalColor.success)
+            } else if user?.lastSeenAt != nil {
+                Text(L10n.lastSeen).font(SamalFont.caption()).foregroundStyle(SamalColor.muted)
+            }
+            if let bio = user?.bio, !bio.isEmpty {
+                Text(bio).font(SamalFont.body()).foregroundStyle(SamalColor.text).multilineTextAlignment(.center).padding(.top, 8)
+            }
+            if let phone = user?.phone, !phone.isEmpty {
+                Text(phone).font(SamalFont.body()).foregroundStyle(SamalColor.muted).padding(.top, 4)
+            }
+            if failed && user == nil {
+                Text(L10n.mediaFail).font(SamalFont.caption()).foregroundStyle(SamalColor.muted)
+            }
+            if user == nil && !failed {
+                ProgressView().padding(.top, 12)
+            }
+            if canWrite, let loaded = user {
+                Button(L10n.writeUser) { onWrite(loaded) }
+                    .font(SamalFont.headline())
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(SamalColor.accent, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .foregroundStyle(.white)
+                    .padding(.top, 12)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(SamalColor.bg)
+        .presentationDetents([.medium, .large])
+        .task(id: userID) {
+            do {
+                user = try await session.api.user(id: userID)
+            } catch {
+                failed = true
+            }
+        }
+    }
+
+    @ViewBuilder private var profileAvatar: some View {
+        let name = user?.displayName ?? ""
+        if let raw = user?.avatarURL, let url = resolveMedia(raw), raw.hasPrefix("http") {
+            AsyncImage(url: url) { image in
+                image.resizable().scaledToFill()
+            } placeholder: {
+                profileLetter(name)
+            }
+            .frame(width: 96, height: 96)
+            .clipShape(Circle())
+            .padding(.top, 12)
+        } else {
+            profileLetter(name).padding(.top, 12)
+        }
+    }
+
+    private func profileLetter(_ name: String) -> some View {
+        Text(String(name.first ?? "?").uppercased())
+            .font(SamalFont.title())
+            .foregroundStyle(SamalColor.text)
+            .frame(width: 96, height: 96)
+            .background(SamalColor.elevated, in: Circle())
+    }
+}
+
 struct MembersSheet: View {
     @EnvironmentObject var session: SessionStore
     @Environment(\.dismiss) private var dismiss
     let chatID: String
+    var onSelect: (APIUser) -> Void = { _ in }
     var onLeave: () -> Void
     @State private var members: [APIChatMember] = []
     @State private var query = ""
@@ -592,7 +781,12 @@ struct MembersSheet: View {
             List {
                 ForEach(members) { member in
                     HStack {
-                        Text(member.user.displayName)
+                        Button {
+                            onSelect(member.user)
+                        } label: {
+                            Text(member.user.displayName).foregroundStyle(SamalColor.text)
+                        }
+                        .buttonStyle(.plain)
                         Spacer()
                         if member.user.id != session.user?.id {
                             Button(L10n.kick) {

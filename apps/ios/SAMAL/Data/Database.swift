@@ -32,6 +32,7 @@ struct LocalMessage: Codable, FetchableRecord, PersistableRecord, Identifiable, 
     var durationMs: Int = 0
     var waveform: String = ""
     var localPath: String = ""
+    var authorName: String = ""
 }
 
 struct OutboxRow: Codable, FetchableRecord, PersistableRecord {
@@ -110,6 +111,11 @@ final class AppDatabase {
                 t.add(column: "mime", .text).notNull().defaults(to: "")
                 t.add(column: "kind", .text).notNull().defaults(to: "")
                 t.add(column: "replyTo", .text).notNull().defaults(to: "")
+            }
+        }
+        m.registerMigration("v3") { db in
+            try db.alter(table: "messages") { t in
+                t.add(column: "authorName", .text).notNull().defaults(to: "")
             }
         }
         return m
@@ -253,7 +259,8 @@ final class AppDatabase {
             deleted: deleted,
             mediaURL: att?.url ?? "",
             durationMs: att?.durationMS ?? m.payload.durationMS ?? 0,
-            waveform: wave
+            waveform: wave,
+            authorName: m.authorName ?? ""
         )
     }
 

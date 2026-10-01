@@ -159,9 +159,15 @@ private fun MainShell(app: SamalApp) {
             Box(Modifier.weight(1f)) {
                 val chat = open
                 if (chat != null) {
-                    ChatScreen(chat, app.db.dao(), app.api, me, onBack = { open = null }) { kind ->
-                        startCall(chat.id, chat.title, kind)
-                    }
+                    ChatScreen(
+                        chat,
+                        app.db.dao(),
+                        app.api,
+                        me,
+                        onBack = { open = null },
+                        onCall = { kind -> startCall(chat.id, chat.title, kind) },
+                        onOpenChat = { open = it },
+                    )
                 } else when (tab) {
                     0 -> ChatListScreen(app.db.dao(), app.api, me) { open = it }
                     1 -> CallsScreen(app.api, app.db.dao())

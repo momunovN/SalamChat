@@ -22,6 +22,8 @@ enum L10n {
     static var answer: String { t("call.answer") }
     static var inCall: String { t("call.in_progress") }
     static var online: String { t("presence.online") }
+    static var lastSeen: String { t("presence.last_seen") }
+    static var writeUser: String { t("profile.write") }
     static var typing: String { t("presence.typing") }
     static var attachPhoto: String { t("attach.photo") }
     static var attachVideo: String { t("attach.video") }
