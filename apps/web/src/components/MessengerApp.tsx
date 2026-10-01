@@ -116,6 +116,8 @@ export function MessengerApp() {
   const [address, setAddress] = useState("");
   const [hideNick, setHideNick] = useState(false);
   const [renameNick, setRenameNick] = useState("");
+  const [profileSaved, setProfileSaved] = useState(false);
+  const [profileBusy, setProfileBusy] = useState(false);
   const activeIdRef = useRef<string | null>(null);
   const meRef = useRef<string | undefined>(undefined);
   const activeCallIdRef = useRef<string | null>(null);
@@ -431,8 +433,9 @@ export function MessengerApp() {
           });
           setMessages((prev) => {
             if (!openId || msg.chat_id !== openId) return prev;
-            const next = prev.some((m) => m.id === msg.id || m.client_id === msg.client_id)
-              ? prev.map((m) => (m.client_id === msg.client_id || m.id === msg.id ? { ...m, ...msg, local_url: m.local_url } : m))
+            const same = (m: Message) => m.id === msg.id || (!!msg.client_id && m.client_id === msg.client_id);
+            const next = prev.some(same)
+              ? prev.map((m) => (same(m) ? { ...m, ...msg, local_url: m.local_url } : m))
               : [...prev, msg];
             return dedupeMessages(next);
           });
@@ -499,7 +502,10 @@ export function MessengerApp() {
         }
         if (env.type === "call.updated") {
           applyRemoteCall(env.body as Call);
-          void api.calls().then((r) => setCalls(r.items ?? []));
+          void api
+            .calls()
+            .then((r) => setCalls(r.items ?? []))
+            .catch(() => undefined);
         }
       } catch {
         /* ignore */
@@ -550,7 +556,10 @@ export function MessengerApp() {
 
   useEffect(() => {
     if (!session || tab !== "calls") return;
-    void api.calls().then((r) => setCalls(r.items));
+    void api
+      .calls()
+      .then((r) => setCalls(r.items ?? []))
+      .catch(() => undefined);
   }, [session, tab]);
 
   useEffect(() => {
@@ -984,6 +993,8 @@ export function MessengerApp() {
       return;
     }
     setProfileError(null);
+    setProfileSaved(false);
+    setProfileBusy(true);
     try {
       const user = await api.patchMe({
         display_name: nextName,
@@ -998,11 +1009,15 @@ export function MessengerApp() {
         saveSession(next);
         setSession(next);
       }
+      setProfileSaved(true);
+      window.setTimeout(() => setProfileSaved(false), 2500);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "";
       setProfileError(
         /username taken|conflict/i.test(msg) ? t.errNickTaken : /birth/i.test(msg) ? t.errBirth : t.errLogin,
       );
+    } finally {
+      setProfileBusy(false);
     }
   }
 
@@ -1111,6 +1126,19 @@ export function MessengerApp() {
   }, [lang]);
 
   useEffect(() => {
+    if (!newOpen && !chatMenu && !rename && !pendingDelete.length) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (pendingDelete.length) setPendingDelete([]);
+      else if (rename) setRename(null);
+      else if (chatMenu) setChatMenu(null);
+      else setNewOpen(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [newOpen, chatMenu, rename, pendingDelete.length]);
+
+  useEffect(() => {
     if (!session?.access_token) return;
     if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
     enableWebPush(lang);
@@ -1164,6 +1192,15 @@ export function MessengerApp() {
     );
   }
 
+  function callStatusLabel(status: string) {
+    if (status === "ended") return t.callStatusEnded;
+    if (status === "missed") return t.callStatusMissed;
+    if (status === "declined") return t.callStatusDeclined;
+    if (status === "active") return t.callStatusActive;
+    if (status === "ringing") return t.callStatusRinging;
+    return status;
+  }
+
   const navBtn = (id: Tab, icon: ReactNode, label: string) => (
     <button
       type="button"
@@ -1171,7 +1208,9 @@ export function MessengerApp() {
         setTab(id);
         if (id !== "chats") leaveChat();
       }}
-      className={`flex flex-col items-center gap-1 rounded-xl px-2 py-2 text-[10px] font-medium transition-colors ${
+      aria-label={label}
+      aria-current={tab === id ? "page" : undefined}
+      className={`flex min-w-14 flex-col items-center gap-1 rounded-xl px-2 py-1.5 text-[10px] font-medium transition-colors ${
         tab === id ? "text-accent" : "text-muted hover:text-ink"
       }`}
     >
@@ -1182,7 +1221,7 @@ export function MessengerApp() {
 
   const listPanel = (
     <div className="flex h-full min-w-0 flex-col border-r border-line bg-bg">
-      <div className="flex items-center justify-between gap-2 px-3 pt-2 pb-2 sm:px-4 sm:pt-3">
+      <div className="flex min-h-14 items-center justify-between gap-2 px-4 pt-2 pb-2 sm:pt-3">
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <BrandMark alt="" className="h-8 w-8 shrink-0 sm:h-9 sm:w-9 md:hidden" />
           <h1 className="truncate text-[22px] font-bold tracking-tight text-ink sm:text-[28px]">
@@ -1197,7 +1236,7 @@ export function MessengerApp() {
                 setPicking((on) => !on);
                 setSelectedIds([]);
               }}
-              className="shrink-0 rounded-full px-2 py-1.5 text-[13px] font-semibold text-accent sm:px-3 sm:text-sm"
+              className="shrink-0 rounded-full px-2.5 py-1.5 text-sm font-semibold text-accent hover:bg-elevated"
             >
               {picking ? t.cancel : t.selectChats}
             </button>
@@ -1219,20 +1258,21 @@ export function MessengerApp() {
 
       {tab === "chats" || tab === "contacts" ? (
         <div className="px-4 pb-3">
-          <label className="flex h-10 items-center gap-2 rounded-xl bg-elevated px-3">
-            <Search size={16} className="text-muted" />
+          <label className="flex h-10 items-center gap-2 rounded-xl bg-elevated px-3 focus-within:ring-1 focus-within:ring-accent/60">
+            <Search size={16} className="shrink-0 text-muted" />
             <input
+              type="search"
               value={tab === "chats" ? query : contactQ}
               onChange={(e) => (tab === "chats" ? setQuery(e.target.value) : setContactQ(e.target.value))}
               placeholder={tab === "contacts" ? t.searchPeople : t.search}
-              className="w-full bg-transparent text-sm text-ink outline-none placeholder:text-muted"
+              className="w-full bg-transparent text-sm text-ink outline-none placeholder:text-muted [&::-webkit-search-cancel-button]:hidden"
             />
           </label>
         </div>
       ) : null}
 
       {tab === "chats" ? (
-        <div className="flex flex-wrap gap-1 px-3 pb-2 sm:px-4">
+        <div className="flex flex-wrap gap-1 px-4 pb-2">
           {picking ? (
             <button
               type="button"
@@ -1248,7 +1288,7 @@ export function MessengerApp() {
               type="button"
               onClick={() => setSeg(s)}
               className={`h-8 rounded-full px-3 text-sm font-semibold transition-colors ${
-                seg === s ? "bg-accent text-ink" : "text-muted hover:text-ink"
+                seg === s ? "bg-accent text-white" : "text-muted hover:bg-elevated hover:text-ink"
               }`}
             >
               {s === "all" ? t.segAll : s === "direct" ? t.segDirect : t.segGroups}
@@ -1285,7 +1325,7 @@ export function MessengerApp() {
                   e.preventDefault();
                   setChatMenu(c);
                 }}
-                className={`flex w-full items-center gap-3 px-4 py-[10px] text-left transition-colors ${
+                className={`flex w-full cursor-pointer items-center gap-3 px-4 py-[10px] text-left outline-none transition-colors focus-visible:bg-elevated ${
                   activeId === c.id ? "bg-elevated" : "hover:bg-elevated/60"
                 }`}
               >
@@ -1302,7 +1342,7 @@ export function MessengerApp() {
                 <div className="min-w-0 flex-1 border-b border-line pb-2">
                   <div className="flex items-center gap-2">
                     <p className="min-w-0 flex-1 truncate text-[17px] font-semibold text-ink">{c.title}</p>
-                    <span className="text-[12px] font-medium text-muted">{fmtTime(c.updated_at)}</span>
+                    <span className="shrink-0 text-[12px] font-medium tabular-nums text-muted">{fmtTime(c.updated_at)}</span>
                     <button
                       type="button"
                       aria-label={t.edit}
@@ -1310,7 +1350,7 @@ export function MessengerApp() {
                         e.stopPropagation();
                         setChatMenu(c);
                       }}
-                      className="flex h-8 w-8 items-center justify-center rounded-full text-muted"
+                      className="-mr-2 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted hover:bg-bg hover:text-ink"
                     >
                       <MoreHorizontal size={18} />
                     </button>
@@ -1322,8 +1362,12 @@ export function MessengerApp() {
                         : lastPreview(c.last_message, t, me, c.type === "group")}
                     </p>
                     {c.unread_count > 0 ? (
-                      <span className="min-w-5 rounded-full bg-accent px-1.5 text-center text-[12px] font-medium text-ink">
-                        {c.unread_count}
+                      <span
+                        className={`flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full px-1.5 text-[12px] font-semibold tabular-nums text-white ${
+                          c.muted_until && new Date(c.muted_until).getTime() > Date.now() ? "bg-muted/60" : "bg-accent"
+                        }`}
+                      >
+                        {c.unread_count > 99 ? "99+" : c.unread_count}
                       </span>
                     ) : null}
                   </div>
@@ -1336,19 +1380,38 @@ export function MessengerApp() {
           <p className="px-4 pt-16 text-center text-base text-muted">{t.emptyCalls}</p>
         ) : null}
         {tab === "calls"
-          ? calls.map((c) => (
-              <div key={c.id} className="flex items-center gap-3 px-4 py-3">
-                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-elevated text-accent">
-                  {c.kind === "video" ? <Video size={18} /> : <Phone size={18} />}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate font-semibold text-ink">{c.kind === "video" ? t.video : t.audio}</p>
-                  <p className="text-sm text-muted">
-                    {c.status} · {fmtTime(c.started_at)}
-                  </p>
-                </div>
-              </div>
-            ))
+          ? calls.map((c) => {
+              const row = chats.find((chat) => chat.id === c.chat_id);
+              const missed = c.status === "missed" || c.status === "declined";
+              return (
+                <button
+                  key={c.id}
+                  type="button"
+                  disabled={!row}
+                  onClick={() => row && selectChat(row.id, row)}
+                  className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-elevated/60 disabled:cursor-default disabled:hover:bg-transparent"
+                >
+                  {row ? (
+                    <Avatar name={row.title} src={row.avatar_url} size={48} />
+                  ) : (
+                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-elevated text-accent">
+                      {c.kind === "video" ? <Video size={18} /> : <Phone size={18} />}
+                    </div>
+                  )}
+                  <div className="min-w-0 flex-1 border-b border-line pb-2.5">
+                    <p className={`truncate font-semibold ${missed ? "text-danger" : "text-ink"}`}>
+                      {row?.title || (c.kind === "video" ? t.video : t.audio)}
+                    </p>
+                    <p className="flex items-center gap-1.5 text-sm text-muted">
+                      {c.kind === "video" ? <Video size={13} className="shrink-0" /> : <Phone size={13} className="shrink-0" />}
+                      <span className="truncate">
+                        {callStatusLabel(c.status)} · {fmtTime(c.started_at)}
+                      </span>
+                    </p>
+                  </div>
+                </button>
+              );
+            })
           : null}
 
         {tab === "contacts" ? (
@@ -1379,9 +1442,9 @@ export function MessengerApp() {
           <div className="px-4 py-2">
             <div className="flex items-center gap-3 rounded-2xl bg-elevated p-4">
               <Avatar name={session.user.display_name} src={session.user.avatar_url} size={56} />
-              <div>
-                <p className="font-semibold text-ink">{session.user.display_name}</p>
-                <p className="text-sm text-muted">
+              <div className="min-w-0 flex-1">
+                <p className="truncate font-semibold text-ink">{session.user.display_name}</p>
+                <p className="truncate text-sm text-muted">
                   {[
                     session.user.username ? `@${session.user.username}` : "",
                     formatPhone(session.user.phone),
@@ -1396,10 +1459,10 @@ export function MessengerApp() {
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="mt-1 h-11 w-full rounded-xl bg-elevated px-3 text-ink outline-none"
+              className="mt-1 h-11 w-full rounded-xl bg-elevated px-3 text-ink outline-none focus:ring-2 focus:ring-accent"
             />
             <label className="mt-3 block text-xs font-medium text-muted">{t.nick}</label>
-            <div className="mt-1 flex h-11 items-center rounded-xl bg-elevated px-3">
+            <div className="mt-1 flex h-11 items-center rounded-xl bg-elevated px-3 focus-within:ring-2 focus-within:ring-accent">
               <span className="text-muted">@</span>
               <input
                 value={username}
@@ -1412,8 +1475,13 @@ export function MessengerApp() {
               />
             </div>
             <p className="mt-1 text-xs text-muted">{t.nickHint}</p>
-            <label className="mt-3 flex items-center gap-2 text-sm text-ink">
-              <input type="checkbox" checked={hideNick} onChange={(e) => setHideNick(e.target.checked)} />
+            <label className="mt-3 flex cursor-pointer items-center gap-2 text-sm text-ink">
+              <input
+                type="checkbox"
+                checked={hideNick}
+                onChange={(e) => setHideNick(e.target.checked)}
+                className="h-4 w-4 shrink-0 cursor-pointer rounded"
+              />
               {t.hideNick}
             </label>
             <p className="mt-1 text-xs text-muted">{t.hideNickHint}</p>
@@ -1422,28 +1490,35 @@ export function MessengerApp() {
               value={bio}
               onChange={(e) => setBio(e.target.value)}
               rows={3}
-              className="mt-1 w-full resize-none rounded-xl bg-elevated px-3 py-2 text-ink outline-none"
+              className="mt-1 w-full resize-none rounded-xl bg-elevated px-3 py-2 text-ink outline-none focus:ring-2 focus:ring-accent"
             />
             <label className="mt-3 block text-xs font-medium text-muted">{t.birth}</label>
             <input
               type="date"
               value={birth}
               onChange={(e) => setBirth(e.target.value)}
-              className="mt-1 h-11 w-full rounded-xl bg-elevated px-3 text-ink outline-none"
+              className="mt-1 h-11 w-full rounded-xl bg-elevated px-3 text-ink outline-none focus:ring-2 focus:ring-accent"
             />
             <label className="mt-3 block text-xs font-medium text-muted">{t.address}</label>
             <input
               value={address}
               onChange={(e) => setAddress(e.target.value)}
-              className="mt-1 h-11 w-full rounded-xl bg-elevated px-3 text-ink outline-none"
+              className="mt-1 h-11 w-full rounded-xl bg-elevated px-3 text-ink outline-none focus:ring-2 focus:ring-accent"
             />
             {profileError ? <p className="mt-2 text-xs font-medium text-danger">{profileError}</p> : null}
             <button
               type="button"
+              disabled={profileBusy || !sanitizeDisplayName(name)}
               onClick={() => void saveProfile()}
-              className="mt-3 h-11 w-full rounded-xl bg-accent font-semibold text-white"
+              className="mt-3 flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-accent font-semibold text-white transition-opacity disabled:opacity-60"
             >
-              {t.save}
+              {profileSaved ? (
+                <>
+                  <Check size={16} /> {t.saved}
+                </>
+              ) : (
+                t.save
+              )}
             </button>
             <div className="mt-6 flex items-center justify-between">
               <span className="flex items-center gap-2 text-sm text-muted">
@@ -1455,7 +1530,8 @@ export function MessengerApp() {
                     key={l}
                     type="button"
                     onClick={() => chooseLang(l)}
-                    className={`rounded-full px-3 py-1 text-sm font-semibold ${lang === l ? "bg-accent text-ink" : "text-muted"}`}
+                    aria-pressed={lang === l}
+                    className={`rounded-full px-3 py-1 text-sm font-semibold ${lang === l ? "bg-accent text-white" : "text-muted hover:text-ink"}`}
                   >
                     {l.toUpperCase()}
                   </button>
@@ -1465,7 +1541,7 @@ export function MessengerApp() {
             <button
               type="button"
               onClick={logout}
-              className="mt-6 flex items-center gap-2 text-danger"
+              className="mt-6 mb-4 flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-elevated font-semibold text-danger"
             >
               <LogOut size={16} /> {t.logout}
             </button>
@@ -1575,12 +1651,19 @@ export function MessengerApp() {
           onClick={() => setNewOpen(null)}
         >
           <div
-            className="w-full max-w-md rounded-t-2xl bg-elevated p-5 md:rounded-2xl"
+            className="w-full max-w-md rounded-t-2xl bg-elevated p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] md:rounded-2xl md:pb-5"
             onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
           >
             <div className="mb-4 flex items-center justify-between">
               <h2 className="text-lg font-semibold">{newOpen === "group" ? t.newGroup : t.newChat}</h2>
-              <button type="button" onClick={() => setNewOpen(null)} aria-label={t.cancel}>
+              <button
+                type="button"
+                onClick={() => setNewOpen(null)}
+                aria-label={t.cancel}
+                className="-mr-2 flex h-9 w-9 items-center justify-center rounded-full text-muted hover:bg-bg hover:text-ink"
+              >
                 <X size={18} />
               </button>
             </div>
@@ -1588,14 +1671,14 @@ export function MessengerApp() {
               <button
                 type="button"
                 onClick={() => setNewOpen("direct")}
-                className={`rounded-full px-3 py-1 text-sm font-semibold ${newOpen === "direct" ? "bg-accent" : "bg-bg text-muted"}`}
+                className={`h-8 rounded-full px-3 text-sm font-semibold ${newOpen === "direct" ? "bg-accent text-white" : "bg-bg text-muted hover:text-ink"}`}
               >
                 {t.newChat}
               </button>
               <button
                 type="button"
                 onClick={() => setNewOpen("group")}
-                className={`rounded-full px-3 py-1 text-sm font-semibold ${newOpen === "group" ? "bg-accent" : "bg-bg text-muted"}`}
+                className={`h-8 rounded-full px-3 text-sm font-semibold ${newOpen === "group" ? "bg-accent text-white" : "bg-bg text-muted hover:text-ink"}`}
               >
                 {t.newGroup}
               </button>
@@ -1606,7 +1689,7 @@ export function MessengerApp() {
                   value={groupTitle}
                   onChange={(e) => setGroupTitle(e.target.value)}
                   placeholder={t.groupTitle}
-                  className="mb-3 h-11 w-full rounded-xl bg-bg px-3 text-ink outline-none"
+                  className="mb-3 h-11 w-full rounded-xl bg-bg px-3 text-ink outline-none placeholder:text-muted focus:ring-2 focus:ring-accent"
                 />
                 <input
                   value={groupNick}
@@ -1615,22 +1698,22 @@ export function MessengerApp() {
                     setProfileError(null);
                   }}
                   placeholder={t.groupNick}
-                  className="mb-3 h-11 w-full rounded-xl bg-bg px-3 text-ink outline-none"
+                  className="mb-3 h-11 w-full rounded-xl bg-bg px-3 text-ink outline-none placeholder:text-muted focus:ring-2 focus:ring-accent"
                 />
                 {profileError ? <p className="mb-3 text-xs font-medium text-danger">{profileError}</p> : null}
               </>
             ) : null}
-            <label className="mb-3 flex h-10 items-center gap-2 rounded-xl bg-bg px-3">
-              <Search size={16} className="text-muted" />
+            <label className="mb-3 flex h-10 items-center gap-2 rounded-xl bg-bg px-3 focus-within:ring-1 focus-within:ring-accent/60">
+              <Search size={16} className="shrink-0 text-muted" />
               <input
                 value={pickerQ}
                 onChange={(e) => setPickerQ(e.target.value)}
                 placeholder={t.searchPeople}
                 autoFocus
-                className="w-full bg-transparent text-sm outline-none"
+                className="w-full bg-transparent text-sm text-ink outline-none placeholder:text-muted"
               />
             </label>
-            <div className="max-h-64 overflow-y-auto">
+            <div className="max-h-[min(16rem,45dvh)] overflow-y-auto">
               <PeopleResults
                 t={t}
                 query={pickerQ}
@@ -1650,7 +1733,7 @@ export function MessengerApp() {
                 type="button"
                 disabled={!groupTitle.trim()}
                 onClick={() => void createGroup()}
-                className="mt-4 h-11 w-full rounded-xl bg-accent font-semibold disabled:opacity-40"
+                className="mt-4 h-11 w-full rounded-xl bg-accent font-semibold text-white disabled:opacity-40"
               >
                 {t.create}
               </button>
@@ -1660,7 +1743,7 @@ export function MessengerApp() {
       ) : null}
 
       {pendingDelete.length ? (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 px-4 pb-6" onClick={() => setPendingDelete([])}>
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] md:items-center" onClick={() => setPendingDelete([])}>
           <div className="w-full max-w-md rounded-2xl bg-elevated p-4" onClick={(e) => e.stopPropagation()}>
             <p className="text-base font-semibold text-ink">
               {pendingDelete.length > 1
@@ -1690,7 +1773,7 @@ export function MessengerApp() {
       ) : null}
 
       {chatMenu ? (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 px-4 pb-6" onClick={() => setChatMenu(null)}>
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] md:items-center" onClick={() => setChatMenu(null)}>
           <div className="w-full max-w-md rounded-2xl bg-elevated p-2" onClick={(e) => e.stopPropagation()}>
             <p className="truncate px-3 py-2 font-semibold text-ink">{chatMenu.title}</p>
             {chatMenu.type === "group" ? (
@@ -1703,7 +1786,7 @@ export function MessengerApp() {
                   setRename(chatMenu);
                   setChatMenu(null);
                 }}
-                className="flex h-11 w-full items-center rounded-xl px-3 text-left font-medium text-ink"
+                className="flex h-11 w-full items-center rounded-xl px-3 text-left font-medium text-ink hover:bg-bg"
               >
                 {t.rename}
               </button>
@@ -1711,7 +1794,7 @@ export function MessengerApp() {
             <button
               type="button"
               onClick={() => askDelete([chatMenu.id])}
-              className="flex h-11 w-full items-center rounded-xl px-3 text-left font-medium text-danger"
+              className="flex h-11 w-full items-center rounded-xl px-3 text-left font-medium text-danger hover:bg-bg"
             >
               {t.deleteChat}
             </button>
@@ -1720,14 +1803,14 @@ export function MessengerApp() {
       ) : null}
 
       {rename ? (
-        <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/50 px-4 pb-6" onClick={() => setRename(null)}>
+        <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/50 px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] md:items-center" onClick={() => setRename(null)}>
           <div className="w-full max-w-md rounded-2xl bg-elevated p-4" onClick={(e) => e.stopPropagation()}>
             <p className="mb-3 font-semibold text-ink">{t.rename}</p>
             <input
               value={renameTitle}
               onChange={(e) => setRenameTitle(e.target.value)}
               placeholder={t.newTitle}
-              className="mb-3 h-11 w-full rounded-xl bg-bg px-3 text-ink outline-none"
+              className="mb-3 h-11 w-full rounded-xl bg-bg px-3 text-ink outline-none placeholder:text-muted focus:ring-2 focus:ring-accent"
             />
             <input
               value={renameNick}
@@ -1736,14 +1819,14 @@ export function MessengerApp() {
                 setProfileError(null);
               }}
               placeholder={t.groupNick}
-              className="mb-3 h-11 w-full rounded-xl bg-bg px-3 text-ink outline-none"
+              className="mb-3 h-11 w-full rounded-xl bg-bg px-3 text-ink outline-none placeholder:text-muted focus:ring-2 focus:ring-accent"
             />
             {profileError ? <p className="mb-3 text-xs font-medium text-danger">{profileError}</p> : null}
             <button
               type="button"
               disabled={!renameTitle.trim()}
               onClick={() => void saveRename()}
-              className="h-11 w-full rounded-xl bg-accent font-semibold disabled:opacity-40"
+              className="h-11 w-full rounded-xl bg-accent font-semibold text-white disabled:opacity-40"
             >
               {t.save}
             </button>

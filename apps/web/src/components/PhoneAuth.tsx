@@ -188,14 +188,14 @@ export function PhoneAuth({
               <button
                 type="button"
                 onClick={() => pickCountry("996")}
-                className={`h-9 rounded-full px-3 text-sm font-semibold ${cc === "996" ? "bg-accent text-ink" : "bg-elevated text-muted"}`}
+                className={`h-9 rounded-full px-3 text-sm font-semibold ${cc === "996" ? "bg-accent text-white" : "bg-elevated text-muted hover:text-ink"}`}
               >
                 {t.countryKg} +996
               </button>
               <button
                 type="button"
                 onClick={() => pickCountry("7")}
-                className={`h-9 rounded-full px-3 text-sm font-semibold ${cc === "7" ? "bg-accent text-ink" : "bg-elevated text-muted"}`}
+                className={`h-9 rounded-full px-3 text-sm font-semibold ${cc === "7" ? "bg-accent text-white" : "bg-elevated text-muted hover:text-ink"}`}
               >
                 {t.countryRu} +7
               </button>

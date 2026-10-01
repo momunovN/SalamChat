@@ -9,6 +9,7 @@ import {
   CheckCheck,
   Copy,
   CornerUpLeft,
+  ImageIcon,
   Lock,
   Mic,
   Paperclip,
@@ -108,6 +109,8 @@ export function ChatPane({
   const discardRef = useRef(false);
   const startedAt = useRef(0);
   const voiceBlobs = useRef(new Map<string, { blob: Blob; ms: number }>());
+  const fileBlobs = useRef(new Map<string, { file: File; kind: "photo" | "file" }>());
+  const composerRef = useRef<HTMLTextAreaElement>(null);
   const localUrls = useRef(new Set<string>());
   const replyRef = useRef(replyTo);
   const [recording, setRecording] = useState(false);
@@ -159,6 +162,13 @@ export function ChatPane({
   useEffect(() => {
     replyRef.current = replyTo;
   }, [replyTo]);
+
+  useEffect(() => {
+    const el = composerRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 128)}px`;
+  }, [text, recording]);
 
   useEffect(() => {
     if (!recording) return;
@@ -288,6 +298,13 @@ export function ChatPane({
           URL.revokeObjectURL(m.local_url);
           localUrls.current.delete(m.local_url);
         }
+        setMessages((prev) => prev.map((x) => (x.client_id === m.client_id ? msg : x)));
+        onLocal(msg);
+      } else if ((m.type === "photo" || m.type === "file") && fileBlobs.current.has(m.client_id)) {
+        const saved = fileBlobs.current.get(m.client_id)!;
+        const uploadId = await api.upload(saved.file, saved.kind);
+        const msg = await api.send(chat.id, m.client_id, m.type, m.payload, [uploadId], m.reply_to_id || undefined);
+        fileBlobs.current.delete(m.client_id);
         setMessages((prev) => prev.map((x) => (x.client_id === m.client_id ? msg : x)));
         onLocal(msg);
       } else {
@@ -502,6 +519,7 @@ export function ChatPane({
       ],
     };
     const quoted = replyTo;
+    fileBlobs.current.set(clientId, { file: prepared, kind });
     setReplyTo(null);
     stick.current = true;
     setMessages((prev) => [...prev, optimistic]);
@@ -516,6 +534,7 @@ export function ChatPane({
         [uploadId],
         quoted?.id,
       );
+      fileBlobs.current.delete(clientId);
       setMessages((prev) => prev.map((m) => (m.client_id === clientId ? msg : m)));
       queueMicrotask(() => URL.revokeObjectURL(localUrl));
       onLocal(msg);
@@ -562,8 +581,9 @@ export function ChatPane({
       <div className="flex h-14 items-center gap-2.5 border-b border-line px-2">
         <button
           type="button"
-          className="flex h-9 w-9 items-center justify-center rounded-full text-ink md:hidden"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-ink hover:bg-elevated md:hidden"
           onClick={onBack}
+          aria-label={t.back}
         >
           <ArrowLeft size={18} />
         </button>
@@ -581,13 +601,13 @@ export function ChatPane({
               <Lock size={12} className="shrink-0 text-muted" aria-label={t.sealed} />
               <span className="truncate">{chat.title}</span>
             </p>
-            <p className={`text-[12px] font-medium ${subColor}`}>{subtitle}</p>
+            <p className={`truncate text-[12px] font-medium ${subColor}`}>{subtitle}</p>
           </div>
         </button>
         <button
           type="button"
           onClick={() => onCall("audio")}
-          className="flex h-9 w-9 items-center justify-center text-ink"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-ink hover:bg-elevated"
           aria-label={t.audio}
         >
           <Phone size={18} />
@@ -595,7 +615,7 @@ export function ChatPane({
         <button
           type="button"
           onClick={() => onCall("video")}
-          className="flex h-9 w-9 items-center justify-center text-ink"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-ink hover:bg-elevated"
           aria-label={t.video}
         >
           <Video size={18} />
@@ -654,14 +674,14 @@ export function ChatPane({
                         e.stopPropagation();
                         setMenuId(m.id);
                       }}
-                      className={`px-3 py-2 text-left text-base text-ink ${
+                      className={`min-w-0 max-w-full cursor-pointer whitespace-pre-wrap px-3 py-2 text-left text-base leading-snug text-ink [overflow-wrap:anywhere] ${
                         mine
                           ? "rounded-[16px] rounded-br-sm bg-outgoing"
                           : "rounded-[16px] rounded-bl-sm bg-incoming"
                       }`}
                     >
                       {m.reply_to ? (
-                        <div className="mb-1 border-l-2 border-white/40 pl-2 text-[12px] text-white/80">
+                        <div className="mb-1 whitespace-normal border-l-2 border-white/40 pl-2 text-[12px] text-white/80">
                           <p className="font-semibold">
                             {m.reply_to.author_id === me ? t.you : m.reply_to.author_name || t.replyTo}
                           </p>
@@ -759,7 +779,7 @@ export function ChatPane({
       </div>
 
       {attach ? (
-        <div className="flex gap-4 bg-elevated px-6 py-4">
+        <div className="flex gap-4 border-t border-line bg-elevated px-6 py-4">
           <button
             type="button"
             onClick={() => {
@@ -769,7 +789,7 @@ export function ChatPane({
             className="flex flex-1 flex-col items-center gap-2 text-xs text-muted"
           >
             <span className="flex h-14 w-14 items-center justify-center rounded-full bg-accent/20 text-accent">
-              <Paperclip size={20} />
+              <ImageIcon size={20} />
             </span>
             {t.attachPhoto}
           </button>
@@ -815,7 +835,8 @@ export function ChatPane({
               setEditing(null);
               if (editing) setComposer("");
             }}
-            className="text-muted"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted hover:bg-elevated"
+            aria-label={t.cancel}
           >
             <X size={16} />
           </button>
@@ -823,12 +844,12 @@ export function ChatPane({
       ) : null}
 
       {voiceError ? <p className="px-4 pb-1 text-xs font-medium text-danger">{voiceError}</p> : null}
-      <div className="flex items-end gap-2 px-3 py-2">
+      <div className="flex items-end gap-2 border-t border-line px-3 py-2">
         {recording ? (
           <button
             type="button"
             onClick={() => stopRec(true)}
-            className="flex h-10 w-10 items-center justify-center rounded-full bg-elevated text-ink"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-elevated text-ink"
             aria-label={t.cancel}
           >
             <X size={18} />
@@ -837,7 +858,9 @@ export function ChatPane({
           <button
             type="button"
             onClick={() => setAttach((v) => !v)}
-            className="flex h-10 w-10 items-center justify-center rounded-full bg-elevated text-ink"
+            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-elevated text-ink transition-transform ${attach ? "rotate-45" : ""}`}
+            aria-label={t.attach}
+            aria-expanded={attach}
           >
             <Plus size={20} />
           </button>
@@ -858,6 +881,7 @@ export function ChatPane({
           </div>
         ) : (
           <textarea
+            ref={composerRef}
             value={text}
             onChange={(e) => {
               setComposer(e.target.value);
@@ -874,15 +898,15 @@ export function ChatPane({
             }}
             rows={1}
             placeholder={t.composer}
-            className="max-h-32 min-h-[40px] flex-1 resize-none rounded-[20px] bg-elevated px-3 py-2.5 text-base text-ink outline-none placeholder:text-muted"
+            className="block max-h-32 min-h-[40px] min-w-0 flex-1 resize-none overflow-y-auto rounded-[20px] bg-elevated px-3.5 py-2 text-base leading-6 text-ink outline-none placeholder:text-muted focus:ring-1 focus:ring-accent/60"
           />
         )}
         {recording ? (
           <button
             type="button"
             onClick={() => stopRec(false)}
-            className="flex h-10 w-10 items-center justify-center rounded-full bg-accent text-white"
-            aria-label={t.voice}
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-accent text-white"
+            aria-label={t.send}
           >
             <ArrowUp size={16} />
           </button>
@@ -890,7 +914,8 @@ export function ChatPane({
           <button
             type="button"
             onClick={() => void send()}
-            className="flex h-10 w-10 items-center justify-center rounded-full bg-accent text-white"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-accent text-white"
+            aria-label={t.send}
           >
             <ArrowUp size={16} />
           </button>
@@ -899,7 +924,7 @@ export function ChatPane({
             type="button"
             disabled={!!editing}
             onClick={() => askRec(Date.now())}
-            className="flex h-10 w-10 items-center justify-center rounded-full bg-elevated text-ink disabled:opacity-40"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-elevated text-ink disabled:opacity-40"
             aria-label={t.voice}
           >
             <Mic size={18} />
@@ -914,7 +939,12 @@ export function ChatPane({
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex h-14 items-center gap-2 border-b border-line px-3">
-              <button type="button" onClick={() => setMembersOpen(false)} className="p-2 text-ink">
+              <button
+                type="button"
+                onClick={() => setMembersOpen(false)}
+                className="flex h-9 w-9 items-center justify-center rounded-full text-ink hover:bg-bg"
+                aria-label={t.cancel}
+              >
                 <X size={18} />
               </button>
               <div className="min-w-0 flex-1">
@@ -982,8 +1012,9 @@ export function ChatPane({
                     {canKick ? (
                       <button
                         type="button"
-                        className="px-2 text-danger"
+                        className="flex h-9 w-9 items-center justify-center rounded-full text-danger hover:bg-danger/10"
                         title={t.kick}
+                        aria-label={t.kick}
                         onClick={() => void kick(m.user.id)}
                       >
                         <UserMinus size={16} />
@@ -1149,12 +1180,17 @@ function ChatFile({
   if (mode === "image") {
     return (
       // eslint-disable-next-line @next/next/no-img-element
-      <img src={url} alt={title} onClick={open} className="mb-1 max-h-64 cursor-zoom-in rounded-lg" />
+      <img src={url} alt={title} onClick={open} className="mb-1 block max-h-64 max-w-full cursor-zoom-in rounded-lg object-cover" />
     );
   }
   return (
-    <button type="button" onClick={open} className="mb-1 flex items-center gap-2 text-left text-sm underline">
-      {title}
+    <button
+      type="button"
+      onClick={open}
+      className="mb-1 flex max-w-full items-center gap-2 rounded-lg bg-black/15 px-2.5 py-2 text-left text-sm"
+    >
+      <Paperclip size={16} className="shrink-0 opacity-80" />
+      <span className="min-w-0 truncate underline decoration-white/40 underline-offset-2">{title}</span>
     </button>
   );
 }

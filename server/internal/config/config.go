@@ -35,6 +35,9 @@ type Config struct {
 	SMSLogin    string
 }
 
+// DevJWTSecret is the example value from .env.example. Never use it in production.
+const DevJWTSecret = "dev-change-me-32-bytes-minimum-secret"
+
 func Load() Config {
 	loadDotEnv()
 	return Config{
@@ -46,7 +49,7 @@ func Load() Config {
 			"SAMAL_DATABASE_URL",
 			"DATABASE_URL",
 		),
-		JWTSecret: []byte(envFirst("dev-change-me-32-bytes-minimum-secret", "TOOAPP_JWT_SECRET", "SAMAL_JWT_SECRET")),
+		JWTSecret:     []byte(envFirst(DevJWTSecret, "TOOAPP_JWT_SECRET", "SAMAL_JWT_SECRET")),
 		OTPDev:        envBoolFirst(true, "TOOAPP_OTP_DEV", "SAMAL_OTP_DEV"),
 		AccessTTL:     30 * time.Minute,
 		RefreshTTL:    60 * 24 * time.Hour,

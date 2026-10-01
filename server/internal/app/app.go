@@ -110,6 +110,9 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger) (http.Handler
 func Run() error {
 	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	cfg := config.Load()
+	if string(cfg.JWTSecret) == config.DevJWTSecret {
+		log.Error("SECURITY: TOOAPP_JWT_SECRET is not set, anyone can sign session tokens. Set it before going public.")
+	}
 	ctx := context.Background()
 
 	h, cleanup, err := New(ctx, cfg, log)

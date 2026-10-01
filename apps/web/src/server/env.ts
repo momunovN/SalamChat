@@ -46,8 +46,21 @@ export function envBool(key: string, fallback: boolean) {
   return v === "1" || v.toLowerCase() === "true" || v.toLowerCase() === "yes";
 }
 
+const DEV_JWT_SECRET = "dev-change-me-32-bytes-minimum-secret";
+let warnedSecret = false;
+
 export function jwtSecret() {
-  return envFirst("dev-change-me-32-bytes-minimum-secret", "TOOAPP_JWT_SECRET", "SAMAL_JWT_SECRET");
+  const secret = envFirst(DEV_JWT_SECRET, "TOOAPP_JWT_SECRET", "SAMAL_JWT_SECRET");
+  // The value also derives the at-rest data key and VAPID keys, so it is not replaced here:
+  // changing it would make stored messages unreadable. Production must set its own.
+  if (secret === DEV_JWT_SECRET && process.env.NODE_ENV === "production" && !warnedSecret) {
+    warnedSecret = true;
+    console.error(
+      "SECURITY: TOOAPP_JWT_SECRET is not set (or uses the example value), so anyone can sign session tokens. " +
+        "Before changing it, set TOOAPP_DATA_KEY=tooapp-seal-v1:<old secret> so stored messages stay readable.",
+    );
+  }
+  return secret;
 }
 
 function rawDatabaseURL() {

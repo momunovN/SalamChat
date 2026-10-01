@@ -44,12 +44,8 @@ async function request<T>(path: string, init: RequestInit & { authed?: boolean; 
     clearTimeout(timer);
   }
   if (res.status === 401 && authed && session?.refresh_token && !path.includes("/auth/refresh")) {
-    const next = await refresh(session.refresh_token);
-    if (next) {
-      saveSession(next);
-      return request<T>(path, { ...init, session: next });
-    }
-    authLost();
+    const next = await refreshOnce(session.refresh_token);
+    if (next) return request<T>(path, { ...init, session: next });
   }
   const text = await res.text();
   let data = {} as T & ApiError;
@@ -71,13 +67,32 @@ function authLost() {
   if (typeof window !== "undefined") window.dispatchEvent(new Event("tooapp:auth-lost"));
 }
 
+let refreshing: { token: string; promise: Promise<Session | null> } | null = null;
+
+// Several requests can hit 401 at once. They share one refresh call, otherwise the
+// second refresh reuses an already rotated token and the user is logged out.
+function refreshOnce(refreshToken: string) {
+  const current = loadSession();
+  if (current && current.refresh_token !== refreshToken && current.access_token) {
+    return Promise.resolve<Session | null>(current);
+  }
+  if (refreshing?.token === refreshToken) return refreshing.promise;
+  const promise = refresh(refreshToken).finally(() => {
+    if (refreshing?.promise === promise) refreshing = null;
+  });
+  refreshing = { token: refreshToken, promise };
+  return promise;
+}
+
 async function refresh(refreshToken: string) {
   try {
-    return await request<Session>("/v1/auth/refresh", {
+    const next = await request<Session>("/v1/auth/refresh", {
       method: "POST",
       body: JSON.stringify({ refresh_token: refreshToken }),
       authed: false,
     });
+    saveSession(next);
+    return next;
   } catch {
     authLost();
     return null;
@@ -148,8 +163,11 @@ export const api = {
     }),
   removeMember: (chatId: string, userId: string) =>
     request<{ ok: boolean }>(`/v1/chats/${chatId}/members/${userId}`, { method: "DELETE" }),
+  // Fire-and-forget: a lost receipt is not worth an unhandled rejection.
   receipts: (ids: string[], status: "delivered" | "read") =>
-    request<{ ok: boolean }>("/v1/receipts", { method: "POST", body: JSON.stringify({ message_ids: ids, status }) }),
+    request<{ ok: boolean }>("/v1/receipts", { method: "POST", body: JSON.stringify({ message_ids: ids, status }) }).catch(
+      () => ({ ok: false }),
+    ),
   direct: (userId: string) =>
     request<Chat>("/v1/chats/direct", { method: "POST", body: JSON.stringify({ user_id: userId }) }),
   group: (title: string, memberIds: string[], username?: string) =>
@@ -194,7 +212,10 @@ export const api = {
   hangupCall: (id: string) => request<Call>(`/v1/calls/${id}/hangup`, { method: "POST" }),
   callToken: (id: string) =>
     request<{ url: string; token: string; room: string }>(`/v1/calls/${id}/token`),
-  typing: (chatId: string) => request<{ ok: boolean }>("/v1/typing", { method: "POST", body: JSON.stringify({ chat_id: chatId }) }),
+  typing: (chatId: string) =>
+    request<{ ok: boolean }>("/v1/typing", { method: "POST", body: JSON.stringify({ chat_id: chatId }) }).catch(() => ({
+      ok: false,
+    })),
   upload: async (file: File, kind: "photo" | "file" | "voice") => {
     const intent = await request<{ id: string; put_url: string }>("/v1/uploads/intent", {
       method: "POST",

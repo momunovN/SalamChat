@@ -110,7 +110,7 @@ export function ProfileSheet({
   return (
     <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/50 sm:items-center" onClick={onClose}>
       <div
-        className="flex max-h-[92vh] w-full max-w-md flex-col overflow-hidden rounded-t-3xl bg-elevated sm:rounded-3xl"
+        className="flex max-h-[92dvh] w-full max-w-md flex-col overflow-hidden rounded-t-3xl bg-elevated sm:rounded-3xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex justify-end px-4 pt-4">
@@ -123,7 +123,7 @@ export function ProfileSheet({
             <X size={18} />
           </button>
         </div>
-        <div className="overflow-y-auto px-5 pb-8">
+        <div className="overflow-y-auto px-5 pb-[max(2rem,env(safe-area-inset-bottom))]">
           <div className="flex flex-col items-center text-center">
             <Avatar name={name || "?"} src={user?.avatar_url || seed?.avatar_url} size={96} online={online} />
             {name ? <h2 className="mt-3 text-xl font-semibold text-ink">{name}</h2> : null}

@@ -34,7 +34,9 @@ export function errorResponse(err: unknown) {
   if (/prepared statement/i.test(msg)) {
     return json(503, { error: { code: "unavailable", message: "db timeout" } });
   }
-  return json(500, { error: { code: "internal", message: msg || "internal error" } });
+  // Raw driver/stack messages stay in the server log; production clients get a generic text.
+  const visible = process.env.NODE_ENV === "production" ? "internal error" : msg || "internal error";
+  return json(500, { error: { code: "internal", message: visible } });
 }
 
 export async function readJSON<T>(req: Request): Promise<T> {

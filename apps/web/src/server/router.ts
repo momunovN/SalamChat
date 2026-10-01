@@ -70,6 +70,50 @@ function sendInput(body: SendBody) {
   };
 }
 
+// Uploads carry a client-chosen MIME. Anything a browser could run as a page (HTML, SVG, XML)
+// is served from the site origin, where the session token lives, so it must never execute.
+const ACTIVE_TYPES = /^(text\/html|application\/xhtml\+xml|image\/svg\+xml|text\/xml|application\/xml|text\/javascript|application\/javascript)$/i;
+
+function mediaResponse(req: Request, buf: Buffer | Uint8Array, rawType: string, cache: string) {
+  let type = (rawType || "application/octet-stream").split(";")[0].trim().toLowerCase() || "application/octet-stream";
+  const headers: Record<string, string> = {
+    "Cache-Control": cache,
+    "Accept-Ranges": "bytes",
+    "Access-Control-Allow-Origin": "*",
+    "X-Content-Type-Options": "nosniff",
+  };
+  if (ACTIVE_TYPES.test(type)) {
+    // SVG still renders inside <img>; opened directly it runs sandboxed with no script.
+    if (type !== "image/svg+xml") type = "text/plain; charset=utf-8";
+    headers["Content-Security-Policy"] = "sandbox; default-src 'none'; img-src data:; style-src 'unsafe-inline'";
+  }
+  headers["Content-Type"] = type;
+
+  // Safari plays audio and video only through byte ranges (206).
+  const total = buf.length;
+  const range = /^bytes=(\d*)-(\d*)$/.exec((req.headers.get("range") || "").trim());
+  if (range && total > 0 && (range[1] || range[2])) {
+    let start: number;
+    let end: number;
+    if (range[1]) {
+      start = Number(range[1]);
+      end = range[2] ? Math.min(Number(range[2]), total - 1) : total - 1;
+    } else {
+      start = Math.max(0, total - Number(range[2]));
+      end = total - 1;
+    }
+    if (start >= total || start > end) {
+      return new Response(null, { status: 416, headers: { ...headers, "Content-Range": `bytes */${total}` } });
+    }
+    const part = buf.subarray(start, end + 1);
+    return new Response(new Uint8Array(part), {
+      status: 206,
+      headers: { ...headers, "Content-Range": `bytes ${start}-${end}/${total}`, "Content-Length": String(part.length) },
+    });
+  }
+  return new Response(new Uint8Array(buf), { headers: { ...headers, "Content-Length": String(total) } });
+}
+
 function match(parts: string[], pattern: string) {
   const pat = pattern.split("/").filter(Boolean);
   if (pat.length !== parts.length) return null;
@@ -101,16 +145,15 @@ export async function handleRequest(req: Request): Promise<Response> {
       return json(200, { ok: true, name: "salam", valkey: valkeyReady() ? "up" : "down" });
     }
     if (pathname.startsWith("/media/id/")) {
-      const id = decodeURIComponent(pathname.slice("/media/id/".length)).split("/")[0];
+      let id = "";
+      try {
+        id = decodeURIComponent(pathname.slice("/media/id/".length)).split("/")[0];
+      } catch {
+        throw new HttpError(400, "bad_request", "bad id");
+      }
+      if (!UUID.test(id)) throw new HttpError(404, "not_found", "not found");
       const opened = await readSealedUpload(id);
-      return new Response(new Uint8Array(opened.buf), {
-        headers: {
-          "Content-Type": opened.mime,
-          "Content-Length": String(opened.buf.length),
-          "Cache-Control": "private, max-age=86400",
-          "Access-Control-Allow-Origin": "*",
-        },
-      });
+      return mediaResponse(req, opened.buf, opened.mime, "private, max-age=86400");
     }
     if (pathname.startsWith("/media/")) {
       let key = pathname.slice("/media/".length);
@@ -121,15 +164,7 @@ export async function handleRequest(req: Request): Promise<Response> {
       }
       const buf = openBytes(await readMedia(key));
       const type = await mediaType(key);
-      return new Response(new Uint8Array(buf), {
-        headers: {
-          "Content-Type": type,
-          "Content-Length": String(buf.length),
-          "Cache-Control": "public, max-age=86400",
-          "Accept-Ranges": "bytes",
-          "Access-Control-Allow-Origin": "*",
-        },
-      });
+      return mediaResponse(req, buf, type, "public, max-age=86400");
     }
     if (!pathname.startsWith("/v1/")) {
       return json(404, { error: { code: "not_found", message: "not found" } });

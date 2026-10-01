@@ -87,11 +87,14 @@ func (s *Service) Hangup(ctx context.Context, userID, id uuid.UUID) (*models.Cal
 	if err != nil {
 		return nil, err
 	}
+	if call.Status != "ringing" && call.Status != "active" {
+		return call, nil
+	}
 	status := "ended"
 	if call.Status == "ringing" {
 		status = "missed"
 	}
-	_, err = s.pool.Exec(ctx, `UPDATE calls SET status=$2, ended_at=now() WHERE id=$1`, id, status)
+	_, err = s.pool.Exec(ctx, `UPDATE calls SET status=$2, ended_at=now() WHERE id=$1 AND status IN ('ringing','active')`, id, status)
 	if err != nil {
 		return nil, err
 	}
@@ -110,7 +113,18 @@ func (s *Service) transit(ctx context.Context, userID, id uuid.UUID, event, stat
 	if err != nil {
 		return nil, err
 	}
-	q := fmt.Sprintf(`UPDATE calls SET status=$2, %s=now() WHERE id=$1`, tsCol)
+	// A group member joining a call that is already live just gets it back.
+	if event == "join" && call.Status == "active" {
+		return call, nil
+	}
+	// Answer/reject only a ringing call, and not one you started yourself.
+	if call.Status != "ringing" {
+		return nil, fmt.Errorf("%w: call is %s", httpx.ErrConflict, call.Status)
+	}
+	if call.InitiatorID == userID {
+		return nil, fmt.Errorf("%w: caller cannot %s", httpx.ErrForbidden, event)
+	}
+	q := fmt.Sprintf(`UPDATE calls SET status=$2, %s=now() WHERE id=$1 AND status='ringing'`, tsCol)
 	if _, err := s.pool.Exec(ctx, q, id, status); err != nil {
 		return nil, err
 	}

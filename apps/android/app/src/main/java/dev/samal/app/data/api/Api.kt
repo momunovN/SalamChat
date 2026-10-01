@@ -52,7 +52,15 @@ class SamalApi(
         return Session.from(post("/v1/auth/otp/verify", payload, false))
     }
 
-    fun refresh(): Boolean {
+    /**
+     * Several threads can get 401 at once. They queue on the lock; whoever comes second sees the
+     * access token already replaced and just retries with it, instead of failing the request or
+     * spending the rotated refresh token a second time.
+     */
+    @Synchronized
+    fun refresh(used: String? = token): Boolean {
+        val now = token
+        if (now != null && now != used) return true
         val current = refreshToken ?: return false
         if (!refreshing.compareAndSet(false, true)) return false
         return try {
@@ -254,11 +262,12 @@ class SamalApi(
         client: OkHttpClient = http,
     ): JSONObject {
         val builder = make()
-        if (authed) token?.let { builder.header("Authorization", "Bearer $it") }
+        val used = if (authed) token else null
+        if (authed) used?.let { builder.header("Authorization", "Bearer $it") }
         builder.header("Accept", "application/json")
         client.newCall(builder.build()).execute().use { resp ->
             val text = resp.body?.string().orEmpty()
-            if (resp.code == 401 && authed && retry && refresh()) {
+            if (resp.code == 401 && authed && retry && refresh(used)) {
                 return exec(make, authed, retry = false, client = client)
             }
             if (!resp.isSuccessful) error(apiError(resp.code, text))

@@ -39,7 +39,7 @@ final class SessionStore: ObservableObject {
         api.onUnauthorized = { [weak self] in
             Task { @MainActor in self?.logout() }
         }
-        if let data = UserDefaults.standard.data(forKey: "samal.session"),
+        if let data = Self.loadSessionData(),
            let sess = try? JSONDecoder().decode(APISession.self, from: data) {
             apply(sess)
         }
@@ -47,6 +47,17 @@ final class SessionStore: ObservableObject {
             guard let id = note.object as? String else { return }
             Task { @MainActor in self?.pendingChatID = id }
         }
+    }
+
+    private static let sessionKey = "samal.session"
+
+    /// Keychain first; a session saved by an older build in UserDefaults is moved over once.
+    private static func loadSessionData() -> Data? {
+        if let data = SecureStore.data(sessionKey) { return data }
+        guard let legacy = UserDefaults.standard.data(forKey: sessionKey) else { return nil }
+        SecureStore.set(legacy, for: sessionKey)
+        UserDefaults.standard.removeObject(forKey: sessionKey)
+        return legacy
     }
 
     func setLanguage(_ code: String) {
@@ -65,7 +76,7 @@ final class SessionStore: ObservableObject {
         api.accessToken = sess.accessToken
         api.refreshToken = sess.refreshToken
         if let data = try? JSONEncoder().encode(sess) {
-            UserDefaults.standard.set(data, forKey: "samal.session")
+            SecureStore.set(data, for: Self.sessionKey)
         }
     }
 
@@ -79,9 +90,12 @@ final class SessionStore: ObservableObject {
     func logout() {
         user = nil
         api.accessToken = nil
-        UserDefaults.standard.removeObject(forKey: "samal.session")
+        api.refreshToken = nil
+        SecureStore.remove(Self.sessionKey)
+        UserDefaults.standard.removeObject(forKey: Self.sessionKey)
         outboxTask?.cancel()
         ws?.stop()
+        ws = nil
     }
 
     func login(email: String, phone: String, code: String) async throws {
@@ -91,7 +105,7 @@ final class SessionStore: ObservableObject {
 
     func updateUser(_ user: APIUser) {
         self.user = user
-        if let data = UserDefaults.standard.data(forKey: "samal.session"),
+        if let data = Self.loadSessionData(),
            var sess = try? JSONDecoder().decode(APISession.self, from: data) {
             sess.user = user
             apply(sess)
@@ -119,12 +133,24 @@ final class SessionStore: ObservableObject {
             }
         }
         ws?.stop()
-        if let token = api.accessToken {
-            let root = api.baseURL.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-            let wsRoot = root
-                .replacingOccurrences(of: "https://", with: "wss://")
-                .replacingOccurrences(of: "http://", with: "ws://")
-            let client = RealtimeClient(url: URL(string: "\(wsRoot)/v1/ws?token=\(token)")!)
+        ws = nil
+        if api.accessToken != nil {
+            let api = self.api
+            let client = RealtimeClient { [weak api] in
+                guard let api, let token = api.accessToken else { return nil }
+                let root = api.baseURL.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+                let wsRoot = root
+                    .replacingOccurrences(of: "https://", with: "wss://")
+                    .replacingOccurrences(of: "http://", with: "ws://")
+                let encoded = token.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? token
+                return URL(string: "\(wsRoot)/v1/ws?token=\(encoded)")
+            }
+            client.onFailure = { [weak self] failures in
+                // The handshake fails with 401 once the 30-minute access token expires.
+                // Any authed REST call refreshes it; the next reconnect then uses the new one.
+                guard failures == 1 || failures % 4 == 0 else { return }
+                Task { @MainActor in _ = try? await self?.api.chats() }
+            }
             client.onEvent = { [weak self] type, body in
                 Task { @MainActor in
                     self?.handle(type: type, body: body)

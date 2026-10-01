@@ -55,7 +55,9 @@ func (s *Service) RequestOTP(ctx context.Context, phone string) (devCode string,
 	if err := s.sms.SendOTP(ctx, phone, code); err != nil {
 		return "", err
 	}
-	if s.cfg.OTPDev {
+	// The code goes back in the response only when no real SMS was sent (stub).
+	// With a live provider, returning it would let anyone log in to any number.
+	if _, stub := s.sms.(sms.Stub); stub && s.cfg.OTPDev {
 		return code, nil
 	}
 	return "", nil
@@ -104,6 +106,14 @@ func (s *Service) VerifyOTP(ctx context.Context, phone, code string, dev DeviceI
 		_, _ = s.pool.Exec(ctx, `UPDATE otp_challenges SET attempts=attempts+1 WHERE id=$1`, chID)
 		return nil, fmt.Errorf("%w: wrong code", httpx.ErrBadRequest)
 	}
+	// Consume first and atomically: two parallel verifies with one code must not both win.
+	tag, err := s.pool.Exec(ctx, `UPDATE otp_challenges SET consumed_at=now() WHERE id=$1 AND consumed_at IS NULL`, chID)
+	if err != nil {
+		return nil, err
+	}
+	if tag.RowsAffected() == 0 {
+		return nil, fmt.Errorf("%w: no otp", httpx.ErrBadRequest)
+	}
 
 	var user models.User
 	err = s.pool.QueryRow(ctx, `SELECT id, phone, display_name, username, avatar_url, bio, created_at, updated_at, last_seen_at FROM users WHERE phone=$1`, phone).
@@ -133,10 +143,6 @@ func (s *Service) VerifyOTP(ctx context.Context, phone, code string, dev DeviceI
 		INSERT INTO devices (id, user_id, platform, device_name, push_token, refresh_token_hash)
 		VALUES ($1,$2,$3,$4,NULLIF($5,''),$6)`,
 		deviceID, user.ID, dev.Platform, dev.DeviceName, dev.PushToken, refreshHash)
-	if err != nil {
-		return nil, err
-	}
-	_, err = s.pool.Exec(ctx, `UPDATE otp_challenges SET consumed_at=now() WHERE id=$1`, chID)
 	if err != nil {
 		return nil, err
 	}
