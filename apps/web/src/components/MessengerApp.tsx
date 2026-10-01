@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import { flushSync } from "react-dom";
 import {
   Check,
@@ -19,7 +20,7 @@ import {
 import { api, loadSession, saveSession } from "@/lib/api";
 import { dedupeChats, dedupeMessages, forgetChat, mergeChats, mergeThread, readActive, readRoster, readThread, writeActive, writeRoster, writeThread } from "@/lib/cache";
 import { captureAudio, captureVideo, forgetMedia, mediaRemembered, rememberMedia, stopCallMedia, warmCallConnection, type CallMedia } from "@/lib/callMedia";
-import { lastPreview } from "@/lib/chat";
+import { lastPreview, nickFromPath, pathForChat } from "@/lib/chat";
 import { dict, type Lang } from "@/lib/i18n";
 import { needsDisplayName, sanitizeDisplayName, sanitizeUsername } from "@/lib/name";
 import {
@@ -57,6 +58,8 @@ function fmtTime(iso: string) {
 }
 
 export function MessengerApp() {
+  const pathname = usePathname() || "/";
+  const router = useRouter();
   const [session, setSession] = useState<Session | null>(null);
   const [ready, setReady] = useState(false);
   const [lang, setLang] = useState<Lang>("ru");
@@ -118,6 +121,14 @@ export function MessengerApp() {
   const paintRef = useRef<(chatId: string, patch: (chat: Chat) => Chat) => void>(() => undefined);
   const errorTimer = useRef<number | null>(null);
   const chatsRef = useRef(chats);
+  const routerRef = useRef(router);
+  routerRef.current = router;
+  const pendingUrl = useRef<string | null>(null);
+  const bootRef = useRef(true);
+  const nickFlight = useRef<string | null>(null);
+  const activeChatRef = useRef<Chat | null>(null);
+  const showChatRef = useRef<(chat: Chat) => void>(() => undefined);
+  const selectChatRef = useRef<(id: string, known?: Chat) => void>(() => undefined);
 
   const active = chats.find((c) => c.id === activeId) || null;
   const me = session?.user.id;
@@ -140,10 +151,22 @@ export function MessengerApp() {
         setBio(s.user.bio || "");
         const roster = readRoster(s.user.id);
         if (roster.length) setChats(roster);
-        const open = readActive(s.user.id);
-        if (open && roster.some((chat) => chat.id === open)) {
-          setActiveId(open);
-          setMessages(readThread(s.user.id, open));
+        const fromUrl = nickFromPath(window.location.pathname);
+        const linked = fromUrl
+          ? roster.find((chat) => chat.type !== "group" && (chat.peer?.username || "").toLowerCase() === fromUrl)
+          : undefined;
+        if (linked) {
+          activeChatRef.current = linked;
+          setActiveId(linked.id);
+          setMessages(readThread(s.user.id, linked.id));
+        } else if (!fromUrl) {
+          const open = readActive(s.user.id);
+          const saved = open ? roster.find((chat) => chat.id === open) : undefined;
+          if (saved) {
+            activeChatRef.current = saved;
+            setActiveId(saved.id);
+            setMessages(readThread(s.user.id, saved.id));
+          }
         }
       }
       if (stored === "ru" || stored === "ky") setLang(stored);
@@ -229,7 +252,12 @@ export function MessengerApp() {
       setSession(null);
       setChats([]);
       setMessages([]);
+      activeChatRef.current = null;
       setActiveId(null);
+      if ((window.location.pathname || "/") !== "/") {
+        pendingUrl.current = "/";
+        routerRef.current.replace("/");
+      }
     };
     window.addEventListener("tooapp:auth-lost", onLost);
     return () => window.removeEventListener("tooapp:auth-lost", onLost);
@@ -751,8 +779,10 @@ export function MessengerApp() {
       if (activeIdRef.current && unique.includes(activeIdRef.current)) writeActive(userId, null);
     }
     if (activeIdRef.current && unique.includes(activeIdRef.current)) {
+      activeChatRef.current = null;
       setActiveId(null);
       setMessages([]);
+      publishUrl("/", "push");
     }
     void Promise.allSettled(unique.map((id) => api.hideChat(id))).then((results) => {
       const failed = unique.filter((_, index) => results[index].status === "rejected");
@@ -762,7 +792,24 @@ export function MessengerApp() {
     });
   }
 
-  function selectChat(id: string) {
+  function publishUrl(want: string, mode: "push" | "replace") {
+    const now = window.location.pathname || "/";
+    if (now === want) return;
+    pendingUrl.current = want;
+    const nav = { scroll: false } as const;
+    if (mode === "push") router.push(want, nav);
+    else router.replace(want, nav);
+  }
+
+  function leaveChat() {
+    activeChatRef.current = null;
+    setActiveId(null);
+    publishUrl("/", "push");
+  }
+
+  function selectChat(id: string, known?: Chat) {
+    const chat = known || chatsRef.current.find((item) => item.id === id) || pinnedChats.current.get(id) || null;
+    if (chat) activeChatRef.current = chat;
     if (id !== activeId) {
       fetchedThread.current = "";
       const userId = meRef.current;
@@ -771,15 +818,16 @@ export function MessengerApp() {
     }
     setActiveId(id);
     if (meRef.current) writeActive(meRef.current, id);
-    paintChat(id, (chat) => ({ ...chat, unread_count: 0 }));
+    paintChat(id, (item) => ({ ...item, unread_count: 0 }));
     setTab("chats");
+    publishUrl(pathForChat(chat), "push");
   }
 
   async function openDirect(userId: string) {
     try {
       const chat = await api.direct(userId);
       showChat(chat);
-      selectChat(chat.id);
+      selectChat(chat.id, chat);
       setNewOpen(null);
     } catch {
       /* the picker stays open */
@@ -793,7 +841,7 @@ export function MessengerApp() {
     try {
       const chat = await api.group(title, picked);
       showChat(chat);
-      selectChat(chat.id);
+      selectChat(chat.id, chat);
       setNewOpen(null);
       setGroupTitle("");
       setPicked([]);
@@ -838,7 +886,9 @@ export function MessengerApp() {
     setSession(null);
     setChats([]);
     setMessages([]);
+    activeChatRef.current = null;
     setActiveId(null);
+    publishUrl("/", "replace");
   }
 
   async function saveProfile() {
@@ -862,6 +912,105 @@ export function MessengerApp() {
       setProfileError(/username taken|conflict/i.test(msg) ? t.errNickTaken : t.errLogin);
     }
   }
+
+  showChatRef.current = showChat;
+  selectChatRef.current = selectChat;
+
+  useEffect(() => {
+    if (!activeId) return;
+    const fresh = chats.find((chat) => chat.id === activeId);
+    if (!fresh) return;
+    activeChatRef.current = fresh;
+    if (!ready || !session || bootRef.current || pendingUrl.current || nickFlight.current) return;
+    const want = pathForChat(fresh);
+    if ((window.location.pathname || "/") !== want) {
+      pendingUrl.current = want;
+      router.replace(want, { scroll: false });
+    }
+  }, [chats, activeId, ready, session, router]);
+
+  useEffect(() => {
+    if (!ready || !session) return;
+    if (pendingUrl.current) {
+      if ((pathname || "/") === pendingUrl.current) pendingUrl.current = null;
+      bootRef.current = false;
+      return;
+    }
+    const nick = nickFromPath(pathname);
+    if (!nick && pathname.startsWith("/cont/")) {
+      pendingUrl.current = "/";
+      routerRef.current.replace("/", { scroll: false });
+      return;
+    }
+    const isBoot = bootRef.current;
+    bootRef.current = false;
+    let cancel = false;
+    let settled = false;
+    const timer = window.setTimeout(() => {
+      settled = true;
+    }, 0);
+    const cancelled = () => cancel;
+
+    async function openNick(name: string) {
+      const flight = `${name}:${Date.now()}`;
+      if (nickFlight.current?.startsWith(`${name}:`)) return;
+      nickFlight.current = flight;
+      try {
+        const have =
+          chatsRef.current.find((chat) => chat.type !== "group" && (chat.peer?.username || "").toLowerCase() === name) ||
+          [...pinnedChats.current.values()].find((chat) => chat.type !== "group" && (chat.peer?.username || "").toLowerCase() === name);
+        let chat = have;
+        if (!chat) {
+          const found = await api.users(name);
+          if (cancelled() || nickFlight.current !== flight) return;
+          const user = found.items.find((item) => (item.username || "").toLowerCase() === name);
+          if (!user) {
+            pendingUrl.current = "/";
+            routerRef.current.replace("/", { scroll: false });
+            return;
+          }
+          chat = await api.direct(user.id);
+          if (cancelled() || nickFlight.current !== flight) return;
+        }
+        if (cancelled() || nickFlight.current !== flight || !chat) return;
+        showChatRef.current(chat);
+        selectChatRef.current(chat.id, chat);
+      } catch {
+        if (!cancelled() && nickFlight.current === flight) {
+          pendingUrl.current = "/";
+          routerRef.current.replace("/", { scroll: false });
+        }
+      } finally {
+        if (nickFlight.current === flight) nickFlight.current = null;
+      }
+    }
+
+    if (isBoot) {
+      if (nick && (activeChatRef.current?.peer?.username || "").toLowerCase() !== nick) void openNick(nick);
+      else {
+        const chat = activeChatRef.current;
+        const want = pathForChat(chat);
+        if (chat && chat.id === activeIdRef.current && want !== (pathname || "/")) {
+          pendingUrl.current = want;
+          routerRef.current.replace(want, { scroll: false });
+        }
+      }
+    } else if (!nick) {
+      if (activeIdRef.current) {
+        activeChatRef.current = null;
+        setActiveId(null);
+      }
+    } else if ((activeChatRef.current?.peer?.username || "").toLowerCase() !== nick) {
+      void openNick(nick);
+    }
+
+    return () => {
+      cancel = true;
+      window.clearTimeout(timer);
+      nickFlight.current = null;
+      if (isBoot && !settled) bootRef.current = true;
+    };
+  }, [pathname, ready, session]);
 
   const isTyping = !!(activeId && (typing[activeId] || 0) > typingNow);
 
@@ -912,7 +1061,7 @@ export function MessengerApp() {
       type="button"
       onClick={() => {
         setTab(id);
-        if (id !== "chats") setActiveId(null);
+        if (id !== "chats") leaveChat();
       }}
       className={`flex flex-col items-center gap-1 rounded-xl px-2 py-2 text-[10px] font-medium transition-colors ${
         tab === id ? "text-accent" : "text-muted hover:text-ink"
@@ -1230,7 +1379,7 @@ export function MessengerApp() {
       setCursor={setCursor}
       isTyping={isTyping}
       rosterTick={rosterTick}
-      onBack={() => setActiveId(null)}
+      onBack={() => leaveChat()}
       onRefreshChats={() => void refreshChats()}
       onOpenDirect={(userId) => void openDirect(userId)}
       onCall={(kind) => void beginCall(active.id, kind)}

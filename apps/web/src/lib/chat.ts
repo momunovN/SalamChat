@@ -1,5 +1,25 @@
 import type { Dict, Lang } from "./i18n";
-import type { Message } from "./types";
+import { sanitizeUsername } from "./name";
+import type { Chat, Message } from "./types";
+
+export function nickFromPath(path: string): string | null {
+  const clean = path.split("?")[0].split("#")[0];
+  const match = /^\/cont\/([^/]+)\/?$/.exec(clean);
+  if (!match) return null;
+  let raw = match[1];
+  try {
+    raw = decodeURIComponent(raw);
+  } catch {
+    return null;
+  }
+  return sanitizeUsername(raw) || null;
+}
+
+export function pathForChat(chat: Chat | null | undefined): string {
+  if (!chat || chat.type === "group") return "/";
+  const nick = sanitizeUsername(chat.peer?.username || "");
+  return nick ? `/cont/${nick}` : "/";
+}
 
 export function payloadText(payload: unknown): string {
   if (payload == null) return "";
