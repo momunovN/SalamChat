@@ -89,6 +89,7 @@ enum L10n {
     static var file: String { t("media.file") }
     static var geo: String { t("media.geo") }
     static var mediaFail: String { t("media.fail") }
+    static var sealed: String { t("media.sealed") }
 
     static var code: String {
         UserDefaults.standard.string(forKey: "samal.lang")

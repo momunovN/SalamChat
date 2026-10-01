@@ -44,6 +44,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.DoneAll
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Videocam
@@ -206,7 +207,11 @@ fun ChatScreen(
             Column(
                 Modifier.padding(start = 8.dp).weight(1f).clickable(enabled = current.type == "group") { members = true },
             ) {
-                Text(current.title, color = Text, maxLines = 1)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Lock, stringResource(R.string.sealed), tint = Muted, modifier = Modifier.size(12.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text(current.title, color = Text, maxLines = 1)
+                }
                 val sub = when {
                     typing -> stringResource(R.string.typing)
                     current.peerOnline -> stringResource(R.string.online)
@@ -662,7 +667,7 @@ private suspend fun sendPayload(
     dao.noteMessage(chatId, previewText(type, text, false), now, 0)
 }
 
-private suspend fun enqueueFile(ctx: Context, dao: SamalDao, chatId: String, me: String, uri: Uri, reply: MessageEntity?) {
+private suspend fun enqueueFile(ctx: Context, dao: SamalDao, chatId: String, me: String, uri: Uri, reply: MessageEntity?) = withContext(Dispatchers.IO) {
     val mime = ctx.contentResolver.getType(uri) ?: "application/octet-stream"
     val name = ctx.contentResolver.query(uri, null, null, null, null)?.use { c ->
         val i = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)

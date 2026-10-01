@@ -9,6 +9,7 @@ import {
   CheckCheck,
   Copy,
   CornerUpLeft,
+  Lock,
   Mic,
   Paperclip,
   Pencil,
@@ -469,15 +470,16 @@ export function ChatPane({
   async function sendFile(file: File, kind: "photo" | "file") {
     setAttach(false);
     const clientId = crypto.randomUUID();
-    const localUrl = URL.createObjectURL(file);
-    const mime = file.type || "application/octet-stream";
+    const prepared = await shrinkPhoto(file);
+    const localUrl = URL.createObjectURL(prepared);
+    const mime = prepared.type || "application/octet-stream";
     const optimistic: Message = {
       id: clientId,
       chat_id: chat.id,
       author_id: me,
       author_name: t.you,
       type: kind,
-      payload: kind === "photo" || !file.name ? {} : { caption: file.name },
+      payload: kind === "photo" || !prepared.name ? {} : { caption: prepared.name },
       client_id: clientId,
       created_at: new Date().toISOString(),
       status: "sending",
@@ -489,7 +491,7 @@ export function ChatPane({
           kind: mime.startsWith("image/") ? "photo" : mime.startsWith("video/") ? "video" : kind,
           url: localUrl,
           mime,
-          filename: file.name,
+          filename: prepared.name,
         },
       ],
     };
@@ -499,12 +501,12 @@ export function ChatPane({
     setMessages((prev) => [...prev, optimistic]);
     onLocal(optimistic);
     try {
-      const uploadId = await api.upload(file, kind);
+      const uploadId = await api.upload(prepared, kind);
       const msg = await api.send(
         chat.id,
         clientId,
         kind,
-        kind === "photo" || !file.name ? {} : { caption: file.name },
+        kind === "photo" || !prepared.name ? {} : { caption: prepared.name },
         [uploadId],
         quoted?.id,
       );
@@ -566,7 +568,10 @@ export function ChatPane({
         >
           <Avatar name={chat.title} src={chat.avatar_url} size={36} online={chat.peer?.online} />
           <div className="min-w-0 flex-1">
-            <p className="truncate text-[17px] font-semibold text-ink">{chat.title}</p>
+            <p className="flex min-w-0 items-center gap-1 truncate text-[17px] font-semibold text-ink">
+              <Lock size={12} className="shrink-0 text-muted" aria-label={t.sealed} />
+              <span className="truncate">{chat.title}</span>
+            </p>
             <p className={`text-[12px] font-medium ${subColor}`}>{subtitle}</p>
           </div>
         </button>
@@ -1194,6 +1199,33 @@ function TextBody({ url, failLabel }: { url: string; failLabel: string }) {
   if (fail) return <p className="text-sm text-white">{failLabel}</p>;
   if (text == null) return null;
   return <pre className="h-full w-full overflow-auto whitespace-pre-wrap text-sm text-white">{text}</pre>;
+}
+
+async function shrinkPhoto(file: File) {
+  if (!file.type.startsWith("image/") || file.type === "image/gif" || file.size < 250_000) return file;
+  try {
+    const bmp = await createImageBitmap(file);
+    const max = 1600;
+    const scale = Math.min(1, max / Math.max(bmp.width, bmp.height));
+    const w = Math.max(1, Math.round(bmp.width * scale));
+    const h = Math.max(1, Math.round(bmp.height * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      bmp.close();
+      return file;
+    }
+    ctx.drawImage(bmp, 0, 0, w, h);
+    bmp.close();
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.82));
+    if (!blob || blob.size >= file.size) return file;
+    const base = file.name.replace(/\.\w+$/, "") || "photo";
+    return new File([blob], `${base}.jpg`, { type: "image/jpeg" });
+  } catch {
+    return file;
+  }
 }
 
 function voiceFile(blob: Blob) {

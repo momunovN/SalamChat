@@ -144,6 +144,7 @@ const ru = {
   voiceFail: "Не отправилось",
   openFile: "Открыть",
   previewFail: "Не открылось",
+  sealed: "Зашифровано",
 };
 
 const ky: typeof ru = {
@@ -290,6 +291,7 @@ const ky: typeof ru = {
   voiceFail: "Жөнөтүлгөн жок",
   openFile: "Ачуу",
   previewFail: "Ачылган жок",
+  sealed: "Шифрленген",
 };
 
 export const dict = { ru, ky };

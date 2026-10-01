@@ -331,7 +331,13 @@ struct ChatView: View {
                     .frame(width: 36, height: 36)
             }
             VStack(alignment: .leading, spacing: 2) {
-                Text(vm.chat.title).font(SamalFont.headline()).foregroundStyle(SamalColor.text)
+                HStack(spacing: 4) {
+                    Image(systemName: "lock.fill")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(SamalColor.muted)
+                        .accessibilityLabel(L10n.sealed)
+                    Text(vm.chat.title).font(SamalFont.headline()).foregroundStyle(SamalColor.text).lineLimit(1)
+                }
                 if session.typingChatID?.lowercased() == vm.chat.id.lowercased() {
                     Text(L10n.typing).font(SamalFont.caption()).foregroundStyle(SamalColor.success)
                 } else if vm.chat.type == "direct",

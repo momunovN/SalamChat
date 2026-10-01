@@ -22,6 +22,7 @@ import {
   type Message,
   type ReplyPreview,
 } from "./chats";
+import { openPayload, sealPayload } from "./seal";
 
 type MsgRow = {
   id: string;
@@ -46,7 +47,7 @@ function mapMsg(r: MsgRow): Message {
     author_id: r.author_id,
     author_name: r.author_name || undefined,
     type: r.type,
-    payload: parsePayload(r.payload),
+    payload: openPayload(parsePayload(r.payload)),
     client_id: r.client_id,
     reply_to_id: r.reply_to_id,
     created_at: iso(r.created_at) || new Date().toISOString(),
@@ -86,17 +87,23 @@ async function attachReplies(items: Message[]) {
   }
 }
 
-async function statusFor(messageId: string) {
-  const row = await queryOne<{ delivered: string; read: string }>(
-    `SELECT
-      COALESCE(sum(CASE WHEN status IN ('delivered','read') THEN 1 ELSE 0 END),0)::text AS delivered,
-      COALESCE(sum(CASE WHEN status = 'read' THEN 1 ELSE 0 END),0)::text AS read
-     FROM receipts WHERE message_id=$1`,
-    [messageId],
+async function statusesFor(ids: string[]) {
+  const map = new Map<string, string>();
+  for (const id of ids) map.set(id, "sent");
+  if (ids.length === 0) return map;
+  const rows = await query<{ message_id: string; delivered: string; read: string }>(
+    `SELECT message_id::text AS message_id,
+       COALESCE(sum(CASE WHEN status IN ('delivered','read') THEN 1 ELSE 0 END),0)::text AS delivered,
+       COALESCE(sum(CASE WHEN status = 'read' THEN 1 ELSE 0 END),0)::text AS read
+     FROM receipts
+     WHERE message_id = ANY($1::uuid[])
+     GROUP BY message_id`,
+    [ids],
   );
-  if (Number(row?.read || 0) > 0) return "read";
-  if (Number(row?.delivered || 0) > 0) return "delivered";
-  return "sent";
+  for (const row of rows) {
+    map.set(row.message_id, Number(row.read) > 0 ? "read" : Number(row.delivered) > 0 ? "delivered" : "sent");
+  }
+  return map;
 }
 
 async function attachmentsFor(ids: string[], req?: Request) {
@@ -114,9 +121,14 @@ async function attachmentsFor(ids: string[], req?: Request) {
     duration_ms: number | null;
     waveform: unknown;
     filename: string | null;
+    sealed: boolean;
+    upload_id: string | null;
   }>(
-    `SELECT id, message_id, kind, object_key, mime, size_bytes, width, height, duration_ms, waveform, filename
-     FROM attachments WHERE message_id = ANY($1::uuid[])`,
+    `SELECT a.id, a.message_id, a.kind, a.object_key, a.mime, a.size_bytes, a.width, a.height, a.duration_ms, a.waveform, a.filename,
+            COALESCE(u.sealed, false) AS sealed, u.id AS upload_id
+     FROM attachments a
+     LEFT JOIN uploads u ON u.object_key = a.object_key
+     WHERE a.message_id = ANY($1::uuid[])`,
     [ids],
   );
   const base = publicBase(req);
@@ -125,7 +137,12 @@ async function attachmentsFor(ids: string[], req?: Request) {
       id: a.id,
       kind: a.kind,
       object_key: a.object_key,
-      url: /^https?:\/\//i.test(a.object_key) ? a.object_key : `${base}/media/${a.object_key}`,
+      url:
+        a.sealed && a.upload_id
+          ? `${base}/media/id/${a.upload_id}`
+          : /^https?:\/\//i.test(a.object_key)
+            ? a.object_key
+            : `${base}/media/${a.object_key}`,
       mime: a.mime,
       size_bytes: Number(a.size_bytes || 0),
       width: a.width,
@@ -232,9 +249,10 @@ export async function listMessages(
     items.map((m) => m.id).filter((id) => pgIds.has(id)),
     req,
   );
+  const statuses = await statusesFor(items.filter((m) => m.author_id === userId && pgIds.has(m.id)).map((m) => m.id));
   for (const m of items) {
     if (!m.attachments?.length) m.attachments = atts.get(m.id) || [];
-    if (m.author_id === userId && pgIds.has(m.id)) m.status = await statusFor(m.id);
+    if (m.author_id === userId && pgIds.has(m.id)) m.status = statuses.get(m.id) || "sent";
     else if (m.author_id === userId && !m.status) m.status = "sent";
   }
   await attachReplies(items);
@@ -344,7 +362,7 @@ async function sendMessagePg(
     const msg = mapMsg(existing);
     const atts = await attachmentsFor([msg.id], req);
     msg.attachments = atts.get(msg.id) || [];
-    msg.status = await statusFor(msg.id);
+    msg.status = (await statusesFor([msg.id])).get(msg.id) || "sent";
     if (msg.chat_id === chatId) fanoutNew(chatId, await memberIds(chatId), msg);
     return msg;
   }
@@ -357,7 +375,7 @@ async function sendMessagePg(
        VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7)
        ON CONFLICT (client_id) DO NOTHING
        RETURNING id`,
-      [id, chatId, userId, type, JSON.stringify(payload), input.client_id, input.reply_to_id || null],
+      [id, chatId, userId, type, JSON.stringify(sealPayload(payload)), input.client_id, input.reply_to_id || null],
     );
     if (!inserted[0]?.id) {
       const again = await queryOne<MsgRow>(
@@ -371,7 +389,7 @@ async function sendMessagePg(
       const dup = mapMsg(again);
       const atts = await attachmentsFor([dup.id], req);
       dup.attachments = atts.get(dup.id) || [];
-      dup.status = await statusFor(dup.id);
+      dup.status = (await statusesFor([dup.id])).get(dup.id) || "sent";
       if (dup.chat_id === chatId) fanoutNew(chatId, await memberIds(chatId), dup);
       return dup;
     }
@@ -391,7 +409,7 @@ async function sendMessagePg(
         const dup = mapMsg(again);
         const atts = await attachmentsFor([dup.id], req);
         dup.attachments = atts.get(dup.id) || [];
-        dup.status = await statusFor(dup.id);
+        dup.status = (await statusesFor([dup.id])).get(dup.id) || "sent";
         if (dup.chat_id === chatId) fanoutNew(chatId, await memberIds(chatId), dup);
         return dup;
       }
@@ -449,7 +467,7 @@ export async function editMessage(userId: string, id: string, text: string, req?
   if (row.type !== "text") throw new HttpError(400, "bad_request", "only text");
   const next = String(text || "").trim();
   if (!next || [...next].length > 4096) throw new HttpError(400, "bad_request", "text length");
-  const payload = { ...parsePayload(row.payload), text: next };
+  const payload = sealPayload({ ...openPayload(parsePayload(row.payload)), text: next });
   await query(`UPDATE messages SET payload=$2::jsonb, edited_at=now() WHERE id=$1`, [id, JSON.stringify(payload)]);
   const msg = await getMessage(userId, id, req);
   await rewriteHot(row.chat_id, msg.id, JSON.stringify(msg), false).catch(() => undefined);
@@ -584,7 +602,7 @@ onPersist(async (job) => {
     `INSERT INTO messages (id, chat_id, author_id, type, payload, client_id, reply_to_id, created_at)
      VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8)
      ON CONFLICT (client_id) DO NOTHING`,
-    [job.id, job.chatId, job.userId, job.type, JSON.stringify(payload), job.clientId, replyTo, createdAt],
+    [job.id, job.chatId, job.userId, job.type, JSON.stringify(sealPayload(payload)), job.clientId, replyTo, createdAt],
   );
   const row = await queryOne<{ id: string }>(`SELECT id FROM messages WHERE client_id=$1`, [job.clientId]);
   if (!row) throw new Error("message missing after insert");
@@ -592,7 +610,7 @@ onPersist(async (job) => {
   if (hot?.edited_at) {
     await query(`UPDATE messages SET payload=$2::jsonb, edited_at=$3 WHERE id=$1`, [
       realId,
-      JSON.stringify(parsePayload(hot.payload)),
+      JSON.stringify(sealPayload(openPayload(parsePayload(hot.payload)))),
       hot.edited_at,
     ]);
   }

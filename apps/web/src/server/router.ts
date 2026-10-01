@@ -34,7 +34,8 @@ import { bearer, corsHeaders, errorResponse, HttpError, json, readJSON } from ".
 import { deleteMessage, editMessage, listMessages, receipts, sendMessage } from "./messages";
 import { listContacts, syncContacts } from "./contacts";
 import { getUserPublic, lookupPhones, searchUsers } from "./users";
-import { completeUpload, createIntent, mediaType, putUpload, readMedia } from "./uploads";
+import { completeUpload, createIntent, mediaType, putUpload, readMedia, readSealedUpload } from "./uploads";
+import { openBytes } from "./seal";
 import { sseResponse } from "./stream";
 import { markTyping, valkeyReady } from "./valkey";
 
@@ -96,6 +97,18 @@ export async function handleRequest(req: Request): Promise<Response> {
     if (pathname === "/healthz") {
       return json(200, { ok: true, name: "tooapp", valkey: valkeyReady() ? "up" : "down" });
     }
+    if (pathname.startsWith("/media/id/")) {
+      const id = decodeURIComponent(pathname.slice("/media/id/".length)).split("/")[0];
+      const opened = await readSealedUpload(id);
+      return new Response(new Uint8Array(opened.buf), {
+        headers: {
+          "Content-Type": opened.mime,
+          "Content-Length": String(opened.buf.length),
+          "Cache-Control": "private, max-age=86400",
+          "Access-Control-Allow-Origin": "*",
+        },
+      });
+    }
     if (pathname.startsWith("/media/")) {
       let key = pathname.slice("/media/".length);
       try {
@@ -103,7 +116,7 @@ export async function handleRequest(req: Request): Promise<Response> {
       } catch {
         throw new HttpError(400, "bad_request", "bad key");
       }
-      const buf = await readMedia(key);
+      const buf = openBytes(await readMedia(key));
       const type = await mediaType(key);
       return new Response(new Uint8Array(buf), {
         headers: {

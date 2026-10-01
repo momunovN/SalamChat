@@ -3,6 +3,7 @@ import { presence } from "./hub";
 import { HttpError, iso } from "./http";
 import { bustMembers, hotTailMap, rememberMembers } from "./valkey";
 import { mapUser, type User, type UserRow } from "./auth";
+import { openPayload } from "./seal";
 
 export type ReplyPreview = {
   id: string;
@@ -149,7 +150,7 @@ function mapChat(r: ChatRow): Chat {
       author_id: r.lm_author_id,
       author_name: r.lm_author_name || undefined,
       type: r.lm_type,
-      payload: parsePayload(r.lm_payload),
+      payload: openPayload(parsePayload(r.lm_payload)),
       client_id: r.lm_client_id || "",
       reply_to_id: r.lm_reply_to_id,
       created_at: iso(r.lm_created_at) || new Date().toISOString(),

@@ -84,3 +84,4 @@
 "media.file" = "Файл";
 "media.geo" = "Гео";
 "media.fail" = "Не открылось";
+"media.sealed" = "Зашифровано";

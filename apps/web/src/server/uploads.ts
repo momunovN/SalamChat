@@ -4,6 +4,7 @@ import path from "path";
 import { query, queryOne } from "./db";
 import { envFirst, publicBase } from "./env";
 import { HttpError } from "./http";
+import { openBytes, sealBytes } from "./seal";
 
 const MAX_BYTES = 20 * 1024 * 1024;
 const CHUNK = 12 * 1024;
@@ -64,23 +65,24 @@ export async function putUpload(userId: string, id: string, req: Request) {
   const buf = Buffer.from(await req.arrayBuffer());
   if (buf.length === 0) throw new HttpError(400, "bad_request", "empty upload");
   if (buf.length > MAX_BYTES) throw new HttpError(413, "too_large", "file too large");
-  const remote = await storeRemote(buf, row.mime, row.kind, row.object_key.split("/").pop() || "file");
+  const sealed = sealBytes(buf);
+  const remote = await storeRemote(sealed, "application/octet-stream", "file", `${row.object_key.split("/").pop() || "file"}.bin`);
   if (remote) {
     await query(
-      `UPDATE uploads SET object_key=$2, status='ready', size_bytes=$3, completed_at=now() WHERE id=$1`,
+      `UPDATE uploads SET object_key=$2, status='ready', size_bytes=$3, sealed=true, completed_at=now() WHERE id=$1`,
       [id, remote, buf.length],
     );
-    return { id, url: remote, object_key: remote };
+    return { id, url: `${publicBase(req)}/media/id/${id}`, object_key: remote };
   }
   let onDisk = false;
   try {
-    await writeAnywhere(row.object_key, buf);
+    await writeAnywhere(row.object_key, sealed);
     onDisk = true;
   } catch (err) {
     if (!denied(err)) throw err;
   }
-  await query(`UPDATE uploads SET status='ready', size_bytes=$2, completed_at=now() WHERE id=$1`, [id, buf.length]);
-  const persist = persistChunks(id, buf);
+  await query(`UPDATE uploads SET status='ready', size_bytes=$2, sealed=true, completed_at=now() WHERE id=$1`, [id, buf.length]);
+  const persist = persistChunks(id, sealed);
   if (!onDisk) await persist;
   else persist.catch((err) => console.error("upload persist", err instanceof Error ? err.message : err));
   return { id, url: `${publicBase(req)}/media/${row.object_key}`, object_key: row.object_key };
@@ -192,4 +194,22 @@ export async function readMedia(objectKey: string) {
   );
   if (!chunks.length) throw new HttpError(404, "not_found", "not found");
   return Buffer.concat(chunks.map((c) => Buffer.from(String(c.body), "hex")));
+}
+
+export async function readSealedUpload(id: string) {
+  const row = await queryOne<{ object_key: string; mime: string }>(
+    `SELECT object_key, mime FROM uploads WHERE id=$1`,
+    [id],
+  );
+  if (!row) throw new HttpError(404, "not_found", "not found");
+  let buf: Buffer;
+  if (/^https?:\/\//i.test(row.object_key)) {
+    const res = await fetch(row.object_key);
+    if (!res.ok) throw new HttpError(404, "not_found", "not found");
+    buf = Buffer.from(await res.arrayBuffer());
+  } else {
+    buf = await readMedia(row.object_key);
+  }
+  const mime = (row.mime || "application/octet-stream").split(";")[0].trim() || "application/octet-stream";
+  return { buf: openBytes(buf), mime };
 }
