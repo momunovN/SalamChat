@@ -13,8 +13,8 @@ final class CallRoomModel: ObservableObject {
             return
         }
         do {
-            try await room.connect(url: url, token: token)
-            try await room.localParticipant.setMicrophone(enabled: true)
+            // The microphone opens while the room is still connecting.
+            try await room.connect(url: url, token: token, connectOptions: ConnectOptions(enableMicrophone: true))
             if video { try await room.localParticipant.setCamera(enabled: true) }
             since = Date()
             phase = "live"

@@ -21,17 +21,14 @@ const HANGUP_TOPIC = "tooapp.call";
 
 type Creds = { url: string; token: string; room: string };
 
-const videoEncoding = { maxBitrate: 4_500_000, maxFramerate: 30, priority: "high" as const };
-
-// 1080p H.264 is encoded on the phone's hardware. 360p and 720p stay available when the upload is weak.
+// 720p H.264, without a second codec in the offer. A VP8 fallback is used only if H.264 is rejected.
 const videoPublish = {
   source: Track.Source.Camera,
   simulcast: true,
   videoCodec: "h264" as const,
-  backupCodec: { codec: "vp8" as const, encoding: videoEncoding },
-  degradationPreference: "maintain-resolution" as const,
-  videoEncoding,
-  videoSimulcastLayers: [VideoPresets.h360, VideoPresets.h720],
+  backupCodec: false as const,
+  degradationPreference: "balanced" as const,
+  videoEncoding: VideoPresets.h720.encoding,
 };
 
 function mountPreview(box: HTMLDivElement, track: MediaStreamTrack, mirror: boolean) {
@@ -72,16 +69,17 @@ export function CallRoom({
   title: string;
   avatarUrl?: string | null;
   t: Dict;
-  media: CallMedia;
+  media: Promise<CallMedia>;
   creds?: Promise<Creds> | null;
   onHangup: () => void;
-  onConnectFailed: () => void;
+  onConnectFailed: (code: string) => void;
 }) {
   const roomRef = useRef<Room | null>(null);
   const liveMedia = useRef<CallMedia | null>(null);
   const endRef = useRef<(notifyPeer: boolean) => void>(() => undefined);
   const onHangupRef = useRef(onHangup);
   const onFailedRef = useRef(onConnectFailed);
+  const [preview, setPreview] = useState<MediaStreamTrack | null>(null);
   const failedText = useRef(t.callFailed);
   const remoteVideo = useRef<HTMLDivElement>(null);
   const localVideo = useRef<HTMLDivElement>(null);
@@ -104,10 +102,9 @@ export function CallRoom({
 
   useEffect(() => {
     const box = localVideo.current;
-    const track = media.video;
-    if (!box || !track) return;
-    mountPreview(box, track, true);
-  }, [media.video]);
+    if (!box || !preview) return;
+    mountPreview(box, preview, true);
+  }, [preview]);
 
   useEffect(() => {
     const room = new Room({
@@ -121,22 +118,20 @@ export function CallRoom({
         autoGainControl: true,
       },
       videoCaptureDefaults: {
-        resolution: VideoPresets.h1080.resolution,
+        resolution: VideoPresets.h720.resolution,
         facingMode: "user",
       },
       publishDefaults: {
         simulcast: true,
-        videoCodec: "vp8",
+        videoCodec: "h264",
         dtx: true,
         red: true,
         audioPreset: AudioPresets.speech,
-        degradationPreference: "maintain-resolution",
+        degradationPreference: "balanced",
         videoEncoding: videoPublish.videoEncoding,
-        videoSimulcastLayers: videoPublish.videoSimulcastLayers,
       },
     });
     roomRef.current = room;
-    liveMedia.current = media;
     let cancelled = false;
     let ended = false;
     let leaveTimer: number | undefined;
@@ -198,56 +193,52 @@ export function CallRoom({
     });
 
     void (async () => {
+      let got: CallMedia | null = null;
       try {
-        const ready = await loadCreds(creds, call.id);
+        // ICE runs while the camera is still opening.
+        const connecting = (async () => {
+          const ready = await loadCreds(creds, call.id);
+          if (cancelled || ended) return;
+          if (!ready.url || ready.token.startsWith("stub-")) throw new Error("livekit");
+          await room.prepareConnection(ready.url, ready.token);
+          if (cancelled || ended) return;
+          await room.connect(ready.url, ready.token);
+        })();
+        const readyMedia = await media;
+        got = readyMedia;
+        if (!cancelled && !ended) setPreview(readyMedia.video ?? null);
+        await connecting;
         if (cancelled || ended) return;
-        if (!ready.url || ready.token.startsWith("stub-")) throw new Error("livekit");
-        await room.prepareConnection(ready.url, ready.token);
-        if (cancelled || ended) return;
-        await room.connect(ready.url, ready.token);
-        if (cancelled || ended) return;
+        liveMedia.current = readyMedia;
         void room.startAudio();
         void room.startVideo();
         if (room.remoteParticipants.size > 0) setPeerJoined(true);
-        const publishes = [
-          room.localParticipant.publishTrack(media.audio, {
-            source: Track.Source.Microphone,
-            dtx: true,
-            red: true,
-            audioPreset: AudioPresets.speech,
-          }),
-        ];
-        if (video && media.video) {
-          const camera = media.video;
-          publishes.push(
-            room.localParticipant.publishTrack(camera, videoPublish).catch(() =>
-              room.localParticipant.publishTrack(camera, { ...videoPublish, videoCodec: "vp8", backupCodec: false }),
-            ),
-          );
+        const audioPub = room.localParticipant.publishTrack(readyMedia.audio, {
+          source: Track.Source.Microphone,
+          dtx: true,
+          red: true,
+          audioPreset: AudioPresets.speech,
+        });
+        if (readyMedia.video) {
+          const camera = readyMedia.video;
+          void room.localParticipant.publishTrack(camera, videoPublish).catch(() => {
+            if (cancelled || ended) return;
+            return room.localParticipant.publishTrack(camera, { ...videoPublish, videoCodec: "vp8", backupCodec: false });
+          });
         }
-        await Promise.all(publishes);
+        await audioPub;
         if (cancelled || ended) return;
-        const local = room.localParticipant.getTrackPublication(Track.Source.Camera)?.track;
-        if (local && localVideo.current) {
-          const el = local.attach();
-          el.className = "h-full w-full object-cover";
-          if (el instanceof HTMLVideoElement) {
-            el.playsInline = true;
-            el.autoplay = true;
-            el.muted = true;
-            el.style.transform = "scaleX(-1)";
-          }
-          localVideo.current.replaceChildren(el);
-        }
         setPhase("live");
-      } catch {
+      } catch (err) {
         if (cancelled || ended) return;
         ended = true;
-        media.audio.stop();
-        media.video?.stop();
+        got?.audio.stop();
+        got?.video?.stop();
+        void room.disconnect(false);
         setPhase("error");
         setError(failedText.current);
-        onFailedRef.current();
+        const code = err instanceof Error ? err.message : "";
+        onFailedRef.current(code === "camera" || code === "mic" ? code : "failed");
       }
     })();
 
@@ -255,16 +246,18 @@ export function CallRoom({
       cancelled = true;
       if (leaveTimer) window.clearTimeout(leaveTimer);
       void room.disconnect(false);
-      const audio = media.audio;
-      const videoTrack = media.video;
-      if (liveMedia.current?.audio === audio) liveMedia.current = null;
-      queueMicrotask(() => {
-        if (liveMedia.current?.audio === audio) return;
-        audio.stop();
-        videoTrack?.stop();
-      });
+      void media
+        .then((ready) => {
+          if (liveMedia.current?.audio === ready.audio) liveMedia.current = null;
+          queueMicrotask(() => {
+            if (liveMedia.current?.audio === ready.audio) return;
+            ready.audio.stop();
+            ready.video?.stop();
+          });
+        })
+        .catch(() => undefined);
     };
-  }, [call.id, creds, media, media.audio, media.video, video]);
+  }, [call.id, creds, media, video]);
 
   useEffect(() => {
     if (!talking) return;

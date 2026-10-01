@@ -98,6 +98,9 @@ export type Call = {
   started_at: string;
   answered_at?: string | null;
   ended_at?: string | null;
+  url?: string;
+  token?: string;
+  room?: string;
 };
 
 export type Envelope = {

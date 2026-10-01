@@ -158,6 +158,13 @@ final class APIClient {
         try await get("/v1/calls/\(id.uuidString)/token")
     }
 
+    func liveKitToken(for call: APICall) async throws -> APIToken {
+        if let url = call.url, let token = call.token, url.hasPrefix("ws"), !token.hasPrefix("stub") {
+            return APIToken(url: url, token: token, room: call.room)
+        }
+        return try await callToken(id: call.id)
+    }
+
     func typing(chatID: UUID) async throws {
         let _: JSONValue = try await post("/v1/typing", body: ["chat_id": chatID.uuidString])
     }

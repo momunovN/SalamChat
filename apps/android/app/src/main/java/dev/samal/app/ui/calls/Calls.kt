@@ -58,6 +58,8 @@ import io.livekit.android.events.collect
 import io.livekit.android.renderer.SurfaceViewRenderer
 import io.livekit.android.room.track.VideoTrack
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -190,9 +192,14 @@ fun CallStage(stage: Stage, onHangup: () -> Unit) {
             }
         }
         val ok = runCatching {
+            room.prepareConnection(stage.url, stage.token)
             room.connect(stage.url, stage.token)
-            room.localParticipant.setMicrophoneEnabled(true)
-            if (stage.video) room.localParticipant.setCameraEnabled(true)
+            coroutineScope {
+                val mic = async { room.localParticipant.setMicrophoneEnabled(true) }
+                val cam = async { if (stage.video) room.localParticipant.setCameraEnabled(true) else true }
+                mic.await()
+                cam.await()
+            }
         }.isSuccess
         if (!ok) phase = "fail" else {
             since = System.currentTimeMillis()
@@ -271,15 +278,22 @@ fun rememberCallStarter(api: SamalApi, onStage: (Stage) -> Unit): (String, Strin
     }
 }
 
+private fun joinCreds(call: JSONObject): JSONObject? {
+    val url = call.optString("url")
+    val token = call.optString("token")
+    if (url.startsWith("ws") && token.isNotEmpty() && !token.startsWith("stub")) return call
+    return null
+}
+
 suspend fun openCall(api: SamalApi, chatId: String, title: String, kind: String, onStage: (Stage) -> Unit) {
     val call = kotlinx.coroutines.withContext(Dispatchers.IO) { runCatching { api.startCall(chatId, kind) }.getOrNull() } ?: return
-    val token = kotlinx.coroutines.withContext(Dispatchers.IO) { runCatching { api.callToken(call.getString("id")) }.getOrNull() } ?: return
+    val token = joinCreds(call) ?: kotlinx.coroutines.withContext(Dispatchers.IO) { runCatching { api.callToken(call.getString("id")) }.getOrNull() } ?: return
     onStage(Stage(call.getString("id"), title, kind == "video", token.optString("url"), token.optString("token")))
 }
 
 suspend fun answerCall(api: SamalApi, call: JSONObject, title: String, onStage: (Stage) -> Unit) {
     val id = call.getString("id")
-    kotlinx.coroutines.withContext(Dispatchers.IO) { runCatching { api.answerCall(id) } }
-    val token = kotlinx.coroutines.withContext(Dispatchers.IO) { runCatching { api.callToken(id) }.getOrNull() } ?: return
+    val answered = kotlinx.coroutines.withContext(Dispatchers.IO) { runCatching { api.answerCall(id) }.getOrNull() } ?: return
+    val token = joinCreds(answered) ?: kotlinx.coroutines.withContext(Dispatchers.IO) { runCatching { api.callToken(id) }.getOrNull() } ?: return
     onStage(Stage(id, title, call.optString("kind") == "video", token.optString("url"), token.optString("token")))
 }

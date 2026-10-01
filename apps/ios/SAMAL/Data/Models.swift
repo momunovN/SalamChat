@@ -179,9 +179,12 @@ struct APICall: Codable, Identifiable {
     var startedAt: Date
     var answeredAt: Date?
     var endedAt: Date?
+    var url: String?
+    var token: String?
+    var room: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, kind, status
+        case id, kind, status, url, token, room
         case chatID = "chat_id"
         case initiatorID = "initiator_id"
         case startedAt = "started_at"

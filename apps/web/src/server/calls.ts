@@ -53,19 +53,37 @@ export async function getCall(userId: string, id: string) {
   return mapCall(row);
 }
 
+function noteEvent(id: string, userId: string, event: string) {
+  void query(`INSERT INTO call_events (call_id, user_id, event) VALUES ($1,$2,$3)`, [id, userId, event]).catch((err) => {
+    console.error("call event", err instanceof Error ? err.message : err);
+  });
+}
+
+// The join token belongs to one participant. The ring sent to the chat must not include it.
+async function withCreds(call: Call, userId: string) {
+  const signed = await signLiveKitToken(userId, call.sfu_room || "");
+  return { ...call, url: signed.url, token: signed.token, room: signed.room };
+}
+
 export async function startCall(userId: string, chatId: string, kind: string) {
   if (kind !== "audio" && kind !== "video") throw new HttpError(400, "bad_request", "kind");
-  await mustMember(chatId, userId);
   const id = crypto.randomUUID();
   const room = "tooapp-" + id;
-  await query(
-    `INSERT INTO calls (id, chat_id, initiator_id, kind, status, sfu_room) VALUES ($1,$2,$3,$4,'ringing',$5)`,
+  const credsPromise = signLiveKitToken(userId, room);
+  const membersPromise = memberIds(chatId);
+  const row = await queryOne<CallRow>(
+    `INSERT INTO calls (id, chat_id, initiator_id, kind, status, sfu_room)
+     SELECT $1, $2, $3, $4, 'ringing', $5
+     WHERE EXISTS (SELECT 1 FROM chat_members WHERE chat_id = $2 AND user_id = $3)
+     RETURNING id, chat_id, initiator_id, kind, status, sfu_room, started_at, answered_at, ended_at`,
     [id, chatId, userId, kind, room],
   );
-  await query(`INSERT INTO call_events (call_id, user_id, event) VALUES ($1,$2,'invite')`, [id, userId]);
-  const call = await getCall(userId, id);
-  hub.publishMany(await memberIds(chatId), envelope("call.updated", call));
-  return call;
+  if (!row) throw new HttpError(403, "forbidden", "forbidden");
+  const call = mapCall(row);
+  const [signed, members] = await Promise.all([credsPromise, membersPromise]);
+  noteEvent(id, userId, "invite");
+  hub.publishMany(members, envelope("call.updated", call));
+  return { ...call, url: signed.url, token: signed.token, room: signed.room };
 }
 
 export async function listCalls(userId: string) {
@@ -101,7 +119,24 @@ async function transit(
 }
 
 export async function answerCall(userId: string, id: string) {
-  return transit(userId, id, "join", "active", "answered_at", ["ringing"]);
+  const row = await queryOne<CallRow>(
+    `UPDATE calls AS c
+     SET status = 'active', answered_at = now()
+     WHERE c.id = $1 AND c.status = 'ringing'
+       AND EXISTS (SELECT 1 FROM chat_members m WHERE m.chat_id = c.chat_id AND m.user_id = $2)
+     RETURNING c.id, c.chat_id, c.initiator_id, c.kind, c.status, c.sfu_room, c.started_at, c.answered_at, c.ended_at`,
+    [id, userId],
+  );
+  if (!row) {
+    const call = await getCall(userId, id);
+    if (call.status !== "active") return call;
+    return withCreds(call, userId);
+  }
+  const call = mapCall(row);
+  const [members, signed] = await Promise.all([memberIds(call.chat_id), signLiveKitToken(userId, call.sfu_room || "")]);
+  noteEvent(id, userId, "join");
+  hub.publishMany(members, envelope("call.updated", call));
+  return { ...call, url: signed.url, token: signed.token, room: signed.room };
 }
 
 export async function rejectCall(userId: string, id: string) {

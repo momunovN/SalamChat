@@ -544,7 +544,7 @@ struct ChatView: View {
         guard let id = UUID(uuidString: vm.chat.id) else { return }
         Task {
             guard let call = try? await session.api.startCall(chatID: id, kind: kind),
-                  let token = try? await session.api.callToken(id: call.id) else { return }
+                  let token = try? await session.api.liveKitToken(for: call) else { return }
             session.activeCall = ActiveCall(id: call.id, title: vm.chat.title, kind: kind, url: token.url, token: token.token)
         }
     }

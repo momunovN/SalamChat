@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 import { api, loadSession, saveSession } from "@/lib/api";
 import { dedupeChats, dedupeMessages, forgetChat, mergeChats, mergeThread, readActive, readRoster, readThread, writeActive, writeRoster, writeThread } from "@/lib/cache";
-import { captureAudio, captureVideo, forgetMedia, mediaRemembered, rememberMedia, stopCallMedia, warmCallConnection, type CallMedia } from "@/lib/callMedia";
+import { captureAudio, captureCall, captureVideo, forgetMedia, mediaRemembered, rememberMedia, stopCallMedia, warmCallConnection, type CallMedia } from "@/lib/callMedia";
 import { chatMatchesSlug, lastPreview, pathForChat, pathsEqual, slugFromPath } from "@/lib/chat";
 import { dict, type Lang } from "@/lib/i18n";
 import { needsDisplayName, sanitizeDisplayName, sanitizeUsername } from "@/lib/name";
@@ -81,7 +81,7 @@ export function MessengerApp() {
   const [profileError, setProfileError] = useState<string | null>(null);
   const [incoming, setIncoming] = useState<Call | null>(null);
   const [activeCall, setActiveCall] = useState<Call | null>(null);
-  const [callMedia, setCallMedia] = useState<CallMedia | null>(null);
+  const [callMedia, setCallMedia] = useState<Promise<CallMedia> | null>(null);
   const [callCreds, setCallCreds] = useState<Promise<{ url: string; token: string; room: string }> | null>(null);
   const [callBusy, setCallBusy] = useState(false);
   const [pendingCall, setPendingCall] = useState<{ kind: "audio" | "video"; step: "mic" | "camera" } | null>(null);
@@ -600,23 +600,66 @@ export function MessengerApp() {
     showCallError(code === "camera" ? t.camDenied : code === "mic" ? t.micDenied : t.callFailed);
   }
 
-  async function openCall(attempt: number, media: CallMedia, start: () => Promise<Call>) {
+  function credsFor(call: Call) {
+    if (call.token) {
+      const creds = { url: call.url || "", token: call.token, room: call.room || "" };
+      if (!call.token.startsWith("stub-")) void warmCallConnection(creds.url, creds.token);
+      return Promise.resolve(creds);
+    }
+    const pending = api.callToken(call.id);
+    void pending.then((creds) => warmCallConnection(creds.url, creds.token)).catch(() => undefined);
+    return pending;
+  }
+
+  function listedCall(call: Call): Call {
+    return {
+      id: call.id,
+      chat_id: call.chat_id,
+      initiator_id: call.initiator_id,
+      kind: call.kind,
+      status: call.status,
+      started_at: call.started_at,
+      answered_at: call.answered_at,
+      ended_at: call.ended_at,
+    };
+  }
+
+  function captureFresh(kind: "audio" | "video", together: boolean) {
+    if (kind === "video" && together) return captureCall("video");
+    if (kind !== "video") return captureAudio().then((audio) => ({ audio }));
+    return captureAudio().then(async (audio) => {
+      try {
+        return { audio, video: await captureVideo() };
+      } catch (err) {
+        audio.stop();
+        throw err;
+      }
+    });
+  }
+
+  async function beginJoin(attempt: number, start: () => Promise<Call>, capture: () => Promise<CallMedia>) {
+    const mediaPromise = capture().then((media) => {
+      rememberMedia("mic");
+      if (media.video) rememberMedia("camera");
+      return media;
+    });
+    void mediaPromise.catch(() => undefined);
     let call: Call;
     try {
       call = await start();
     } catch (err) {
-      stopCallMedia(media);
+      void mediaPromise.then(stopCallMedia).catch(() => undefined);
       throw err;
     }
     if (attempt !== attemptRef.current) {
-      stopCallMedia(media);
+      void mediaPromise.then(stopCallMedia).catch(() => undefined);
       if (call.status === "ringing" || call.status === "active") void api.hangupCall(call.id);
       armingRef.current = false;
       setCallBusy(false);
       return;
     }
     if (call.status !== "ringing" && call.status !== "active") {
-      stopCallMedia(media);
+      void mediaPromise.then(stopCallMedia).catch(() => undefined);
       failCall(attempt, "failed");
       return;
     }
@@ -625,11 +668,12 @@ export function MessengerApp() {
     armingRef.current = false;
     setCallBusy(false);
     setPendingCall(null);
-    setCallCreds(api.callToken(call.id));
-    setCallMedia(media);
+    setCallCreds(credsFor(call));
+    setCallMedia(mediaPromise);
     setIncoming(null);
-    setActiveCall(call);
-    setCalls((prev) => [call, ...prev.filter((item) => item.id !== call.id)]);
+    const shown = listedCall(call);
+    setActiveCall(shown);
+    setCalls((prev) => [shown, ...prev.filter((item) => item.id !== shown.id)]);
   }
 
   function showCameraPermit(attempt: number, kind: "audio" | "video", audio: MediaStreamTrack, start: () => Promise<Call>) {
@@ -646,42 +690,19 @@ export function MessengerApp() {
     setPendingCall({ kind, step: "camera" });
   }
 
-  async function captureAndOpen(attempt: number, kind: "audio" | "video", start: () => Promise<Call>) {
-    try {
-      const audio = await captureAudio();
-      rememberMedia("mic");
-      if (attempt !== attemptRef.current) {
-        audio.stop();
-        armingRef.current = false;
-        setCallBusy(false);
-        return;
-      }
-      if (kind !== "video") {
-        await openCall(attempt, { audio }, start);
-        return;
-      }
-      if (mediaRemembered("camera")) {
-        const video = await captureVideo();
-        rememberMedia("camera");
-        await openCall(attempt, { audio, video }, start);
-        return;
-      }
-      showCameraPermit(attempt, kind, audio, start);
-    } catch (err) {
-      const code = err instanceof Error ? err.message : "";
-      failCall(attempt, code === "camera" ? "camera" : "mic");
-    }
-  }
-
   function placeCall(kind: "audio" | "video", start: () => Promise<Call>) {
     if (armingRef.current || activeCall) return;
     const attempt = ++attemptRef.current;
     armingRef.current = true;
     setCallError(null);
     pendingStart.current = start;
-    if (mediaRemembered("mic")) {
+    const ready = mediaRemembered("mic") && (kind !== "video" || mediaRemembered("camera"));
+    if (ready) {
       setCallBusy(true);
-      void captureAndOpen(attempt, kind, start);
+      void beginJoin(attempt, start, () => captureFresh(kind, kind === "video")).catch((err) => {
+        const code = err instanceof Error ? err.message : "";
+        failCall(attempt, code === "camera" ? "camera" : code === "mic" ? "mic" : "failed");
+      });
       return;
     }
     setCallBusy(false);
@@ -702,34 +723,32 @@ export function MessengerApp() {
     void (async () => {
       try {
         if (pending.step === "mic") {
-          const audio = await captureAudio();
-          rememberMedia("mic");
-          if (pending.kind === "video") {
-            if (mediaRemembered("camera")) {
-              const video = await captureVideo();
-              rememberMedia("camera");
-              await openCall(attempt, { audio, video }, start);
-              return;
-            }
-            showCameraPermit(attempt, pending.kind, audio, start);
+          if (pending.kind !== "video" || mediaRemembered("camera")) {
+            await beginJoin(attempt, start, () => captureFresh(pending.kind, pending.kind === "video"));
             return;
           }
-          await openCall(attempt, { audio }, start);
+          const audio = await captureAudio();
+          rememberMedia("mic");
+          if (attempt !== attemptRef.current) {
+            audio.stop();
+            armingRef.current = false;
+            setCallBusy(false);
+            return;
+          }
+          showCameraPermit(attempt, pending.kind, audio, start);
           return;
         }
         const audio = pendingAudio.current;
         if (!audio) throw new Error("mic");
-        let video: MediaStreamTrack;
-        try {
-          video = await captureVideo();
-          rememberMedia("camera");
-        } catch (err) {
-          audio.stop();
-          pendingAudio.current = null;
-          throw err;
-        }
-        pendingAudio.current = null;
-        await openCall(attempt, { audio, video }, start);
+        await beginJoin(attempt, start, async () => {
+          try {
+            return { audio, video: await captureVideo() };
+          } catch (err) {
+            audio.stop();
+            pendingAudio.current = null;
+            throw err;
+          }
+        });
       } catch (err) {
         const code = err instanceof Error ? err.message : "";
         failCall(attempt, code === "camera" ? "camera" : code === "mic" ? "mic" : "failed");
@@ -1782,8 +1801,10 @@ export function MessengerApp() {
           avatarUrl={activeChat?.avatar_url}
           t={t}
           onHangup={() => closeCall(activeCall.id)}
-          onConnectFailed={() => {
-            showCallError(t.callFailed);
+          onConnectFailed={(code) => {
+            if (code === "camera") forgetMedia("camera");
+            else if (code === "mic") forgetMedia("mic");
+            showCallError(code === "camera" ? t.camDenied : code === "mic" ? t.micDenied : t.callFailed);
             closeCall(activeCall.id);
           }}
         />

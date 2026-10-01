@@ -82,11 +82,10 @@ struct IncomingCallView: View {
                     guard let call = session.incomingCall else { return }
                     session.incomingCall = nil
                     Task {
-                        _ = try? await session.api.answerCall(id: call.id)
-                        if let token = try? await session.api.callToken(id: call.id) {
-                            let title = (try? AppDatabase.shared.fetchChats(filter: "", query: ""))?.first { $0.id == call.chatID.uuidString }?.title ?? L10n.incomingAudio
-                            session.activeCall = ActiveCall(id: call.id, title: title, kind: call.kind, url: token.url, token: token.token)
-                        }
+                        guard let answered = try? await session.api.answerCall(id: call.id),
+                              let token = try? await session.api.liveKitToken(for: answered) else { return }
+                        let title = (try? AppDatabase.shared.fetchChats(filter: "", query: ""))?.first { $0.id == call.chatID.uuidString }?.title ?? L10n.incomingAudio
+                        session.activeCall = ActiveCall(id: call.id, title: title, kind: call.kind, url: token.url, token: token.token)
                     }
                 } label: {
                     VStack {

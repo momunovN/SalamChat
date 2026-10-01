@@ -11,10 +11,11 @@ const audioConstraints: MediaTrackConstraints = {
   autoGainControl: true,
 };
 
+// 720p opens the camera sooner than 1080p. The sensor can still go higher when that mode is the closest one.
 const videoConstraints: MediaTrackConstraints = {
   facingMode: "user",
-  width: { ideal: 1920 },
-  height: { ideal: 1080 },
+  width: { ideal: 1280, max: 1920 },
+  height: { ideal: 720, max: 1080 },
   frameRate: { ideal: 30, max: 30 },
 };
 
@@ -63,23 +64,30 @@ export async function captureVideo() {
     stream.getTracks().forEach((track) => track.stop());
     throw new Error("camera");
   }
-  await preferSharpVideo(video);
-  video.contentHint = "detail";
   return video;
 }
 
-async function preferSharpVideo(video: MediaStreamTrack) {
-  const caps = video.getCapabilities?.();
-  const width = Math.min(caps?.width?.max ?? 1920, 1920);
-  const height = Math.min(caps?.height?.max ?? 1080, 1080);
+// One device open is faster than opening the mic and then the camera.
+export async function captureCall(kind: "audio" | "video"): Promise<CallMedia> {
+  if (kind !== "video") return { audio: await captureAudio() };
   try {
-    await video.applyConstraints({
-      width: { ideal: width },
-      height: { ideal: height },
-      frameRate: { ideal: 30, max: 30 },
-    });
-  } catch {
-    /* the camera already uses the closest size it can */
+    const stream = await requestUserMedia({ audio: audioConstraints, video: videoConstraints }, "camera");
+    const audio = stream.getAudioTracks()[0];
+    const video = stream.getVideoTracks()[0];
+    if (!audio || !video) {
+      stream.getTracks().forEach((track) => track.stop());
+      throw new Error(audio ? "camera" : "mic");
+    }
+    return { audio, video };
+  } catch (err) {
+    if (!(err instanceof Error) || err.message !== "camera") throw err;
+    const audio = await captureAudio();
+    try {
+      return { audio, video: await captureVideo() };
+    } catch (videoErr) {
+      audio.stop();
+      throw videoErr;
+    }
   }
 }
 
