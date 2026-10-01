@@ -1,8 +1,10 @@
 import { query, queryOne } from "./db";
-import { presence } from "./hub";
+import { envelope, hub, presence } from "./hub";
 import { HttpError, iso } from "./http";
 import { bustMembers, hotTailMap, rememberMembers } from "./valkey";
 import { mapUser, type User, type UserRow } from "./auth";
+import { nickTaken } from "./nicks";
+import { sanitizeUsername } from "@/lib/name";
 import { openPayload } from "./seal";
 
 export type ReplyPreview = {
@@ -70,6 +72,7 @@ export type Chat = {
   id: string;
   type: string;
   title: string;
+  username?: string | null;
   avatar_url?: string | null;
   peer?: User;
   last_message?: Message | null;
@@ -84,6 +87,7 @@ type ChatRow = {
   id: string;
   type: string;
   title: string;
+  username: string | null;
   avatar_url: string | null;
   created_at: Date;
   updated_at: Date;
@@ -94,6 +98,8 @@ type ChatRow = {
   peer_phone: string | null;
   peer_display_name: string | null;
   peer_username: string | null;
+  peer_username_hidden: boolean | null;
+  peer_public_id: string | null;
   peer_avatar_url: string | null;
   peer_bio: string | null;
   peer_created_at: Date | null;
@@ -117,6 +123,7 @@ function mapChat(r: ChatRow): Chat {
     id: r.id,
     type: r.type,
     title: r.title || "",
+    username: r.username ?? undefined,
     avatar_url: r.avatar_url ?? undefined,
     unread_count: Number(r.unread || 0),
     muted_until: iso(r.muted_until),
@@ -128,9 +135,10 @@ function mapChat(r: ChatRow): Chat {
     const peer = mapUser(
       {
         id: r.peer_id,
-        phone: r.peer_phone || "",
+        phone: "",
         display_name: r.peer_display_name || "",
-        username: r.peer_username,
+        username: r.peer_username_hidden ? null : r.peer_username,
+        public_id: r.peer_public_id,
         avatar_url: r.peer_avatar_url,
         bio: r.peer_bio || "",
         created_at: r.peer_created_at || r.created_at,
@@ -161,12 +169,12 @@ function mapChat(r: ChatRow): Chat {
   return chat;
 }
 
-export async function listChats(userId: string, q = "", kind = "") {
+export async function listChats(userId: string, q = "", kind = "", onlyId = "") {
   q = q.trim();
   const rows = await query<ChatRow>(
     `
     SELECT
-      c.id, c.type, COALESCE(c.title, '') AS title, c.avatar_url, c.created_at, c.updated_at,
+      c.id, c.type, COALESCE(c.title, '') AS title, c.username, c.avatar_url, c.created_at, c.updated_at,
       cm.muted_until,
       (SELECT count(*) FROM chat_members x WHERE x.chat_id=c.id) AS member_count,
       COALESCE((
@@ -177,7 +185,8 @@ export async function listChats(userId: string, q = "", kind = "") {
           AND (cm.last_read_at IS NULL OR msg.created_at > cm.last_read_at)
       ),0) AS unread,
       peer.id AS peer_id, peer.phone AS peer_phone, peer.display_name AS peer_display_name,
-      peer.username AS peer_username, peer.avatar_url AS peer_avatar_url, peer.bio AS peer_bio,
+      peer.username AS peer_username, peer.username_hidden AS peer_username_hidden, peer.public_id AS peer_public_id,
+      peer.avatar_url AS peer_avatar_url, peer.bio AS peer_bio,
       peer.created_at AS peer_created_at, peer.updated_at AS peer_updated_at, peer.last_seen_at AS peer_last_seen_at,
       lm.id AS lm_id, lm.chat_id AS lm_chat_id, lm.author_id AS lm_author_id, lm.type AS lm_type,
       lm.payload AS lm_payload, lm.client_id AS lm_client_id, lm.reply_to_id AS lm_reply_to_id,
@@ -206,13 +215,15 @@ export async function listChats(userId: string, q = "", kind = "") {
       AND (
         $3 = '' OR
         c.title ILIKE '%'||$3||'%' OR
+        c.username ILIKE '%'||$3||'%' OR
         peer.display_name ILIKE '%'||$3||'%' OR
-        peer.username ILIKE '%'||$3||'%'
+        (peer.username_hidden = false AND peer.username ILIKE '%'||$3||'%')
       )
+      AND ($4 = '' OR c.id::text = $4)
     ORDER BY c.updated_at DESC
     LIMIT 100
   `,
-    [userId, kind, q],
+    [userId, kind, q, onlyId],
   );
   const chats = rows.map(mapChat);
   try {
@@ -242,7 +253,7 @@ export async function listChats(userId: string, q = "", kind = "") {
 
 export async function getChat(userId: string, chatId: string) {
   await mustMember(chatId, userId);
-  const list = await listChats(userId, "", "");
+  const list = await listChats(userId, "", "", chatId);
   const found = list.find((c) => c.id === chatId);
   if (!found) throw new HttpError(404, "not_found", "not found");
   return found;
@@ -278,9 +289,16 @@ export async function directChat(me: string, peer: string) {
   return getChat(me, chatId);
 }
 
-export async function createGroup(me: string, title: string, memberIds: string[]) {
+export async function createGroup(me: string, title: string, memberIds: string[], username?: string) {
   title = title.trim();
   if (!title) throw new HttpError(400, "bad_request", "title required");
+  let nick: string | null = null;
+  if (username !== undefined && username.trim()) {
+    const clean = sanitizeUsername(username);
+    if (!clean) throw new HttpError(400, "bad_request", "invalid username");
+    if (await nickTaken(clean)) throw new HttpError(409, "conflict", "username taken");
+    nick = clean;
+  }
   const seen = new Set<string>([me]);
   const members = [me];
   for (const id of memberIds || []) {
@@ -290,7 +308,18 @@ export async function createGroup(me: string, title: string, memberIds: string[]
   }
   if (members.length > 256) throw new HttpError(400, "bad_request", "too many members");
   const chatId = crypto.randomUUID();
-  await query(`INSERT INTO chats (id, type, title, created_by) VALUES ($1,'group',$2,$3)`, [chatId, title, me]);
+  try {
+    await query(`INSERT INTO chats (id, type, title, username, created_by) VALUES ($1,'group',$2,$3,$4)`, [
+      chatId,
+      title,
+      nick,
+      me,
+    ]);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "";
+    if (/chats_username|duplicate key/i.test(msg)) throw new HttpError(409, "conflict", "username taken");
+    throw err;
+  }
   for (const uid of members) {
     const role = uid === me ? "owner" : "member";
     await query(`INSERT INTO chat_members (chat_id, user_id, role) VALUES ($1,$2,$3)`, [chatId, uid, role]);
@@ -335,16 +364,67 @@ export async function hideChat(userId: string, chatId: string) {
   return { ok: true };
 }
 
-export async function renameChat(userId: string, chatId: string, title: string) {
-  title = title.trim();
-  if (!title || [...title].length > 80) throw new HttpError(400, "bad_request", "title length");
+export async function renameChat(
+  userId: string,
+  chatId: string,
+  patch: { title?: string; username?: string },
+) {
   const chat = await queryOne<{ type: string }>(`SELECT type FROM chats WHERE id=$1`, [chatId]);
   if (!chat) throw new HttpError(404, "not_found", "not found");
   if (chat.type !== "group") throw new HttpError(400, "bad_request", "not a group");
   const role = await memberRole(chatId, userId);
   if (!canManageMembers(role)) throw new HttpError(403, "forbidden", "forbidden");
-  await query(`UPDATE chats SET title=$2, updated_at=now() WHERE id=$1`, [chatId, title]);
+  if (patch.title === undefined && patch.username === undefined) {
+    throw new HttpError(400, "bad_request", "title length");
+  }
+  if (patch.title !== undefined) {
+    const title = patch.title.trim();
+    if (!title || [...title].length > 80) throw new HttpError(400, "bad_request", "title length");
+    await query(`UPDATE chats SET title=$2, updated_at=now() WHERE id=$1`, [chatId, title]);
+  }
+  if (patch.username !== undefined) {
+    const clean = sanitizeUsername(patch.username);
+    if (clean === null) throw new HttpError(400, "bad_request", "invalid username");
+    if (clean && (await nickTaken(clean, { chatId }))) throw new HttpError(409, "conflict", "username taken");
+    try {
+      await query(`UPDATE chats SET username=$2, updated_at=now() WHERE id=$1`, [chatId, clean || null]);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "";
+      if (/chats_username|duplicate key|users_public_id/i.test(msg)) throw new HttpError(409, "conflict", "username taken");
+      throw err;
+    }
+  }
   return getChat(userId, chatId);
+}
+
+export async function setDirectNotifications(me: string, peerId: string, enabled: boolean) {
+  if (me === peerId) throw new HttpError(400, "bad_request", "cannot mute self");
+  const until = enabled ? null : "9999-12-31T00:00:00.000Z";
+  const [a, b] = me < peerId ? [me, peerId] : [peerId, me];
+  const key = `${a}:${b}`;
+  const existing = await queryOne<{ id: string }>(`SELECT id FROM chats WHERE peer_key=$1`, [key]);
+  if (existing) {
+    await query(`UPDATE chat_members SET muted_until=$3 WHERE chat_id=$1 AND user_id=$2`, [existing.id, me, until]);
+    hub.publish(me, envelope("chat.updated", { chat_id: existing.id }));
+    return { enabled, chat_id: existing.id, muted_until: until };
+  }
+  const chatId = crypto.randomUUID();
+  try {
+    await query(`INSERT INTO chats (id, type, created_by, peer_key) VALUES ($1,'direct',$2,$3)`, [chatId, me, key]);
+    await query(
+      `INSERT INTO chat_members (chat_id, user_id, role, hidden_at, muted_until) VALUES
+       ($1,$2,'member',now(),$4), ($1,$3,'member',now(),NULL)`,
+      [chatId, me, peerId, until],
+    );
+  } catch {
+    const again = await queryOne<{ id: string }>(`SELECT id FROM chats WHERE peer_key=$1`, [key]);
+    if (!again) throw new HttpError(500, "internal", "chat create failed");
+    await query(`UPDATE chat_members SET muted_until=$3 WHERE chat_id=$1 AND user_id=$2`, [again.id, me, until]);
+    hub.publish(me, envelope("chat.updated", { chat_id: again.id }));
+    return { enabled, chat_id: again.id, muted_until: until };
+  }
+  hub.publish(me, envelope("chat.updated", { chat_id: chatId }));
+  return { enabled, chat_id: chatId, muted_until: until };
 }
 
 export async function mustMember(chatId: string, userId: string) {
@@ -394,7 +474,8 @@ export function canManageMembers(role: string) {
 export async function listMembers(userId: string, chatId: string) {
   await mustMember(chatId, userId);
   const rows = await query<UserRow & { role: string; joined_at: Date | string }>(
-    `SELECT u.id, u.phone, u.display_name, u.username, u.avatar_url, u.bio, u.created_at, u.updated_at, u.last_seen_at,
+    `SELECT u.id, u.phone, u.display_name, u.username, u.username_hidden, u.public_id, u.avatar_url, u.bio,
+            u.created_at, u.updated_at, u.last_seen_at,
             cm.role, cm.joined_at
      FROM chat_members cm
      JOIN users u ON u.id = cm.user_id
@@ -402,11 +483,20 @@ export async function listMembers(userId: string, chatId: string) {
      ORDER BY CASE cm.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END, u.display_name`,
     [chatId],
   );
-  const items: ChatMember[] = rows.map((r) => ({
-    user: mapUser(r, presence.online(r.id)),
-    role: r.role,
-    joined_at: iso(r.joined_at) || new Date().toISOString(),
-  }));
+  const items: ChatMember[] = rows.map((r) => {
+    const user = mapUser(r, presence.online(r.id));
+    user.phone = "";
+    user.email = undefined;
+    if (r.username_hidden && r.id !== userId) {
+      user.username = undefined;
+      user.username_hidden = undefined;
+    }
+    return {
+      user,
+      role: r.role,
+      joined_at: iso(r.joined_at) || new Date().toISOString(),
+    };
+  });
   return { items };
 }
 

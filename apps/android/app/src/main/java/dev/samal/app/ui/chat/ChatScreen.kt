@@ -505,7 +505,15 @@ fun ChatScreen(
     }
     profile?.let { userId ->
         val canWrite = !userId.equals(me, true) && !(current.type == "direct" && userId.equals(current.peerId, true))
-        ProfileSheet(api, userId, onClose = { profile = null }, onWrite = if (canWrite) {
+        ProfileSheet(api, userId, onClose = { profile = null }, showNotes = !userId.equals(me, true), onOpenChat = { chatId ->
+            scope.launch {
+                val raw = withContext(Dispatchers.IO) { runCatching { api.chat(chatId) }.getOrNull() } ?: return@launch
+                val entity = chatEntity(raw)
+                withContext(Dispatchers.IO) { dao.upsertChats(listOf(entity)) }
+                profile = null
+                onOpenChat(entity)
+            }
+        }, onWrite = if (canWrite) {
             {
                 scope.launch {
                     val raw = withContext(Dispatchers.IO) { runCatching { api.direct(userId) }.getOrNull() } ?: return@launch

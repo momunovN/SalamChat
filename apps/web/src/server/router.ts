@@ -18,6 +18,7 @@ import {
   markRead,
   removeMember,
   renameChat,
+  setDirectNotifications,
 } from "./chats";
 import {
   answerCall,
@@ -33,7 +34,8 @@ import { envelope, hub, presence } from "./hub";
 import { bearer, corsHeaders, errorResponse, HttpError, json, readJSON } from "./http";
 import { deleteMessage, editMessage, listMessages, receipts, sendMessage } from "./messages";
 import { listContacts, syncContacts } from "./contacts";
-import { getUserPublic, lookupPhones, searchUsers } from "./users";
+import { profileLibrary } from "./profile";
+import { getUserPublic, lookupPhones, resolveSlug, searchUsers } from "./users";
 import { completeUpload, createIntent, mediaType, putUpload, readMedia, readSealedUpload } from "./uploads";
 import { openBytes } from "./seal";
 import { sseResponse } from "./stream";
@@ -167,7 +169,15 @@ async function dispatch(method: string, parts: string[], req: Request, url: URL)
     return json(200, await getUser(auth.userId));
   }
   if (method === "PATCH" && p("me")) {
-    const body = await readJSON<{ display_name?: string; username?: string; bio?: string; avatar_url?: string }>(req);
+    const body = await readJSON<{
+      display_name?: string;
+      username?: string;
+      bio?: string;
+      avatar_url?: string;
+      birth_date?: string | null;
+      address?: string;
+      username_hidden?: boolean;
+    }>(req);
     return json(200, await updateMe(auth.userId, body));
   }
   if (method === "GET" && p("chats")) {
@@ -185,8 +195,8 @@ async function dispatch(method: string, parts: string[], req: Request, url: URL)
   {
     const m = p("chats/groups");
     if (method === "POST" && m) {
-      const body = await readJSON<{ title?: string; member_ids?: string[] }>(req);
-      return json(201, await createGroup(auth.userId, body.title || "", body.member_ids || []));
+      const body = await readJSON<{ title?: string; member_ids?: string[]; username?: string }>(req);
+      return json(201, await createGroup(auth.userId, body.title || "", body.member_ids || [], body.username));
     }
   }
   {
@@ -206,8 +216,8 @@ async function dispatch(method: string, parts: string[], req: Request, url: URL)
       return json(200, out);
     }
     if (method === "PATCH" && m) {
-      const body = await readJSON<{ title?: string }>(req);
-      const chat = await renameChat(auth.userId, m.chatID, body.title || "");
+      const body = await readJSON<{ title?: string; username?: string }>(req);
+      const chat = await renameChat(auth.userId, m.chatID, body);
       const ids = await (await import("./chats")).memberIds(m.chatID);
       hub.publishMany(ids, envelope("chat.updated", { chat_id: m.chatID }));
       return json(200, chat);
@@ -308,8 +318,11 @@ async function dispatch(method: string, parts: string[], req: Request, url: URL)
     const body = await readJSON<{ enabled?: boolean; items?: { phone?: string; name?: string }[] }>(req);
     return json(200, await syncContacts(auth.userId, body.enabled !== false, body.items || []));
   }
+  if (method === "GET" && p("resolve")) {
+    return json(200, await resolveSlug(auth.userId, url.searchParams.get("slug") || ""));
+  }
   if (method === "GET" && p("users")) {
-    return json(200, await searchUsers(url.searchParams.get("q") || ""));
+    return json(200, await searchUsers(url.searchParams.get("q") || "", auth.userId));
   }
   if (method === "POST" && p("users/lookup")) {
     const body = await readJSON<{ phones?: string[] }>(req);
@@ -319,7 +332,22 @@ async function dispatch(method: string, parts: string[], req: Request, url: URL)
     const m = p("users/:id");
     if (method === "GET" && m) {
       if (!UUID.test(m.id)) throw new HttpError(400, "bad_id", "invalid id");
-      return json(200, await getUserPublic(m.id));
+      return json(200, await getUserPublic(m.id, auth.userId));
+    }
+  }
+  {
+    const m = p("users/:id/library");
+    if (method === "GET" && m) {
+      if (!UUID.test(m.id)) throw new HttpError(400, "bad_id", "invalid id");
+      return json(200, await profileLibrary(auth.userId, m.id, req));
+    }
+  }
+  {
+    const m = p("users/:id/notifications");
+    if (method === "PATCH" && m) {
+      if (!UUID.test(m.id)) throw new HttpError(400, "bad_id", "invalid id");
+      const body = await readJSON<{ enabled?: boolean }>(req);
+      return json(200, await setDirectNotifications(auth.userId, m.id, body.enabled !== false));
     }
   }
   if (method === "GET" && p("calls")) {

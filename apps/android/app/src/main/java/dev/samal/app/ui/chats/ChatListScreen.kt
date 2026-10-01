@@ -200,6 +200,13 @@ fun ChatListScreen(dao: SamalDao, api: SamalApi, me: String, onOpen: (ChatEntity
 
     renaming?.let { chat ->
         var title by remember(chat.id) { mutableStateOf(chat.title) }
+        var nick by remember(chat.id) { mutableStateOf("") }
+        var nickReady by remember(chat.id) { mutableStateOf(false) }
+        LaunchedEffect(chat.id) {
+            val remote = withContext(Dispatchers.IO) { runCatching { api.chat(chat.id) }.getOrNull() }
+            nick = remote?.optString("username").orEmpty()
+            nickReady = true
+        }
         AlertDialog(
             onDismissRequest = { renaming = null },
             confirmButton = {
@@ -209,7 +216,10 @@ fun ChatListScreen(dao: SamalDao, api: SamalApi, me: String, onOpen: (ChatEntity
                     renaming = null
                     scope.launch {
                         dao.renameLocal(chat.id, next)
-                        withContext(Dispatchers.IO) { runCatching { api.renameChat(chat.id, next) } }
+                        val clean = nick.trim().removePrefix("@")
+                        withContext(Dispatchers.IO) {
+                            runCatching { api.renameChat(chat.id, next, if (nickReady) clean else null) }
+                        }
                     }
                 }.padding(8.dp))
             },
@@ -217,7 +227,10 @@ fun ChatListScreen(dao: SamalDao, api: SamalApi, me: String, onOpen: (ChatEntity
                 Text(stringResource(R.string.cancel), color = Muted, modifier = Modifier.clickable { renaming = null }.padding(8.dp))
             },
             text = {
-                TextField(value = title, onValueChange = { title = it }, label = { Text(stringResource(R.string.group_title)) }, colors = fieldColors())
+                Column {
+                    TextField(value = title, onValueChange = { title = it }, label = { Text(stringResource(R.string.group_title)) }, colors = fieldColors())
+                    TextField(value = nick, onValueChange = { nick = it.removePrefix("@") }, label = { Text(stringResource(R.string.group_nick)) }, colors = fieldColors())
+                }
             },
             containerColor = Elevated,
         )
@@ -232,6 +245,7 @@ private fun NewChatDialog(api: SamalApi, dao: SamalDao, me: String, onOpen: (Cha
     var found by remember { mutableStateOf(listOf<JSONObject>()) }
     var group by remember { mutableStateOf(false) }
     var title by remember { mutableStateOf("") }
+    var nick by remember { mutableStateOf("") }
     var picked by remember { mutableStateOf(setOf<String>()) }
     val scope = rememberCoroutineScope()
     LaunchedEffect(q) {
@@ -256,7 +270,10 @@ private fun NewChatDialog(api: SamalApi, dao: SamalDao, me: String, onOpen: (Cha
                     val name = title.trim()
                     if (name.length < 2 || picked.isEmpty()) return@clickable
                     scope.launch {
-                        val chat = withContext(Dispatchers.IO) { runCatching { chatEntity(api.group(name, picked.toList())) }.getOrNull() } ?: return@launch
+                        val clean = nick.trim().removePrefix("@")
+                        val chat = withContext(Dispatchers.IO) {
+                            runCatching { chatEntity(api.group(name, picked.toList(), clean.ifBlank { null })) }.getOrNull()
+                        } ?: return@launch
                         dao.upsertChats(listOf(chat))
                         onOpen(chat)
                     }
@@ -275,6 +292,7 @@ private fun NewChatDialog(api: SamalApi, dao: SamalDao, me: String, onOpen: (Cha
                 }
                 if (group) {
                     TextField(value = title, onValueChange = { title = it }, placeholder = { Text(stringResource(R.string.group_title), color = Muted) }, colors = fieldColors())
+                    TextField(value = nick, onValueChange = { nick = it.removePrefix("@") }, placeholder = { Text(stringResource(R.string.group_nick), color = Muted) }, colors = fieldColors())
                 }
                 TextField(value = q, onValueChange = { q = it }, placeholder = { Text(stringResource(R.string.search_people), color = Muted) }, colors = fieldColors())
                 found.forEach { user ->

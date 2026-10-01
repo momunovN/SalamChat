@@ -113,12 +113,20 @@ final class APIClient {
         let _: JSONValue = try await send("/v1/chats/\(id.uuidString)", method: "DELETE", body: nil, authed: true)
     }
 
-    func renameChat(id: UUID, title: String) async throws {
-        let _: JSONValue = try await send("/v1/chats/\(id.uuidString)", method: "PATCH", body: ["title": title], authed: true)
+    func chat(id: UUID) async throws -> APIChat {
+        try await get("/v1/chats/\(id.uuidString)")
     }
 
-    func group(title: String, memberIDs: [String]) async throws -> APIChat {
-        try await post("/v1/chats/groups", body: ["title": title, "member_ids": memberIDs])
+    func renameChat(id: UUID, title: String, username: String? = nil) async throws {
+        var body: [String: Any] = ["title": title]
+        if let username { body["username"] = username }
+        let _: JSONValue = try await send("/v1/chats/\(id.uuidString)", method: "PATCH", body: body, authed: true)
+    }
+
+    func group(title: String, memberIDs: [String], username: String? = nil) async throws -> APIChat {
+        var body: [String: Any] = ["title": title, "member_ids": memberIDs]
+        if let username, !username.isEmpty { body["username"] = username }
+        return try await post("/v1/chats/groups", body: body)
     }
 
     func members(chatID: UUID) async throws -> [APIChatMember] {
@@ -189,11 +197,29 @@ final class APIClient {
         return w.items
     }
 
-    func patchMe(displayName: String, username: String?, bio: String? = nil) async throws -> APIUser {
+    func patchMe(
+        displayName: String,
+        username: String?,
+        bio: String? = nil,
+        birthDate: String? = nil,
+        address: String? = nil,
+        usernameHidden: Bool? = nil
+    ) async throws -> APIUser {
         var body: [String: Any] = ["display_name": displayName]
-        if let username, !username.isEmpty { body["username"] = username }
+        if let username { body["username"] = username }
         if let bio { body["bio"] = bio }
+        if let birthDate { body["birth_date"] = birthDate }
+        if let address { body["address"] = address }
+        if let usernameHidden { body["username_hidden"] = usernameHidden }
         return try await send("/v1/me", method: "PATCH", body: body, authed: true)
+    }
+
+    func library(id: String) async throws -> ProfileLibrary {
+        try await get("/v1/users/\(id)/library")
+    }
+
+    func setNotifications(id: String, enabled: Bool) async throws -> NotifyResult {
+        try await send("/v1/users/\(id)/notifications", method: "PATCH", body: ["enabled": enabled], authed: true)
     }
 
     func syncContacts(enabled: Bool, items: [BookContact]) async throws {

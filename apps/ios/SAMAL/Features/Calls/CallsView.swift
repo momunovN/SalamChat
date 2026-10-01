@@ -219,6 +219,9 @@ struct MoreView: View {
     @State private var name = ""
     @State private var nick = ""
     @State private var bio = ""
+    @State private var birth = ""
+    @State private var address = ""
+    @State private var hideNick = false
     @State private var error: String?
     @State private var busy = false
 
@@ -250,6 +253,12 @@ struct MoreView: View {
                     Text(L10n.nickHint).font(SamalFont.caption()).foregroundStyle(SamalColor.muted)
                     Text(L10n.fieldBio).font(SamalFont.caption()).foregroundStyle(SamalColor.muted)
                     field($bio)
+                    Toggle(L10n.hideNick, isOn: $hideNick).tint(SamalColor.accent)
+                    Text(L10n.hideNickHint).font(SamalFont.caption()).foregroundStyle(SamalColor.muted)
+                    Text(L10n.fieldBirth).font(SamalFont.caption()).foregroundStyle(SamalColor.muted)
+                    field($birth, prompt: "1990-01-01")
+                    Text(L10n.fieldAddress).font(SamalFont.caption()).foregroundStyle(SamalColor.muted)
+                    field($address)
                     if let error {
                         Text(error).font(SamalFont.caption()).foregroundStyle(SamalColor.danger)
                     }
@@ -283,6 +292,9 @@ struct MoreView: View {
             name = session.user?.displayName ?? ""
             nick = session.user?.username ?? ""
             bio = session.user?.bio ?? ""
+            birth = session.user?.birthDate ?? ""
+            address = session.user?.address ?? ""
+            hideNick = session.user?.usernameHidden ?? false
         }
     }
 
@@ -304,8 +316,8 @@ struct MoreView: View {
             .buttonStyle(.plain)
     }
 
-    private func field(_ binding: Binding<String>) -> some View {
-        TextField("", text: binding)
+    private func field(_ binding: Binding<String>, prompt: String = "") -> some View {
+        TextField(prompt, text: binding)
             .font(SamalFont.body())
             .foregroundStyle(SamalColor.text)
             .padding(.horizontal, 14)
@@ -327,8 +339,11 @@ struct MoreView: View {
                 let clean = nick.trimmingCharacters(in: .whitespacesAndNewlines).trimmingPrefix("@")
                 let user = try await session.api.patchMe(
                     displayName: trimmed,
-                    username: clean.isEmpty ? nil : String(clean),
-                    bio: bio
+                    username: clean.isEmpty ? "" : String(clean),
+                    bio: bio,
+                    birthDate: birth.trimmingCharacters(in: .whitespacesAndNewlines),
+                    address: address.trimmingCharacters(in: .whitespacesAndNewlines),
+                    usernameHidden: hideNick
                 )
                 session.updateUser(user)
             } catch {

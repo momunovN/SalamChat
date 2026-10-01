@@ -54,7 +54,7 @@ export async function listContacts(ownerId: string): Promise<{ items: ContactUse
   const rows = await query<
     UserRow & { book_name: string; contacts_sync?: boolean }
   >(
-    `SELECT u.id, u.phone, u.display_name, u.username, u.avatar_url, u.bio, u.created_at, u.updated_at, u.last_seen_at,
+    `SELECT u.id, u.phone, u.display_name, u.username, u.username_hidden, u.avatar_url, u.bio, u.created_at, u.updated_at, u.last_seen_at,
             c.book_name
      FROM contacts c
      JOIN users u ON u.phone = c.phone
@@ -65,10 +65,12 @@ export async function listContacts(ownerId: string): Promise<{ items: ContactUse
   );
   return {
     synced,
-    items: rows.map((r) => ({
-      ...mapUser(r, presence.online(r.id)),
-      book_name: r.book_name || undefined,
-    })),
+    items: rows.map((r) => {
+      const user = mapUser(r, presence.online(r.id));
+      if (r.username_hidden) user.username = undefined;
+      user.email = undefined;
+      return { ...user, book_name: r.book_name || undefined };
+    }),
   };
 }
 

@@ -6,6 +6,8 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import org.json.JSONArray
+import java.time.Instant
 import android.media.AudioAttributes
 import android.media.MediaPlayer
 import android.os.Handler
@@ -91,5 +93,43 @@ object Notifier {
                 }
             }, 220)
         }
+    }
+}
+
+object Mutes {
+    private const val PREFS = "samal.session"
+    private const val KEY = "muted.chats"
+
+    private fun prefs(ctx: Context) = ctx.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+
+    private fun ids(ctx: Context) = (prefs(ctx).getStringSet(KEY, emptySet()) ?: emptySet()).toMutableSet()
+
+    fun has(ctx: Context, chatId: String): Boolean {
+        if (chatId.isBlank()) return false
+        return ids(ctx).contains(chatId.lowercase())
+    }
+
+    fun set(ctx: Context, chatId: String, muted: Boolean) {
+        if (chatId.isBlank()) return
+        val next = ids(ctx)
+        val id = chatId.lowercase()
+        if (muted) next.add(id) else next.remove(id)
+        prefs(ctx).edit().putStringSet(KEY, next).apply()
+    }
+
+    fun applyList(ctx: Context, items: JSONArray) {
+        val next = ids(ctx)
+        val now = System.currentTimeMillis()
+        for (i in 0 until items.length()) {
+            val row = items.optJSONObject(i) ?: continue
+            val id = row.optString("id").lowercase()
+            if (id.isBlank()) continue
+            val until = row.optString("muted_until")
+            val muted = until.isNotBlank() && until != "null" && runCatching {
+                Instant.parse(until).toEpochMilli() > now
+            }.getOrDefault(false)
+            if (muted) next.add(id) else next.remove(id)
+        }
+        prefs(ctx).edit().putStringSet(KEY, next).apply()
     }
 }

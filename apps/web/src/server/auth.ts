@@ -5,9 +5,10 @@ import { forgetName } from "./valkey";
 import { jwtSecret } from "./env";
 import { HttpError } from "./http";
 import { sanitizeDisplayName, sanitizeUsername } from "@/lib/name";
+import { nickTaken } from "./nicks";
 import { defaultDisplayName, normalizeEmail, optionalPhone } from "./phone";
 
-const USER_COLS = `id, phone, email, display_name, username, avatar_url, bio, created_at, updated_at, last_seen_at`;
+const USER_COLS = `id, phone, email, display_name, username, avatar_url, bio, birth_date, address, username_hidden, public_id, created_at, updated_at, last_seen_at`;
 
 export type User = {
   id: string;
@@ -17,6 +18,11 @@ export type User = {
   username?: string | null;
   avatar_url?: string | null;
   bio: string;
+  birth_date?: string | null;
+  address?: string;
+  username_hidden?: boolean;
+  public_id?: string | null;
+  notifications?: boolean;
   created_at: string;
   updated_at: string;
   last_seen_at?: string | null;
@@ -32,6 +38,10 @@ type UserRow = {
   username: string | null;
   avatar_url: string | null;
   bio: string;
+  birth_date?: Date | string | null;
+  address?: string | null;
+  username_hidden?: boolean | null;
+  public_id?: string | null;
   created_at: Date | string;
   updated_at: Date | string;
   last_seen_at: Date | string | null;
@@ -45,6 +55,15 @@ function asIso(d: Date | string | null | undefined) {
     return Number.isNaN(t.getTime()) ? d : t.toISOString();
   }
   return d.toISOString();
+}
+
+function asDate(d: Date | string | null | undefined) {
+  if (!d) return undefined;
+  if (typeof d === "string") return d.slice(0, 10);
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
 function secretKey() {
@@ -75,6 +94,10 @@ function mapUser(r: UserRow, online?: boolean): User {
     username: r.username ?? undefined,
     avatar_url: r.avatar_url ?? undefined,
     bio: r.bio ?? "",
+    birth_date: asDate(r.birth_date) ?? null,
+    address: r.address ?? "",
+    username_hidden: !!r.username_hidden,
+    public_id: r.public_id ?? undefined,
     created_at: asIso(r.created_at) || new Date().toISOString(),
     updated_at: asIso(r.updated_at) || new Date().toISOString(),
     last_seen_at: asIso(r.last_seen_at),
@@ -263,9 +286,34 @@ export async function getUser(id: string): Promise<User> {
   return mapUser(row);
 }
 
+function parseBirth(raw: string) {
+  const s = raw.trim();
+  if (!s) return null;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) throw new HttpError(400, "bad_request", "invalid birth date");
+  const d = new Date(`${s}T00:00:00Z`);
+  if (Number.isNaN(d.getTime())) throw new HttpError(400, "bad_request", "invalid birth date");
+  const year = Number(s.slice(0, 4));
+  if (year < 1900 || d.getTime() > Date.now()) throw new HttpError(400, "bad_request", "invalid birth date");
+  return s;
+}
+
+function parseAddress(raw: string) {
+  const s = raw.trim().replace(/\s+/g, " ");
+  if ([...s].length > 160) throw new HttpError(400, "bad_request", "invalid address");
+  return s;
+}
+
 export async function updateMe(
   id: string,
-  patch: { display_name?: string; username?: string; bio?: string; avatar_url?: string },
+  patch: {
+    display_name?: string;
+    username?: string;
+    bio?: string;
+    avatar_url?: string;
+    birth_date?: string | null;
+    address?: string;
+    username_hidden?: boolean;
+  },
 ) {
   let displayName = patch.display_name ?? null;
   if (patch.display_name !== undefined) {
@@ -277,23 +325,24 @@ export async function updateMe(
     const nick = sanitizeUsername(patch.username);
     if (nick === null) throw new HttpError(400, "bad_request", "invalid username");
     if (nick) {
-      const taken = await queryOne<{ id: string }>(
-        `SELECT id FROM users WHERE lower(username)=lower($1) AND id<>$2`,
-        [nick, id],
-      );
-      if (taken) throw new HttpError(409, "conflict", "username taken");
+      if (await nickTaken(nick, { userId: id })) throw new HttpError(409, "conflict", "username taken");
       username = nick;
     } else {
       username = null;
     }
   }
+  const birth = patch.birth_date !== undefined ? parseBirth(patch.birth_date || "") : null;
+  const address = patch.address !== undefined ? parseAddress(patch.address) : null;
   try {
     await query(
       `UPDATE users SET
         display_name = COALESCE($2, display_name),
-        username = CASE WHEN $6 THEN $3 ELSE COALESCE($3, username) END,
+        username = CASE WHEN $6 THEN $3 ELSE username END,
         bio = COALESCE($4, bio),
         avatar_url = COALESCE($5, avatar_url),
+        birth_date = CASE WHEN $7 THEN $8::date ELSE birth_date END,
+        address = CASE WHEN $9 THEN $10 ELSE address END,
+        username_hidden = CASE WHEN $11 THEN $12 ELSE username_hidden END,
         updated_at = now()
        WHERE id=$1`,
       [
@@ -303,11 +352,19 @@ export async function updateMe(
         patch.bio ?? null,
         patch.avatar_url ?? null,
         patch.username !== undefined,
+        patch.birth_date !== undefined,
+        birth,
+        patch.address !== undefined,
+        address,
+        patch.username_hidden !== undefined,
+        !!patch.username_hidden,
       ],
     );
   } catch (err) {
     const msg = err instanceof Error ? err.message : "";
-    if (/users_username|duplicate key/i.test(msg)) throw new HttpError(409, "conflict", "username taken");
+    if (/users_username|duplicate key|users_public_id|chats_username/i.test(msg)) {
+      throw new HttpError(409, "conflict", "username taken");
+    }
     throw err;
   }
   if (displayName) void forgetName(id);

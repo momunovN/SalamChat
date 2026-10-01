@@ -162,12 +162,14 @@ final class AppDatabase {
     }
 
     func upsertChats(_ chats: [APIChat]) throws {
+        Mutes.apply(chats)
         try dbQueue.write { db in
             for c in chats { try saveChat(c, db: db) }
         }
     }
 
     func replaceChats(_ chats: [APIChat]) throws {
+        Mutes.apply(chats)
         try dbQueue.write { db in
             let ids = chats.map(\.id.uuidString)
             if ids.isEmpty {

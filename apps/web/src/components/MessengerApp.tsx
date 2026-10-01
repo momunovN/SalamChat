@@ -20,7 +20,7 @@ import {
 import { api, loadSession, saveSession } from "@/lib/api";
 import { dedupeChats, dedupeMessages, forgetChat, mergeChats, mergeThread, readActive, readRoster, readThread, writeActive, writeRoster, writeThread } from "@/lib/cache";
 import { captureAudio, captureVideo, forgetMedia, mediaRemembered, rememberMedia, stopCallMedia, warmCallConnection, type CallMedia } from "@/lib/callMedia";
-import { lastPreview, nickFromPath, pathForChat } from "@/lib/chat";
+import { chatMatchesSlug, lastPreview, pathForChat, pathsEqual, slugFromPath } from "@/lib/chat";
 import { dict, type Lang } from "@/lib/i18n";
 import { needsDisplayName, sanitizeDisplayName, sanitizeUsername } from "@/lib/name";
 import {
@@ -97,10 +97,15 @@ export function MessengerApp() {
   const [rename, setRename] = useState<Chat | null>(null);
   const [renameTitle, setRenameTitle] = useState("");
   const [groupTitle, setGroupTitle] = useState("");
+  const [groupNick, setGroupNick] = useState("");
   const [picked, setPicked] = useState<string[]>([]);
   const [name, setName] = useState("");
   const [username, setUsername] = useState("");
   const [bio, setBio] = useState("");
+  const [birth, setBirth] = useState("");
+  const [address, setAddress] = useState("");
+  const [hideNick, setHideNick] = useState(false);
+  const [renameNick, setRenameNick] = useState("");
   const activeIdRef = useRef<string | null>(null);
   const meRef = useRef<string | undefined>(undefined);
   const activeCallIdRef = useRef<string | null>(null);
@@ -149,12 +154,13 @@ export function MessengerApp() {
         setName(s.user.display_name);
         setUsername(s.user.username || "");
         setBio(s.user.bio || "");
+        setBirth(s.user.birth_date || "");
+        setAddress(s.user.address || "");
+        setHideNick(!!s.user.username_hidden);
         const roster = readRoster(s.user.id);
         if (roster.length) setChats(roster);
-        const fromUrl = nickFromPath(window.location.pathname);
-        const linked = fromUrl
-          ? roster.find((chat) => chat.type !== "group" && (chat.peer?.username || "").toLowerCase() === fromUrl)
-          : undefined;
+        const fromUrl = slugFromPath(window.location.pathname);
+        const linked = fromUrl ? roster.find((chat) => chatMatchesSlug(chat, fromUrl)) : undefined;
         if (linked) {
           activeChatRef.current = linked;
           setActiveId(linked.id);
@@ -173,6 +179,22 @@ export function MessengerApp() {
       setReady(true);
       if (s?.user && !needsDisplayName(s.user.display_name) && shouldAskNotify()) setNotifyAsk(true);
     });
+    if (s?.access_token) {
+      void api.me().then((user) => {
+        setSession((prev) => {
+          if (!prev || prev.user.id !== user.id) return prev;
+          const next = { ...prev, user };
+          saveSession(next);
+          return next;
+        });
+        setName(user.display_name);
+        setUsername(user.username || "");
+        setBio(user.bio || "");
+        setBirth(user.birth_date || "");
+        setAddress(user.address || "");
+        setHideNick(!!user.username_hidden);
+      }).catch(() => undefined);
+    }
   }, []);
 
   useEffect(() => {
@@ -406,9 +428,12 @@ export function MessengerApp() {
           });
           void refreshChats();
           if (!mine && msg.author_id) {
-            playMessageChime();
+            const row = chatsRef.current.find((chat) => chat.id === msg.chat_id) || pinnedChats.current.get(msg.chat_id);
+            const until = row?.muted_until ? new Date(row.muted_until).getTime() : 0;
+            const quiet = until > Date.now();
+            if (!quiet) playMessageChime();
             const looking = document.visibilityState === "visible" && openId === msg.chat_id;
-            if (!looking) {
+            if (!looking && !quiet) {
               const title = chatsRef.current.find((chat) => chat.id === msg.chat_id)?.title || "Salam";
               const body = msg.type === "photo" ? msg.payload?.text || "" : msg.payload?.text || msg.payload?.caption || "";
               notifyMessage(title, body);
@@ -794,7 +819,7 @@ export function MessengerApp() {
 
   function publishUrl(want: string, mode: "push" | "replace") {
     const now = window.location.pathname || "/";
-    if (now === want) return;
+    if (pathsEqual(now, want)) return;
     pendingUrl.current = want;
     const nav = { scroll: false } as const;
     if (mode === "push") router.push(want, nav);
@@ -823,6 +848,21 @@ export function MessengerApp() {
     publishUrl(pathForChat(chat), "push");
   }
 
+  async function openKnown(id: string) {
+    const have = chatsRef.current.find((chat) => chat.id === id) || pinnedChats.current.get(id);
+    if (have) {
+      selectChat(have.id, have);
+      return;
+    }
+    try {
+      const chat = await api.chat(id);
+      showChat(chat);
+      selectChat(chat.id, chat);
+    } catch {
+      /* the profile stays on the current chat */
+    }
+  }
+
   async function openDirect(userId: string) {
     try {
       const chat = await api.direct(userId);
@@ -839,14 +879,22 @@ export function MessengerApp() {
     if (!title || groupBusy.current) return;
     groupBusy.current = true;
     try {
-      const chat = await api.group(title, picked);
+      const nick = sanitizeUsername(groupNick);
+      if (groupNick.trim() && !nick) {
+        setProfileError(t.errNick);
+        return;
+      }
+      const chat = await api.group(title, picked, nick || undefined);
       showChat(chat);
       selectChat(chat.id, chat);
       setNewOpen(null);
       setGroupTitle("");
+      setGroupNick("");
       setPicked([]);
-    } catch {
-      /* the picker stays open */
+      setProfileError(null);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "";
+      setProfileError(/username taken|conflict/i.test(msg) ? t.errNickTaken : t.errLogin);
     } finally {
       groupBusy.current = false;
     }
@@ -863,19 +911,26 @@ export function MessengerApp() {
     if (!rename) return;
     const title = renameTitle.trim();
     if (!title) return;
+    const nick = sanitizeUsername(renameNick);
+    if (renameNick.trim() && !nick) {
+      setProfileError(t.errNick);
+      return;
+    }
     const id = rename.id;
     setRename(null);
+    setProfileError(null);
     renamed.current.set(id, title);
-    paintChat(id, (chat) => ({ ...chat, title }));
+    paintChat(id, (chat) => ({ ...chat, title, username: nick || null }));
     const userId = meRef.current;
     if (userId) {
-      const stored = readRoster(userId).map((chat) => (chat.id === id ? { ...chat, title } : chat));
+      const stored = readRoster(userId).map((chat) => (chat.id === id ? { ...chat, title, username: nick || null } : chat));
       writeRoster(userId, stored);
     }
     try {
-      await api.renameChat(id, title);
+      await api.renameChat(id, title, nick || "");
     } catch {
       renamed.current.delete(id);
+      setProfileError(t.errNickTaken);
       void refreshChats();
     }
   }
@@ -901,7 +956,14 @@ export function MessengerApp() {
     }
     setProfileError(null);
     try {
-      const user = await api.patchMe({ display_name: nextName, ...(nick ? { username: nick } : {}), bio });
+      const user = await api.patchMe({
+        display_name: nextName,
+        username: nick || "",
+        bio,
+        birth_date: birth,
+        address,
+        username_hidden: hideNick,
+      });
       if (session) {
         const next = { ...session, user };
         saveSession(next);
@@ -909,7 +971,9 @@ export function MessengerApp() {
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : "";
-      setProfileError(/username taken|conflict/i.test(msg) ? t.errNickTaken : t.errLogin);
+      setProfileError(
+        /username taken|conflict/i.test(msg) ? t.errNickTaken : /birth/i.test(msg) ? t.errBirth : t.errLogin,
+      );
     }
   }
 
@@ -923,7 +987,7 @@ export function MessengerApp() {
     activeChatRef.current = fresh;
     if (!ready || !session || bootRef.current || pendingUrl.current || nickFlight.current) return;
     const want = pathForChat(fresh);
-    if ((window.location.pathname || "/") !== want) {
+    if (!pathsEqual(window.location.pathname || "/", want)) {
       pendingUrl.current = want;
       router.replace(want, { scroll: false });
     }
@@ -932,11 +996,11 @@ export function MessengerApp() {
   useEffect(() => {
     if (!ready || !session) return;
     if (pendingUrl.current) {
-      if ((pathname || "/") === pendingUrl.current) pendingUrl.current = null;
+      if (pathsEqual(pathname || "/", pendingUrl.current)) pendingUrl.current = null;
       bootRef.current = false;
       return;
     }
-    const nick = nickFromPath(pathname);
+    const nick = slugFromPath(pathname);
     if (!nick && pathname.startsWith("/cont/")) {
       pendingUrl.current = "/";
       routerRef.current.replace("/", { scroll: false });
@@ -957,20 +1021,21 @@ export function MessengerApp() {
       nickFlight.current = flight;
       try {
         const have =
-          chatsRef.current.find((chat) => chat.type !== "group" && (chat.peer?.username || "").toLowerCase() === name) ||
-          [...pinnedChats.current.values()].find((chat) => chat.type !== "group" && (chat.peer?.username || "").toLowerCase() === name);
+          chatsRef.current.find((chat) => chatMatchesSlug(chat, name)) ||
+          [...pinnedChats.current.values()].find((chat) => chatMatchesSlug(chat, name));
         let chat = have;
         if (!chat) {
-          const found = await api.users(name);
+          const found = await api.resolve(name);
           if (cancelled() || nickFlight.current !== flight) return;
-          const user = found.items.find((item) => (item.username || "").toLowerCase() === name);
-          if (!user) {
+          if (found.chat) chat = found.chat;
+          else if (found.user) {
+            chat = await api.direct(found.user.id);
+            if (cancelled() || nickFlight.current !== flight) return;
+          } else {
             pendingUrl.current = "/";
             routerRef.current.replace("/", { scroll: false });
             return;
           }
-          chat = await api.direct(user.id);
-          if (cancelled() || nickFlight.current !== flight) return;
         }
         if (cancelled() || nickFlight.current !== flight || !chat) return;
         showChatRef.current(chat);
@@ -986,11 +1051,11 @@ export function MessengerApp() {
     }
 
     if (isBoot) {
-      if (nick && (activeChatRef.current?.peer?.username || "").toLowerCase() !== nick) void openNick(nick);
+      if (nick && !chatMatchesSlug(activeChatRef.current, nick)) void openNick(nick);
       else {
         const chat = activeChatRef.current;
         const want = pathForChat(chat);
-        if (chat && chat.id === activeIdRef.current && want !== (pathname || "/")) {
+        if (chat && chat.id === activeIdRef.current && !pathsEqual(want, pathname || "/")) {
           pendingUrl.current = want;
           routerRef.current.replace(want, { scroll: false });
         }
@@ -1000,7 +1065,7 @@ export function MessengerApp() {
         activeChatRef.current = null;
         setActiveId(null);
       }
-    } else if ((activeChatRef.current?.peer?.username || "").toLowerCase() !== nick) {
+    } else if (!chatMatchesSlug(activeChatRef.current, nick)) {
       void openNick(nick);
     }
 
@@ -1304,12 +1369,30 @@ export function MessengerApp() {
               />
             </div>
             <p className="mt-1 text-xs text-muted">{t.nickHint}</p>
+            <label className="mt-3 flex items-center gap-2 text-sm text-ink">
+              <input type="checkbox" checked={hideNick} onChange={(e) => setHideNick(e.target.checked)} />
+              {t.hideNick}
+            </label>
+            <p className="mt-1 text-xs text-muted">{t.hideNickHint}</p>
             <label className="mt-3 block text-xs font-medium text-muted">{t.bio}</label>
             <textarea
               value={bio}
               onChange={(e) => setBio(e.target.value)}
               rows={3}
               className="mt-1 w-full resize-none rounded-xl bg-elevated px-3 py-2 text-ink outline-none"
+            />
+            <label className="mt-3 block text-xs font-medium text-muted">{t.birth}</label>
+            <input
+              type="date"
+              value={birth}
+              onChange={(e) => setBirth(e.target.value)}
+              className="mt-1 h-11 w-full rounded-xl bg-elevated px-3 text-ink outline-none"
+            />
+            <label className="mt-3 block text-xs font-medium text-muted">{t.address}</label>
+            <input
+              value={address}
+              onChange={(e) => setAddress(e.target.value)}
+              className="mt-1 h-11 w-full rounded-xl bg-elevated px-3 text-ink outline-none"
             />
             {profileError ? <p className="mt-2 text-xs font-medium text-danger">{profileError}</p> : null}
             <button
@@ -1382,6 +1465,8 @@ export function MessengerApp() {
       onBack={() => leaveChat()}
       onRefreshChats={() => void refreshChats()}
       onOpenDirect={(userId) => void openDirect(userId)}
+      onOpenChat={(id) => void openKnown(id)}
+      onMuted={(chatId, mutedUntil) => paintChat(chatId, (chat) => ({ ...chat, muted_until: mutedUntil }))}
       onCall={(kind) => void beginCall(active.id, kind)}
       onLocal={(last) => {
         const chatId = activeIdRef.current;
@@ -1477,12 +1562,24 @@ export function MessengerApp() {
               </button>
             </div>
             {newOpen === "group" ? (
-              <input
-                value={groupTitle}
-                onChange={(e) => setGroupTitle(e.target.value)}
-                placeholder={t.groupTitle}
-                className="mb-3 h-11 w-full rounded-xl bg-bg px-3 text-ink outline-none"
-              />
+              <>
+                <input
+                  value={groupTitle}
+                  onChange={(e) => setGroupTitle(e.target.value)}
+                  placeholder={t.groupTitle}
+                  className="mb-3 h-11 w-full rounded-xl bg-bg px-3 text-ink outline-none"
+                />
+                <input
+                  value={groupNick}
+                  onChange={(e) => {
+                    setGroupNick(e.target.value.replace(/^@/, ""));
+                    setProfileError(null);
+                  }}
+                  placeholder={t.groupNick}
+                  className="mb-3 h-11 w-full rounded-xl bg-bg px-3 text-ink outline-none"
+                />
+                {profileError ? <p className="mb-3 text-xs font-medium text-danger">{profileError}</p> : null}
+              </>
             ) : null}
             <label className="mb-3 flex h-10 items-center gap-2 rounded-xl bg-bg px-3">
               <Search size={16} className="text-muted" />
@@ -1562,6 +1659,8 @@ export function MessengerApp() {
                 type="button"
                 onClick={() => {
                   setRenameTitle(chatMenu.title);
+                  setRenameNick(chatMenu.username || "");
+                  setProfileError(null);
                   setRename(chatMenu);
                   setChatMenu(null);
                 }}
@@ -1591,6 +1690,16 @@ export function MessengerApp() {
               placeholder={t.newTitle}
               className="mb-3 h-11 w-full rounded-xl bg-bg px-3 text-ink outline-none"
             />
+            <input
+              value={renameNick}
+              onChange={(e) => {
+                setRenameNick(e.target.value.replace(/^@/, ""));
+                setProfileError(null);
+              }}
+              placeholder={t.groupNick}
+              className="mb-3 h-11 w-full rounded-xl bg-bg px-3 text-ink outline-none"
+            />
+            {profileError ? <p className="mb-3 text-xs font-medium text-danger">{profileError}</p> : null}
             <button
               type="button"
               disabled={!renameTitle.trim()}

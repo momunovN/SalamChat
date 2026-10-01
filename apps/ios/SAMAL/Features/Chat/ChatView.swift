@@ -335,9 +335,11 @@ struct ChatView: View {
                 nextChat = chat
             }
         }) { target in
-            ProfileSheet(userID: target.id, canWrite: target.canWrite) { user in
+            ProfileSheet(userID: target.id, canWrite: target.canWrite, onWrite: { user in
                 Task { await openProfileChat(user) }
-            }
+            }, onOpenGroup: { id in
+                Task { await openGroupChat(id) }
+            })
             .environmentObject(session)
         }
         .navigationDestination(item: $nextChat) { chat in
@@ -360,6 +362,24 @@ struct ChatView: View {
             title: chat.title.isEmpty ? user.displayName : chat.title,
             avatarURL: chat.avatarURL ?? user.avatarURL,
             peerID: chat.peer?.id.uuidString ?? user.id.uuidString,
+            lastText: "",
+            lastAt: chat.updatedAt,
+            unread: chat.unreadCount,
+            memberCount: chat.memberCount
+        )
+        pendingChat = local
+        profile = nil
+    }
+
+    private func openGroupChat(_ id: String) async {
+        guard let uuid = UUID(uuidString: id), let chat = try? await session.api.chat(id: uuid) else { return }
+        try? AppDatabase.shared.upsertChats([chat])
+        let local = LocalChat(
+            id: chat.id.uuidString,
+            type: chat.type,
+            title: chat.title,
+            avatarURL: chat.avatarURL,
+            peerID: chat.peer?.id.uuidString,
             lastText: "",
             lastAt: chat.updatedAt,
             unread: chat.unreadCount,
@@ -687,57 +707,206 @@ struct ProfileSheet: View {
     let userID: String
     var canWrite: Bool
     var onWrite: (APIUser) -> Void
+    var onOpenGroup: (String) -> Void = { _ in }
     @State private var user: APIUser?
+    @State private var library = ProfileLibrary(media: [], links: [], voice: [], groups: [])
+    @State private var libraryReady = false
     @State private var failed = false
+    @State private var tab = 0
+    @State private var notes = true
+    @State private var noteBusy = false
+    @State private var player: AVPlayer?
+
+    private var isSelf: Bool {
+        session.user?.id.uuidString.lowercased() == userID.lowercased()
+    }
 
     var body: some View {
-        VStack(spacing: 10) {
-            Capsule().fill(SamalColor.muted.opacity(0.4)).frame(width: 36, height: 4).padding(.top, 8)
-            profileAvatar
-            if let name = user?.displayName, !name.isEmpty {
-                Text(name).font(SamalFont.title()).foregroundStyle(SamalColor.text).multilineTextAlignment(.center)
+        ScrollView {
+            VStack(spacing: 10) {
+                Capsule().fill(SamalColor.muted.opacity(0.4)).frame(width: 36, height: 4).padding(.top, 8)
+                profileAvatar
+                if let name = user?.displayName, !name.isEmpty {
+                    Text(name).font(SamalFont.title()).foregroundStyle(SamalColor.text).multilineTextAlignment(.center)
+                }
+                if let nick = user?.username, !nick.isEmpty {
+                    Text("@\(nick)").font(SamalFont.body()).foregroundStyle(SamalColor.accent)
+                }
+                if user?.online == true {
+                    Text(L10n.online).font(SamalFont.caption()).foregroundStyle(SamalColor.success)
+                } else if user?.lastSeenAt != nil {
+                    Text(L10n.lastSeen).font(SamalFont.caption()).foregroundStyle(SamalColor.muted)
+                }
+                VStack(alignment: .leading, spacing: 10) {
+                    if let phone = user?.phone, !phone.isEmpty {
+                        profileRow(L10n.phoneLabel, phone)
+                    }
+                    if let bio = user?.bio, !bio.isEmpty {
+                        profileRow(L10n.fieldBio, bio)
+                    }
+                    if let birth = user?.birthDate, !birth.isEmpty {
+                        profileRow(L10n.fieldBirth, String(birth.prefix(10)))
+                    }
+                    if let address = user?.address, !address.isEmpty {
+                        profileRow(L10n.fieldAddress, address)
+                    }
+                    if !isSelf, user != nil {
+                        Toggle(L10n.notifications, isOn: Binding(
+                            get: { notes },
+                            set: { next in
+                                notes = next
+                                noteBusy = true
+                                Task {
+                                    do {
+                                        let saved = try await session.api.setNotifications(id: userID, enabled: next)
+                                        Mutes.set(saved.chatID, muted: !saved.enabled)
+                                    } catch {
+                                        notes = !next
+                                    }
+                                    noteBusy = false
+                                }
+                            }
+                        ))
+                        .disabled(noteBusy)
+                        .tint(SamalColor.accent)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 8)
+                if failed && user == nil {
+                    Text(L10n.mediaFail).font(SamalFont.caption()).foregroundStyle(SamalColor.muted)
+                }
+                if user == nil && !failed {
+                    ProgressView().padding(.top, 12)
+                }
+                if canWrite, let loaded = user {
+                    Button(L10n.writeUser) { onWrite(loaded) }
+                        .font(SamalFont.headline())
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(SamalColor.accent, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .foregroundStyle(.white)
+                        .padding(.top, 12)
+                }
+                HStack {
+                    tabButton(0, L10n.tabMedia)
+                    tabButton(1, L10n.tabLinks)
+                    tabButton(2, L10n.tabVoice)
+                    tabButton(3, L10n.tabGroups)
+                }
+                .padding(.top, 8)
+                libraryBody
             }
-            if let nick = user?.username, !nick.isEmpty {
-                Text("@\(nick)").font(SamalFont.body()).foregroundStyle(SamalColor.accent)
-            }
-            if user?.online == true {
-                Text(L10n.online).font(SamalFont.caption()).foregroundStyle(SamalColor.success)
-            } else if user?.lastSeenAt != nil {
-                Text(L10n.lastSeen).font(SamalFont.caption()).foregroundStyle(SamalColor.muted)
-            }
-            if let bio = user?.bio, !bio.isEmpty {
-                Text(bio).font(SamalFont.body()).foregroundStyle(SamalColor.text).multilineTextAlignment(.center).padding(.top, 8)
-            }
-            if let phone = user?.phone, !phone.isEmpty {
-                Text(phone).font(SamalFont.body()).foregroundStyle(SamalColor.muted).padding(.top, 4)
-            }
-            if failed && user == nil {
-                Text(L10n.mediaFail).font(SamalFont.caption()).foregroundStyle(SamalColor.muted)
-            }
-            if user == nil && !failed {
-                ProgressView().padding(.top, 12)
-            }
-            if canWrite, let loaded = user {
-                Button(L10n.writeUser) { onWrite(loaded) }
-                    .font(SamalFont.headline())
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-                    .background(SamalColor.accent, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    .foregroundStyle(.white)
-                    .padding(.top, 12)
-            }
-            Spacer()
+            .padding(.horizontal, 24)
+            .padding(.bottom, 24)
         }
-        .padding(.horizontal, 24)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(SamalColor.bg)
         .presentationDetents([.medium, .large])
         .task(id: userID) {
+            async let person = session.api.user(id: userID)
+            async let shelf = session.api.library(id: userID)
             do {
-                user = try await session.api.user(id: userID)
+                let loaded = try await person
+                user = loaded
+                if let flag = loaded.notifications { notes = flag }
             } catch {
                 failed = true
             }
+            if let loaded = try? await shelf {
+                library = loaded
+            }
+            libraryReady = true
+        }
+    }
+
+    private func profileRow(_ label: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label).font(SamalFont.caption()).foregroundStyle(SamalColor.muted)
+            Text(value).font(SamalFont.body()).foregroundStyle(SamalColor.text)
+        }
+    }
+
+    private func tabButton(_ index: Int, _ title: String) -> some View {
+        Button(title) { tab = index }
+            .font(SamalFont.caption().weight(.semibold))
+            .foregroundStyle(tab == index ? SamalColor.accent : SamalColor.muted)
+            .buttonStyle(.plain)
+    }
+
+    @ViewBuilder private var libraryBody: some View {
+        if !libraryReady {
+            ProgressView().padding(.top, 12)
+        } else if currentItemsEmpty {
+            Text(emptyTitle).font(SamalFont.body()).foregroundStyle(SamalColor.muted).padding(.top, 12)
+        } else if tab == 0 {
+            ForEach(library.media) { item in
+                if item.kind == "video" {
+                    Text(L10n.attachVideo).frame(maxWidth: .infinity, alignment: .leading)
+                } else if let url = URL(string: item.url) {
+                    AsyncImage(url: url) { image in
+                        image.resizable().scaledToFill()
+                    } placeholder: {
+                        Color.clear.frame(height: 80)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 160)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+            }
+        } else if tab == 1 {
+            ForEach(library.links) { item in
+                if let url = URL(string: item.url) {
+                    Link(item.url, destination: url)
+                        .font(SamalFont.body())
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+        } else if tab == 2 {
+            ForEach(library.voice) { item in
+                Button(L10n.tabVoice) {
+                    if let url = URL(string: item.url) {
+                        let next = AVPlayer(url: url)
+                        player = next
+                        next.play()
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        } else {
+            ForEach(library.groups) { item in
+                Button {
+                    onOpenGroup(item.id)
+                } label: {
+                    VStack(alignment: .leading) {
+                        Text(item.title).foregroundStyle(SamalColor.text)
+                        if let nick = item.username, !nick.isEmpty {
+                            Text("@\(nick)").font(SamalFont.caption()).foregroundStyle(SamalColor.accent)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private var currentItemsEmpty: Bool {
+        switch tab {
+        case 1: return library.links.isEmpty
+        case 2: return library.voice.isEmpty
+        case 3: return library.groups.isEmpty
+        default: return library.media.isEmpty
+        }
+    }
+
+    private var emptyTitle: String {
+        switch tab {
+        case 1: return L10n.emptyLinks
+        case 2: return L10n.emptyVoice
+        case 3: return L10n.emptyGroups
+        default: return L10n.emptyMedia
         }
     }
 

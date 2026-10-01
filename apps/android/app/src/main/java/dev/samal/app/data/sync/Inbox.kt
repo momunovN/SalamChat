@@ -3,6 +3,7 @@ package dev.samal.app.data.sync
 import android.content.Context
 import dev.samal.app.data.api.SamalApi
 import dev.samal.app.data.db.SamalDao
+import dev.samal.app.data.notify.Mutes
 import dev.samal.app.data.notify.Notifier
 import dev.samal.app.data.session.SessionStore
 import dev.samal.app.ui.previewLabel
@@ -77,6 +78,7 @@ class Inbox(
 
     private suspend fun pull(me: String) {
         val items = api.chats()
+        Mutes.applyList(app, items)
         val chats = (0 until items.length()).map { chatEntity(items.getJSONObject(it)) }
         if (chats.isEmpty()) dao.deleteAllChats()
         else {
@@ -261,6 +263,7 @@ class Inbox(
         if (msg.outgoing) return
         val status = if (looking) "read" else "delivered"
         runCatching { api.receipts(listOf(msg.id), status) }
+        if (Mutes.has(app, msg.chatId)) return
         if (looking) {
             Notifier.chime(app)
         } else {

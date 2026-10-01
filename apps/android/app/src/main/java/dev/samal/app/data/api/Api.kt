@@ -126,13 +126,20 @@ class SamalApi(
 
     fun hideChat(id: String): JSONObject = delete("/v1/chats/$id")
 
-    fun renameChat(id: String, title: String): JSONObject =
-        patch("/v1/chats/$id", JSONObject().put("title", title))
+    fun chat(id: String): JSONObject = get("/v1/chats/$id")
 
-    fun group(title: String, memberIds: List<String>): JSONObject {
+    fun renameChat(id: String, title: String, username: String? = null): JSONObject {
+        val body = JSONObject().put("title", title)
+        if (username != null) body.put("username", username)
+        return patch("/v1/chats/$id", body)
+    }
+
+    fun group(title: String, memberIds: List<String>, username: String? = null): JSONObject {
         val arr = JSONArray()
         memberIds.forEach { arr.put(it) }
-        return post("/v1/chats/groups", JSONObject().put("title", title).put("member_ids", arr), true)
+        val body = JSONObject().put("title", title).put("member_ids", arr)
+        if (!username.isNullOrBlank()) body.put("username", username)
+        return post("/v1/chats/groups", body, true)
     }
 
     fun members(chatId: String): JSONArray =
@@ -181,12 +188,27 @@ class SamalApi(
         return id
     }
 
-    fun patchMe(displayName: String, username: String?, bio: String? = null): JSONObject {
+    fun patchMe(
+        displayName: String,
+        username: String?,
+        bio: String? = null,
+        birthDate: String? = null,
+        address: String? = null,
+        usernameHidden: Boolean? = null,
+    ): JSONObject {
         val body = JSONObject().put("display_name", displayName)
-        if (!username.isNullOrBlank()) body.put("username", username)
+        if (username != null) body.put("username", username)
         if (bio != null) body.put("bio", bio)
+        if (birthDate != null) body.put("birth_date", birthDate)
+        if (address != null) body.put("address", address)
+        if (usernameHidden != null) body.put("username_hidden", usernameHidden)
         return patch("/v1/me", body)
     }
+
+    fun library(id: String): JSONObject = get("/v1/users/$id/library")
+
+    fun setNotifications(id: String, enabled: Boolean): JSONObject =
+        patch("/v1/users/$id/notifications", JSONObject().put("enabled", enabled))
 
     fun syncContacts(enabled: Boolean, items: List<dev.samal.app.data.contacts.BookContact>): JSONObject {
         val arr = JSONArray()

@@ -60,6 +60,8 @@ export function ChatPane({
   onBack,
   onRefreshChats,
   onOpenDirect,
+  onOpenChat,
+  onMuted,
   onCall,
   onLocal,
   onMeta,
@@ -78,6 +80,8 @@ export function ChatPane({
   onBack: () => void;
   onRefreshChats: () => void;
   onOpenDirect: (userId: string) => void;
+  onOpenChat?: (chatId: string) => void;
+  onMuted?: (chatId: string, mutedUntil: string | null) => void;
   onCall: (kind: "audio" | "video") => void;
   onLocal: (last: Message | null) => void;
   onMeta: (patch: { member_count?: number }) => void;
@@ -549,8 +553,8 @@ export function ChatPane({
     : chat.peer?.online
       ? t.online
       : group
-        ? membersPhrase(chat.member_count, t, lang)
-        : t.lastSeen;
+      ? [chat.username ? `@${chat.username}` : "", membersPhrase(chat.member_count, t, lang)].filter(Boolean).join(" · ")
+      : t.lastSeen;
   const subColor = isTyping || chat.peer?.online ? "text-success" : "text-muted";
 
   return (
@@ -1026,6 +1030,14 @@ export function ChatPane({
               : members.find((m) => m.user.id === profileId)?.user
           }
           t={t}
+          lang={lang}
+          self={profileId === me}
+          onMuted={onMuted}
+          onOpenChat={(id) => {
+            setProfileId(null);
+            setMembersOpen(false);
+            onOpenChat?.(id);
+          }}
           onWrite={
             profileId !== me && !(chat.type !== "group" && chat.peer?.id === profileId)
               ? () => {

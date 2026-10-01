@@ -2,7 +2,7 @@ import type { Dict, Lang } from "./i18n";
 import { sanitizeUsername } from "./name";
 import type { Chat, Message } from "./types";
 
-export function nickFromPath(path: string): string | null {
+export function slugFromPath(path: string): string | null {
   const clean = path.split("?")[0].split("#")[0];
   const match = /^\/cont\/([^/]+)\/?$/.exec(clean);
   if (!match) return null;
@@ -12,13 +12,43 @@ export function nickFromPath(path: string): string | null {
   } catch {
     return null;
   }
-  return sanitizeUsername(raw) || null;
+  raw = raw.replace(/^@+/, "").trim().toLowerCase();
+  const nick = sanitizeUsername(raw);
+  if (nick) return nick;
+  if (/^[a-z0-9]{8}$/.test(raw)) return raw;
+  return null;
+}
+
+export function pathsEqual(a: string, b: string) {
+  const norm = (path: string) => {
+    try {
+      return decodeURIComponent(path);
+    } catch {
+      return path;
+    }
+  };
+  return norm(a) === norm(b);
+}
+
+export function chatMatchesSlug(chat: Chat | null | undefined, slug: string) {
+  if (!chat || !slug) return false;
+  if (chat.type === "group") return sanitizeUsername(chat.username || "") === slug;
+  const nick = sanitizeUsername(chat.peer?.username || "");
+  if (nick && nick === slug) return true;
+  return (chat.peer?.public_id || "").toLowerCase() === slug;
 }
 
 export function pathForChat(chat: Chat | null | undefined): string {
-  if (!chat || chat.type === "group") return "/";
+  if (!chat) return "/";
+  if (chat.type === "group") {
+    const nick = sanitizeUsername(chat.username || "");
+    return nick ? `/cont/@${nick}` : "/";
+  }
   const nick = sanitizeUsername(chat.peer?.username || "");
-  return nick ? `/cont/${nick}` : "/";
+  if (nick) return `/cont/@${nick}`;
+  const id = (chat.peer?.public_id || "").toLowerCase();
+  if (/^[a-z0-9]{8}$/.test(id)) return `/cont/${id}`;
+  return "/";
 }
 
 export function payloadText(payload: unknown): string {

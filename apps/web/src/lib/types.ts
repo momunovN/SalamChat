@@ -6,6 +6,11 @@ export type User = {
   username?: string | null;
   avatar_url?: string | null;
   bio: string;
+  birth_date?: string | null;
+  address?: string;
+  username_hidden?: boolean;
+  public_id?: string | null;
+  notifications?: boolean;
   created_at?: string;
   updated_at?: string;
   last_seen_at?: string | null;
@@ -66,13 +71,22 @@ export type Chat = {
   id: string;
   type: string;
   title: string;
+  username?: string | null;
   avatar_url?: string | null;
   peer?: User;
   last_message?: Message | null;
   unread_count: number;
+  muted_until?: string | null;
   member_count: number;
   updated_at: string;
   created_at: string;
+};
+
+export type ProfileLibrary = {
+  media: { id: string; url: string; kind: string; created_at: string }[];
+  links: { id: string; url: string; created_at: string }[];
+  voice: { id: string; url: string; duration_ms?: number | null; created_at: string }[];
+  groups: { id: string; title: string; username?: string | null; avatar_url?: string | null; member_count: number }[];
 };
 
 export type Call = {

@@ -53,6 +53,9 @@ fun MoreScreen(session: SessionStore) {
     var name by remember(user?.id) { mutableStateOf(user?.displayName.orEmpty()) }
     var nick by remember(user?.id) { mutableStateOf(user?.username.orEmpty()) }
     var bio by remember(user?.id) { mutableStateOf(user?.bio.orEmpty()) }
+    var birth by remember(user?.id) { mutableStateOf(user?.birthDate.orEmpty()) }
+    var address by remember(user?.id) { mutableStateOf(user?.address.orEmpty()) }
+    var hideNick by remember(user?.id) { mutableStateOf(user?.usernameHidden == true) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
@@ -73,7 +76,14 @@ fun MoreScreen(session: SessionStore) {
         error = null
         scope.launch {
             try {
-                session.patchProfile(name.trim(), sanitizeUsername(nick)?.ifBlank { null }, bio.trim())
+                session.patchProfile(
+                    name.trim(),
+                    sanitizeUsername(nick)?.ifBlank { "" },
+                    bio.trim(),
+                    birth.trim(),
+                    address.trim(),
+                    hideNick,
+                )
             } catch (e: Exception) {
                 error = e.message ?: "name"
             } finally {
@@ -133,9 +143,29 @@ fun MoreScreen(session: SessionStore) {
             Spacer(Modifier.height(6.dp))
             Text(stringResource(R.string.nick_hint), color = Muted, fontSize = 12.sp)
             Spacer(Modifier.height(12.dp))
+            Text(
+                (if (hideNick) "✓ " else "") + stringResource(R.string.hide_nick),
+                color = if (hideNick) Accent else Text,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Elevated)
+                    .clickable { hideNick = !hideNick }
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(stringResource(R.string.hide_nick_hint), color = Muted, fontSize = 12.sp)
+            Spacer(Modifier.height(12.dp))
             Text(stringResource(R.string.field_bio), color = Muted, fontSize = 12.sp, fontWeight = FontWeight.Medium)
             Spacer(Modifier.height(6.dp))
             AuthField(value = bio, onValueChange = { bio = it }, keyboard = KeyboardType.Text, onGo = ::save)
+            Spacer(Modifier.height(12.dp))
+            Text(stringResource(R.string.field_birth), color = Muted, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+            Spacer(Modifier.height(6.dp))
+            AuthField(value = birth, onValueChange = { birth = it }, keyboard = KeyboardType.Text, onGo = ::save, placeholder = "1990-01-01")
+            Spacer(Modifier.height(12.dp))
+            Text(stringResource(R.string.field_address), color = Muted, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+            Spacer(Modifier.height(6.dp))
+            AuthField(value = address, onValueChange = { address = it }, keyboard = KeyboardType.Text, onGo = ::save)
             if (error != null) {
                 Spacer(Modifier.height(12.dp))
                 Text(

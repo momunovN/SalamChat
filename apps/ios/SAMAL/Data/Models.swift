@@ -8,14 +8,22 @@ struct APIUser: Codable, Hashable, Identifiable {
     var username: String?
     var avatarURL: String?
     var bio: String
+    var birthDate: String?
+    var address: String?
+    var usernameHidden: Bool?
+    var publicId: String?
+    var notifications: Bool?
     var lastSeenAt: Date?
     var online: Bool?
     var bookName: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, phone, email, username, bio, online
+        case id, phone, email, username, bio, online, address, notifications
         case displayName = "display_name"
         case avatarURL = "avatar_url"
+        case birthDate = "birth_date"
+        case usernameHidden = "username_hidden"
+        case publicId = "public_id"
         case lastSeenAt = "last_seen_at"
         case bookName = "book_name"
     }
@@ -41,20 +49,23 @@ struct APIChat: Codable, Identifiable, Hashable {
     var id: UUID
     var type: String
     var title: String
+    var username: String?
     var avatarURL: String?
     var peer: APIUser?
     var lastMessage: APIMessage?
     var unreadCount: Int
     var memberCount: Int
     var updatedAt: Date
+    var mutedUntil: String? = nil
 
     enum CodingKeys: String, CodingKey {
-        case id, type, title, peer
+        case id, type, title, username, peer
         case avatarURL = "avatar_url"
         case lastMessage = "last_message"
         case unreadCount = "unread_count"
         case memberCount = "member_count"
         case updatedAt = "updated_at"
+        case mutedUntil = "muted_until"
     }
 }
 
@@ -213,4 +224,49 @@ struct Envelope: Codable {
 struct AnyCodable: Codable {
     init(from decoder: Decoder) throws { _ = decoder }
     func encode(to encoder: Encoder) throws {}
+}
+
+struct ProfileLibrary: Decodable {
+    var media: [ProfileItem]
+    var links: [ProfileItem]
+    var voice: [ProfileItem]
+    var groups: [ProfileGroup]
+}
+
+struct ProfileItem: Decodable, Identifiable {
+    var id: String
+    var url: String
+    var kind: String?
+    var durationMs: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case id, url, kind
+        case durationMs = "duration_ms"
+    }
+}
+
+struct ProfileGroup: Decodable, Identifiable {
+    var id: String
+    var title: String
+    var username: String?
+    var avatarURL: String?
+    var memberCount: Int
+
+    enum CodingKeys: String, CodingKey {
+        case id, title, username
+        case avatarURL = "avatar_url"
+        case memberCount = "member_count"
+    }
+}
+
+struct NotifyResult: Decodable {
+    var enabled: Bool
+    var chatID: String
+    var mutedUntil: String?
+
+    enum CodingKeys: String, CodingKey {
+        case enabled
+        case chatID = "chat_id"
+        case mutedUntil = "muted_until"
+    }
 }

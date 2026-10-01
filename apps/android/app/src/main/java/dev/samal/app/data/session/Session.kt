@@ -10,6 +10,10 @@ data class User(
     val username: String? = null,
     val avatarUrl: String? = null,
     val bio: String = "",
+    val birthDate: String? = null,
+    val address: String = "",
+    val usernameHidden: Boolean = false,
+    val publicId: String? = null,
 )
 
 data class Session(
@@ -33,7 +37,11 @@ data class Session(
                 .put("display_name", user.displayName)
                 .put("username", user.username)
                 .put("avatar_url", user.avatarUrl)
-                .put("bio", user.bio),
+                .put("bio", user.bio)
+                .put("birth_date", user.birthDate)
+                .put("address", user.address)
+                .put("username_hidden", user.usernameHidden)
+                .put("public_id", user.publicId),
         )
 
     companion object {
@@ -52,6 +60,10 @@ data class Session(
                     username = u.optionalString("username"),
                     avatarUrl = u.optionalString("avatar_url"),
                     bio = u.optString("bio"),
+                    birthDate = u.optionalString("birth_date"),
+                    address = u.optString("address"),
+                    usernameHidden = u.optBoolean("username_hidden", false),
+                    publicId = u.optionalString("public_id"),
                 ),
             )
         }

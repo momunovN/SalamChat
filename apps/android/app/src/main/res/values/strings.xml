@@ -91,4 +91,19 @@
     <string name="preview_fail">Не открылось</string>
     <string name="last_seen">был(а) недавно</string>
     <string name="write_user">Написать</string>
+    <string name="field_birth">Дата рождения</string>
+    <string name="field_address">Адрес</string>
+    <string name="hide_nick">Скрыть ник</string>
+    <string name="hide_nick_hint">Если скрыт, в профиле его не будет, а ссылка — короткий id</string>
+    <string name="notifications">Уведомления</string>
+    <string name="tab_media">Медиа</string>
+    <string name="tab_links">Ссылки</string>
+    <string name="tab_voice">Голосовые</string>
+    <string name="tab_groups">Группы</string>
+    <string name="empty_media">Пока нет медиа</string>
+    <string name="empty_links">Пока нет ссылок</string>
+    <string name="empty_voice">Пока нет голосовых</string>
+    <string name="empty_groups">Пока нет общих групп</string>
+    <string name="group_nick">Ник группы</string>
+    <string name="phone_label">Номер</string>
 </resources>

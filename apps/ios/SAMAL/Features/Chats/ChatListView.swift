@@ -76,6 +76,8 @@ struct ChatListView: View {
     @State private var confirm = false
     @State private var renaming: LocalChat?
     @State private var renameTitle = ""
+    @State private var renameNick = ""
+    @State private var renameNickReady = false
 
     var body: some View {
         NavigationStack {
@@ -134,11 +136,14 @@ struct ChatListView: View {
         }
         .alert(L10n.rename, isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
             TextField(L10n.groupTitle, text: $renameTitle)
+            TextField(L10n.groupNick, text: $renameNick)
             Button(L10n.save) {
                 guard let chat = renaming, let id = UUID(uuidString: chat.id) else { return }
                 let title = renameTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+                let nick = renameNick.trimmingCharacters(in: .whitespacesAndNewlines).trimmingPrefix("@")
+                let ready = renameNickReady
                 Task {
-                    try? await session.api.renameChat(id: id, title: title)
+                    try? await session.api.renameChat(id: id, title: title, username: ready ? String(nick) : nil)
                     await vm.refresh(session: session)
                 }
             }
@@ -240,7 +245,19 @@ struct ChatListView: View {
                             confirm = true
                         }
                         if chat.type == "group" {
-                            Button(L10n.rename) { renameTitle = chat.title; renaming = chat }
+                            Button(L10n.rename) {
+                                renameTitle = chat.title
+                                renameNick = ""
+                                renameNickReady = false
+                                renaming = chat
+                                Task {
+                                    guard let id = UUID(uuidString: chat.id) else { return }
+                                    if let remote = try? await session.api.chat(id: id) {
+                                        renameNick = remote.username ?? ""
+                                    }
+                                    renameNickReady = true
+                                }
+                            }
                         }
                     }
                 }
@@ -316,6 +333,7 @@ struct NewChatSheet: View {
     @State private var found: [APIUser] = []
     @State private var group = false
     @State private var title = ""
+    @State private var nick = ""
     @State private var picked = Set<UUID>()
 
     var body: some View {
@@ -327,6 +345,9 @@ struct NewChatSheet: View {
                 }
                 if group {
                     TextField(L10n.groupTitle, text: $title)
+                        .padding(12)
+                        .background(SamalColor.elevated, in: RoundedRectangle(cornerRadius: 12))
+                    TextField(L10n.groupNick, text: $nick)
                         .padding(12)
                         .background(SamalColor.elevated, in: RoundedRectangle(cornerRadius: 12))
                 }
@@ -381,7 +402,8 @@ struct NewChatSheet: View {
     private func createGroup() async {
         let name = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard name.count >= 2, !picked.isEmpty else { return }
-        guard let chat = try? await session.api.group(title: name, memberIDs: picked.map(\.uuidString)) else { return }
+        let clean = nick.trimmingCharacters(in: .whitespacesAndNewlines).trimmingPrefix("@")
+        guard let chat = try? await session.api.group(title: name, memberIDs: picked.map(\.uuidString), username: clean.isEmpty ? nil : String(clean)) else { return }
         try? AppDatabase.shared.upsertChats([chat])
         onOpen(local(chat, fallback: name))
     }

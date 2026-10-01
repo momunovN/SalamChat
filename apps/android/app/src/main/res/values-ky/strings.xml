@@ -85,4 +85,19 @@
     <string name="preview_fail">Ачылган жок</string>
     <string name="last_seen">жакында болгон</string>
     <string name="write_user">Жазуу</string>
+    <string name="field_birth">Туулган күн</string>
+    <string name="field_address">Дарек</string>
+    <string name="hide_nick">Никти жашыруу</string>
+    <string name="hide_nick_hint">Жашырылса, профилде көрүнбөйт, шилтеме кыска id болот</string>
+    <string name="notifications">Билдирмелер</string>
+    <string name="tab_media">Медиа</string>
+    <string name="tab_links">Шилтемелер</string>
+    <string name="tab_voice">Үн билдирүүлөр</string>
+    <string name="tab_groups">Топтор</string>
+    <string name="empty_media">Азырынча медиа жок</string>
+    <string name="empty_links">Азырынча шилтеме жок</string>
+    <string name="empty_voice">Азырынча үн билдирүү жок</string>
+    <string name="empty_groups">Азырынча жалпы топ жок</string>
+    <string name="group_nick">Топтун ники</string>
+    <string name="phone_label">Номер</string>
 </resources>

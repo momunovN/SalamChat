@@ -201,11 +201,13 @@ final class SessionStore: ObservableObject {
                 if msg.authorID != me.id {
                     let looking = openChatID?.lowercased() == msg.chatID.uuidString.lowercased()
                     Task { try? await api.receipts(ids: [msg.id], status: looking ? "read" : "delivered") }
-                    if looking {
-                        Chime.play()
-                    } else {
-                        let title = (try? db.chat(id: msg.chatID.uuidString))?.title ?? L10n.appName
-                        Chime.notify(id: msg.id.uuidString, title: title, body: noteBody(msg), chatID: msg.chatID.uuidString)
+                    if !Mutes.contains(msg.chatID.uuidString) {
+                        if looking {
+                            Chime.play()
+                        } else {
+                            let title = (try? db.chat(id: msg.chatID.uuidString))?.title ?? L10n.appName
+                            Chime.notify(id: msg.id.uuidString, title: title, body: noteBody(msg), chatID: msg.chatID.uuidString)
+                        }
                     }
                 }
             }
@@ -281,6 +283,38 @@ private func noteBody(_ msg: APIMessage) -> String {
     case "file": return L10n.file
     case "location": return L10n.geo
     default: return L10n.appName
+    }
+}
+
+enum Mutes {
+    private static let key = "samal.muted"
+
+    static func contains(_ id: String) -> Bool {
+        let set = UserDefaults.standard.stringArray(forKey: key) ?? []
+        return set.contains(id.lowercased())
+    }
+
+    static func set(_ id: String, muted: Bool) {
+        let clean = id.lowercased()
+        guard !clean.isEmpty else { return }
+        var set = Set((UserDefaults.standard.stringArray(forKey: key) ?? []).map { $0.lowercased() })
+        if muted { set.insert(clean) } else { set.remove(clean) }
+        UserDefaults.standard.set(Array(set), forKey: key)
+    }
+
+    static func apply(_ chats: [APIChat]) {
+        var set = Set((UserDefaults.standard.stringArray(forKey: key) ?? []).map { $0.lowercased() })
+        for chat in chats {
+            let id = chat.id.uuidString.lowercased()
+            if muted(chat.mutedUntil) { set.insert(id) } else { set.remove(id) }
+        }
+        UserDefaults.standard.set(Array(set), forKey: key)
+    }
+
+    private static func muted(_ raw: String?) -> Bool {
+        guard let raw, !raw.isEmpty else { return false }
+        let date = ISO8601DateFormatter.full.date(from: raw) ?? ISO8601DateFormatter.frac.date(from: raw)
+        return (date ?? .distantPast) > Date()
     }
 }
 

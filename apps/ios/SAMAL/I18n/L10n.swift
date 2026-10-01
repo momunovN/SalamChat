@@ -55,6 +55,21 @@ enum L10n {
     static var fieldName: String { t("more.name") }
     static var fieldNick: String { t("more.nick") }
     static var fieldBio: String { t("more.bio") }
+    static var fieldBirth: String { t("more.birth") }
+    static var fieldAddress: String { t("more.address") }
+    static var hideNick: String { t("more.hide_nick") }
+    static var hideNickHint: String { t("more.hide_nick_hint") }
+    static var notifications: String { t("profile.notifications") }
+    static var tabMedia: String { t("profile.media") }
+    static var tabLinks: String { t("profile.links") }
+    static var tabVoice: String { t("profile.voice") }
+    static var tabGroups: String { t("profile.groups") }
+    static var emptyMedia: String { t("profile.empty_media") }
+    static var emptyLinks: String { t("profile.empty_links") }
+    static var emptyVoice: String { t("profile.empty_voice") }
+    static var emptyGroups: String { t("profile.empty_groups") }
+    static var groupNick: String { t("chat.group_nick") }
+    static var phoneLabel: String { t("profile.phone") }
     static var save: String { t("more.save") }
     static var logout: String { t("more.logout") }
     static var reply: String { t("msg.reply") }

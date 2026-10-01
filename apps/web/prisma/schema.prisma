@@ -13,7 +13,11 @@ model User {
   displayName String    @default("") @map("display_name")
   username    String?   @unique
   avatarUrl   String?   @map("avatar_url")
-  bio         String    @default("")
+  bio            String    @default("")
+  birthDate      DateTime? @map("birth_date") @db.Date
+  address        String    @default("")
+  usernameHidden Boolean   @default(false) @map("username_hidden")
+  publicId       String    @unique @map("public_id")
   createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
   lastSeenAt    DateTime? @map("last_seen_at") @db.Timestamptz(6)
@@ -80,6 +84,7 @@ model Chat {
   id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   type          String
   title         String?
+  username      String?
   avatarUrl     String?  @map("avatar_url")
   createdBy     String?  @map("created_by") @db.Uuid
   peerKey       String?  @unique @map("peer_key")

@@ -1,4 +1,4 @@
-import type { Call, Chat, ChatMember, Message, Session, User } from "./types";
+import type { Call, Chat, ChatMember, Message, ProfileLibrary, Session, User } from "./types";
 
 const SESSION_KEY = "tooapp.session";
 
@@ -103,8 +103,11 @@ export const api = {
       authed: false,
     }),
   me: () => request<User>("/v1/me"),
-  patchMe: (body: Partial<Pick<User, "display_name" | "username" | "bio" | "avatar_url">>) =>
-    request<User>("/v1/me", { method: "PATCH", body: JSON.stringify(body) }),
+  patchMe: (
+    body: Partial<
+      Pick<User, "display_name" | "username" | "bio" | "avatar_url" | "birth_date" | "address" | "username_hidden">
+    >,
+  ) => request<User>("/v1/me", { method: "PATCH", body: JSON.stringify(body) }),
   logout: () => request<{ ok: boolean }>("/v1/auth/logout", { method: "POST" }),
   chats: (q = "", type = "") => {
     const p = new URLSearchParams();
@@ -147,14 +150,29 @@ export const api = {
     request<{ ok: boolean }>("/v1/receipts", { method: "POST", body: JSON.stringify({ message_ids: ids, status }) }),
   direct: (userId: string) =>
     request<Chat>("/v1/chats/direct", { method: "POST", body: JSON.stringify({ user_id: userId }) }),
-  group: (title: string, memberIds: string[]) =>
-    request<Chat>("/v1/chats/groups", { method: "POST", body: JSON.stringify({ title, member_ids: memberIds }) }),
+  group: (title: string, memberIds: string[], username?: string) =>
+    request<Chat>("/v1/chats/groups", {
+      method: "POST",
+      body: JSON.stringify({ title, member_ids: memberIds, ...(username ? { username } : {}) }),
+    }),
+  chat: (id: string) => request<Chat>(`/v1/chats/${id}`),
   hideChat: (chatId: string) => request<{ ok: boolean }>(`/v1/chats/${chatId}`, { method: "DELETE" }),
-  renameChat: (chatId: string, title: string) =>
-    request<Chat>(`/v1/chats/${chatId}`, { method: "PATCH", body: JSON.stringify({ title }) }),
+  renameChat: (chatId: string, title: string, username?: string) =>
+    request<Chat>(`/v1/chats/${chatId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ title, ...(username !== undefined ? { username } : {}) }),
+    }),
   users: (q: string) =>
     request<{ items: User[] }>(`/v1/users?q=${encodeURIComponent(q)}`).then((r) => ({ items: r.items ?? [] })),
   user: (id: string) => request<User>(`/v1/users/${id}`),
+  library: (id: string) => request<ProfileLibrary>(`/v1/users/${id}/library`),
+  setNotifications: (id: string, enabled: boolean) =>
+    request<{ enabled: boolean; chat_id: string; muted_until: string | null }>(`/v1/users/${id}/notifications`, {
+      method: "PATCH",
+      body: JSON.stringify({ enabled }),
+    }),
+  resolve: (slug: string) =>
+    request<{ user: User | null; chat: Chat | null }>(`/v1/resolve?slug=${encodeURIComponent(slug)}`),
   contacts: () =>
     request<{ items: User[]; synced?: boolean }>("/v1/contacts").then((r) => ({
       items: r.items ?? [],
