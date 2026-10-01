@@ -21,9 +21,11 @@ export type PersistJob = {
 
 type Fanout = { origin: string; userId?: string; env: FanoutEnvelope };
 
-const OUTBOX = "tooapp:outbox";
-const WORK = "tooapp:outbox:work";
-const TAIL = "tooapp:tail";
+const OUTBOX = "salam:outbox";
+const WORK = "salam:outbox:work";
+const TAIL = "salam:tail";
+/** Queues written before the rename. recoverWork drains them so no queued message is lost. */
+const LEGACY_QUEUES = ["tooapp:outbox:work", "tooapp:outbox"];
 const origin = crypto.randomUUID();
 
 const claimScript = `
@@ -50,7 +52,7 @@ export function onPersist(fn: (job: PersistJob) => Promise<void>) {
 }
 
 export function valkeyURL() {
-  const set = envFirst("", "TOOAPP_VALKEY_URL", "VALKEY_URL", "REDIS_URL");
+  const set = envFirst("", "SALAM_VALKEY_URL", "TOOAPP_VALKEY_URL", "VALKEY_URL", "REDIS_URL");
   if (set) return set;
   if (process.env.NODE_ENV === "production") return "";
   return "redis://127.0.0.1:6379";
@@ -61,7 +63,7 @@ export function valkeyReady() {
 }
 
 function memKey(chatId: string) {
-  return `tooapp:members:${chatId}`;
+  return `salam:members:${chatId}`;
 }
 
 export async function connectValkey() {
@@ -77,7 +79,7 @@ export async function connectValkey() {
 async function open() {
   const url = valkeyURL();
   if (!url) {
-    console.log("valkey off (set REDIS_URL or TOOAPP_VALKEY_URL)");
+    console.log("valkey off (set REDIS_URL or SALAM_VALKEY_URL)");
     nextTry = Date.now() + 60_000;
     return;
   }
@@ -125,6 +127,11 @@ async function open() {
 
 async function recoverWork() {
   if (!pub?.isOpen) return;
+  for (const legacy of LEGACY_QUEUES) {
+    const old = await pub.lRange(legacy, 0, -1);
+    for (const item of old) await pub.rPush(OUTBOX, item);
+    if (old.length) await pub.del(legacy);
+  }
   const stuck = await pub.lRange(WORK, 0, -1);
   if (stuck.length === 0) return;
   for (const item of stuck) await pub.rPush(OUTBOX, item);
@@ -212,7 +219,7 @@ export async function clearOnline(userId: string) {
 
 export async function cachedName(userId: string, load: () => Promise<string>) {
   if (!pub?.isOpen) return load();
-  const key = `tooapp:name:${userId}`;
+  const key = `salam:name:${userId}`;
   try {
     const hit = await pub.get(key);
     if (hit) return hit;
@@ -226,7 +233,7 @@ export async function cachedName(userId: string, load: () => Promise<string>) {
 
 export async function forgetName(userId: string) {
   if (!pub?.isOpen) return;
-  await pub.del(`tooapp:name:${userId}`).catch(() => undefined);
+  await pub.del(`salam:name:${userId}`).catch(() => undefined);
 }
 
 export async function membersCached(chatId: string, load: () => Promise<string[]>) {
@@ -256,19 +263,19 @@ export async function bustMembers(chatId: string) {
 
 export async function messageByClient(clientId: string) {
   if (!pub?.isOpen) return null;
-  const id = await pub.get(`tooapp:cid:${clientId}`);
+  const id = await pub.get(`salam:cid:${clientId}`);
   if (!id) return null;
   return readHot(id);
 }
 
 export async function readHot(id: string) {
   if (!pub?.isOpen) return null;
-  return pub.get(`tooapp:msg:${id}`);
+  return pub.get(`salam:msg:${id}`);
 }
 
 export async function readRecent(chatId: string) {
   if (!pub?.isOpen) return [];
-  return pub.lRange(`tooapp:recent:${chatId}`, 0, 199);
+  return pub.lRange(`salam:recent:${chatId}`, 0, 199);
 }
 
 export async function hotTailMap(ids: string[]) {
@@ -284,15 +291,15 @@ export async function hotTailMap(ids: string[]) {
 
 export async function stageMessage(msgJson: string, msgId: string, clientId: string, chatId: string, job: PersistJob) {
   if (!pub?.isOpen) return "down" as const;
-  const cid = `tooapp:cid:${clientId}`;
+  const cid = `salam:cid:${clientId}`;
   const claimed = await pub.set(cid, msgId, { NX: true, EX: 60 * 60 * 48 });
   if (claimed !== "OK") return "dup" as const;
   try {
     await pub
       .multi()
-      .set(`tooapp:msg:${msgId}`, msgJson, { EX: 60 * 60 * 24 })
-      .lPush(`tooapp:recent:${chatId}`, msgJson)
-      .lTrim(`tooapp:recent:${chatId}`, 0, 199)
+      .set(`salam:msg:${msgId}`, msgJson, { EX: 60 * 60 * 24 })
+      .lPush(`salam:recent:${chatId}`, msgJson)
+      .lTrim(`salam:recent:${chatId}`, 0, 199)
       .hSet(TAIL, chatId, msgJson)
       .rPush(OUTBOX, JSON.stringify(job))
       .exec();
@@ -306,13 +313,13 @@ export async function stageMessage(msgJson: string, msgId: string, clientId: str
 
 export async function rewriteHot(chatId: string, id: string, json: string, deleted: boolean) {
   if (!pub?.isOpen) return;
-  await pub.set(`tooapp:msg:${id}`, json, { EX: 60 * 60 * 24 });
-  const rows = await pub.lRange(`tooapp:recent:${chatId}`, 0, 199);
+  await pub.set(`salam:msg:${id}`, json, { EX: 60 * 60 * 24 });
+  const rows = await pub.lRange(`salam:recent:${chatId}`, 0, 199);
   for (let i = 0; i < rows.length; i++) {
     try {
       const item = JSON.parse(rows[i]) as { id?: string };
       if (item.id === id) {
-        await pub.lSet(`tooapp:recent:${chatId}`, i, json);
+        await pub.lSet(`salam:recent:${chatId}`, i, json);
         break;
       }
     } catch {

@@ -91,7 +91,7 @@ export async function captureCall(kind: "audio" | "video"): Promise<CallMedia> {
   }
 }
 
-const permKey = { mic: "tooapp.perm.mic", camera: "tooapp.perm.camera" };
+const permKey = { mic: "salam.perm.mic", camera: "salam.perm.camera" };
 
 export function mediaRemembered(kind: "mic" | "camera") {
   try {

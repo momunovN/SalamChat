@@ -1,6 +1,8 @@
+import { migrateLegacyStorage } from "./storage";
 import type { Call, Chat, ChatMember, Message, ProfileLibrary, Session, User } from "./types";
 
-const SESSION_KEY = "tooapp.session";
+const SESSION_KEY = "salam.session";
+migrateLegacyStorage();
 
 export function loadSession(): Session | null {
   if (typeof window === "undefined") return null;
@@ -73,7 +75,7 @@ async function request<T>(path: string, init: RequestInit & { authed?: boolean; 
 
 function authLost() {
   saveSession(null);
-  if (typeof window !== "undefined") window.dispatchEvent(new Event("tooapp:auth-lost"));
+  if (typeof window !== "undefined") window.dispatchEvent(new Event("salam:auth-lost"));
 }
 
 let refreshing: { token: string; promise: Promise<Session | null> } | null = null;

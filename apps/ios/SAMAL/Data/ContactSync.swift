@@ -33,7 +33,7 @@ enum ContactSync {
 
 func needsDisplayName(_ name: String?) -> Bool {
     let n = (name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-    if n.isEmpty || n == "TooApp" { return true }
+    if n.isEmpty || n == "TooApp" || n == "Salam" { return true }
     if n.range(of: #"^[•·.\-\s]*\d{2,8}$"#, options: .regularExpression) != nil { return true }
     if n.rangeOfCharacter(from: .letters) == nil { return true }
     return false

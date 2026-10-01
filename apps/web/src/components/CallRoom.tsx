@@ -17,7 +17,7 @@ import type { Call } from "@/lib/types";
 import { Avatar } from "./Avatar";
 
 const HANGUP = "hangup";
-const HANGUP_TOPIC = "tooapp.call";
+const HANGUP_TOPIC = "salam.call";
 
 type IceServer = { urls: string | string[]; username?: string; credential?: string };
 type Creds = { url: string; token: string; room: string; ice_servers?: IceServer[] };

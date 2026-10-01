@@ -1,5 +1,5 @@
 ---
-name: too-app
+name: salam
 description: Rules and handoff for Salam messenger (salam-chat.ru, repo momunovN/tooApp). Use when building, fixing, deploying, or renaming Salam / salam-chat / TooApp / Samal Android iOS web Go chat, OTP, WebSocket, RelaxDev, Neon, Gradle JDK.
 ---
 

@@ -34,7 +34,7 @@ function p1Message(body: P1Body, status: number) {
 // so the code never reaches the phone. OTP uses the shared sender VIRTA on char.
 function senderName() {
   const from = env("SMS_SENDER", "").trim();
-  if (!from || ["tooapp", "samal"].includes(from.toLowerCase())) return "VIRTA";
+  if (!from || ["salam", "tooapp", "samal"].includes(from.toLowerCase())) return "VIRTA";
   return from;
 }
 

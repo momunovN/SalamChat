@@ -37,7 +37,7 @@ export function normalizeEmail(raw: string): string | null {
 }
 
 export function defaultDisplayName(phone: string) {
-  if (phone.length < 4) return "TooApp";
+  if (phone.length < 4) return "Salam";
   return "• " + phone.slice(-4);
 }
 

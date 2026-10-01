@@ -32,7 +32,7 @@ fun readBookContacts(context: Context): List<BookContact> {
 
 fun needsDisplayName(name: String): Boolean {
     val n = name.trim()
-    if (n.isEmpty() || n == "TooApp") return true
+    if (n.isEmpty() || n == "TooApp" || n == "Salam") return true
     if (Regex("^[•·.\\-\\s]*\\d{2,8}$").matches(n)) return true
     if (n.none { it.isLetter() }) return true
     return false

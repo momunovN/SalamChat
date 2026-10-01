@@ -91,7 +91,7 @@ async function withCreds(call: Call, userId: string) {
 export async function startCall(userId: string, chatId: string, kind: string) {
   if (kind !== "audio" && kind !== "video") throw new HttpError(400, "bad_request", "kind");
   const id = crypto.randomUUID();
-  const room = "tooapp-" + id;
+  const room = "salam-" + id;
   const credsPromise = signLiveKitToken(userId, room);
   const membersPromise = memberIds(chatId);
   const row = await queryOne<CallRow>(

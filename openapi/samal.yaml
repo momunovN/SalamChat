@@ -1,8 +1,8 @@
 openapi: 3.0.3
 info:
-  title: TooApp API
+  title: Salam API
   version: 0.1.0
-  description: TooApp messenger. TLS + session auth. E2EE is phase 2.
+  description: Salam messenger. TLS + session auth. E2EE is phase 2.
 servers:
   - url: http://localhost:8080
 paths:
@@ -24,7 +24,7 @@ paths:
                 phone: { type: string, example: "+996700000001" }
       responses:
         "200":
-          description: OTP sent. `dev_code` only when TOOAPP_OTP_DEV=true
+          description: OTP sent. `dev_code` only when SALAM_OTP_DEV=true
   /v1/auth/otp/verify:
     post:
       requestBody:

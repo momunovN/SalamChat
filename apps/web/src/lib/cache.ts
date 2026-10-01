@@ -14,7 +14,7 @@ function empty(): Store {
 }
 
 function key(userId: string) {
-  return `tooapp.box.${userId}`;
+  return `salam.box.${userId}`;
 }
 
 function read(userId: string): Store {

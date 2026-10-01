@@ -2,15 +2,15 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: samal
-      POSTGRES_PASSWORD: samal
-      POSTGRES_DB: samal
+      POSTGRES_USER: salam
+      POSTGRES_PASSWORD: salam
+      POSTGRES_DB: salam
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U samal -d samal"]
+      test: ["CMD-SHELL", "pg_isready -U salam -d salam"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -25,8 +25,8 @@ services:
     image: minio/minio:latest
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: samal
-      MINIO_ROOT_PASSWORD: samalsecret
+      MINIO_ROOT_USER: salam
+      MINIO_ROOT_PASSWORD: salamsecret
     ports:
       - "9000:9000"
       - "9001:9001"

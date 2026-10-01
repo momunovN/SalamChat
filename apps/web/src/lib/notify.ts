@@ -7,7 +7,7 @@ import type { Lang } from "./i18n";
 const SRC = "/sounds/alert-tone.mp3";
 const MESSAGE_SEC = 0.22;
 const RING_EVERY_MS = 2500;
-const PERM_KEY = "tooapp.perm.notify";
+const PERM_KEY = "salam.perm.notify";
 
 let ctx: AudioContext | null = null;
 let buffer: AudioBuffer | null = null;

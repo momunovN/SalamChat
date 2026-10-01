@@ -111,7 +111,7 @@ func Run() error {
 	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	cfg := config.Load()
 	if string(cfg.JWTSecret) == config.DevJWTSecret {
-		log.Error("SECURITY: TOOAPP_JWT_SECRET is not set, anyone can sign session tokens. Set it before going public.")
+		log.Error("SECURITY: SALAM_JWT_SECRET is not set, anyone can sign session tokens. Set it before going public.")
 	}
 	ctx := context.Background()
 
@@ -121,7 +121,7 @@ func Run() error {
 	}
 	defer cleanup()
 
-	log.Info("tooapp api listening", "addr", cfg.HTTPAddr)
+	log.Info("salam api listening", "addr", cfg.HTTPAddr)
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
 		Handler:           h,

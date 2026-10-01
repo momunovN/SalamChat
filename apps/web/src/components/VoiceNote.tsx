@@ -27,9 +27,9 @@ export function VoiceNote({
       const other = (ev as CustomEvent<string>).detail;
       if (other !== src) audioRef.current?.pause();
     };
-    window.addEventListener("tooapp:voice", onOther);
+    window.addEventListener("salam:voice", onOther);
     return () => {
-      window.removeEventListener("tooapp:voice", onOther);
+      window.removeEventListener("salam:voice", onOther);
       clearCap();
     };
   }, [src]);
@@ -90,7 +90,7 @@ export function VoiceNote({
     if (audio.paused) {
       const total = finiteVoiceMs(durationMs) || dur;
       if (total > 0 && audio.currentTime * 1000 >= total - 30) audio.currentTime = 0;
-      window.dispatchEvent(new CustomEvent("tooapp:voice", { detail: src }));
+      window.dispatchEvent(new CustomEvent("salam:voice", { detail: src }));
       void audio.play().then(() => armCap(audio)).catch(() => setPlaying(false));
     } else {
       clearCap();

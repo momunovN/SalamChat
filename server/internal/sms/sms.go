@@ -65,7 +65,7 @@ func (p P1) SendOTP(ctx context.Context, phone, code string) error {
 		return fmt.Errorf("p1sms: SMS_API_KEY required")
 	}
 	sender := strings.TrimSpace(p.Sender)
-	if sender == "" || strings.EqualFold(sender, "TooApp") || strings.EqualFold(sender, "SAMAL") {
+	if sender == "" || strings.EqualFold(sender, "TooApp") || strings.EqualFold(sender, "Salam") || strings.EqualFold(sender, "SAMAL") {
 		sender = "VIRTA"
 	}
 	item := map[string]string{

@@ -42,7 +42,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     <html lang="ru" className={`${inter.variable} h-full antialiased`}>
       <body className="min-h-full bg-bg font-sans text-ink">
         <Script id="salam-lang" strategy="beforeInteractive">
-          {`try{var l=localStorage.getItem("tooapp.lang")||localStorage.getItem("samal.lang");if(l==="ky"||l==="ru")document.documentElement.lang=l}catch(e){}`}
+          {`try{var l=localStorage.getItem("salam.lang")||localStorage.getItem("tooapp.lang")||localStorage.getItem("samal.lang");if(l==="ky"||l==="ru")document.documentElement.lang=l}catch(e){}`}
         </Script>
         <Shell>{children}</Shell>
       </body>

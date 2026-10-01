@@ -18,6 +18,7 @@ import {
   X,
 } from "lucide-react";
 import { api, loadSession, saveSession } from "@/lib/api";
+import { migrateLegacyStorage } from "@/lib/storage";
 import { dedupeChats, dedupeMessages, forgetChat, mergeChats, mergeThread, readActive, readRoster, readThread, writeActive, writeRoster, writeThread } from "@/lib/cache";
 import { captureAudio, captureCall, captureVideo, forgetMedia, mediaRemembered, rememberMedia, stopCallMedia, warmCallConnection, type CallMedia } from "@/lib/callMedia";
 import { chatMatchesSlug, lastPreview, pathForChat, pathsEqual, slugFromPath } from "@/lib/chat";
@@ -70,7 +71,7 @@ export function MessengerApp() {
   function chooseLang(next: Lang) {
     setLang(next);
     try {
-      localStorage.setItem("tooapp.lang", next);
+      localStorage.setItem("salam.lang", next);
     } catch {
       /* private mode */
     }
@@ -161,7 +162,8 @@ export function MessengerApp() {
 
   useEffect(() => {
     const s = loadSession();
-    const stored = localStorage.getItem("tooapp.lang") || localStorage.getItem("samal.lang");
+    migrateLegacyStorage();
+    const stored = localStorage.getItem("salam.lang");
     queueMicrotask(() => {
       setSession(s);
       if (s?.user) {
@@ -295,8 +297,8 @@ export function MessengerApp() {
         routerRef.current.replace("/");
       }
     };
-    window.addEventListener("tooapp:auth-lost", onLost);
-    return () => window.removeEventListener("tooapp:auth-lost", onLost);
+    window.addEventListener("salam:auth-lost", onLost);
+    return () => window.removeEventListener("salam:auth-lost", onLost);
   }, []);
 
   useEffect(() => {

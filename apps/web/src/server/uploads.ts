@@ -10,8 +10,8 @@ const MAX_BYTES = 20 * 1024 * 1024;
 const CHUNK = 12 * 1024;
 
 function uploadRoots() {
-  const preferred = envFirst("", "TOOAPP_UPLOAD_DIR") || path.join(process.cwd(), "data", "uploads");
-  const tmp = path.join(os.tmpdir(), "tooapp-uploads");
+  const preferred = envFirst("", "SALAM_UPLOAD_DIR", "TOOAPP_UPLOAD_DIR") || path.join(process.cwd(), "data", "uploads");
+  const tmp = path.join(os.tmpdir(), "salam-uploads");
   return preferred === tmp ? [preferred] : [preferred, tmp];
 }
 
@@ -89,11 +89,11 @@ export async function putUpload(userId: string, id: string, req: Request) {
 }
 
 async function storeRemote(buf: Buffer, mime: string, kind: string, filename: string) {
-  const key = envFirst("", "STORAGE_API_KEY", "TOOAPP_STORAGE_KEY");
+  const key = envFirst("", "STORAGE_API_KEY", "SALAM_STORAGE_KEY", "TOOAPP_STORAGE_KEY");
   if (!key) return null;
   const form = new FormData();
   form.append("file", new Blob([new Uint8Array(buf)], { type: mime || "application/octet-stream" }), filename);
-  form.append("path", `tooapp/${kind || "file"}`);
+  form.append("path", `salam/${kind || "file"}`);
   if (kind !== "photo") form.append("webp", "false");
   const endpoint = envFirst("https://relaxdev.ru/api/v1/storage/upload", "STORAGE_UPLOAD_URL");
   try {

@@ -4,7 +4,9 @@ import { envFirst, jwtSecret } from "./env";
 const MAGIC = Buffer.from("SALAM1");
 
 function key() {
-  const raw = envFirst("", "TOOAPP_DATA_KEY");
+  const raw = envFirst("", "SALAM_DATA_KEY", "TOOAPP_DATA_KEY");
+  // Keep this exact prefix: it is part of the key every stored message was sealed with.
+  // Renaming it would make the whole history unreadable.
   const material = raw || `tooapp-seal-v1:${jwtSecret()}`;
   return createHash("sha256").update(material).digest();
 }

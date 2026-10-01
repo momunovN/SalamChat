@@ -6,7 +6,7 @@
 **Сайт / API:** https://salam-chat.ru
 **Прод:** RelaxDev + Neon PostgreSQL
 **Figma:** https://www.figma.com/design/1MlHF63Z8m006x2gD47zCQ
-**Бренд:** в шапках сайта «Salam», адрес salam-chat.ru. В коде ещё встречаются TooApp / Samal / SAMAL — старые имена, не плодить новые.
+**Бренд:** в шапках сайта «Salam», адрес salam-chat.ru. Переменные окружения — `SALAM_*` (старые `TOOAPP_*`/`SAMAL_*` пока читаются как запасные). В коде ещё встречаются Samal / SAMAL (пакет `dev.samal.app`, модуль Go `samal.dev`) — старые имена, не плодить новые.
 
 ---
 
@@ -36,11 +36,11 @@ openapi        контракт
 ## Что уже сделано
 
 ### Инфраструктура
-- Neon PostgreSQL (`TOOAPP_DATABASE_URL` / `DATABASE_URL`, **direct host без `-pooler`**)
+- Neon PostgreSQL (`SALAM_DATABASE_URL` / `DATABASE_URL`, **direct host без `-pooler`**)
 - RelaxDev: папка `apps/web`, без Dockerfile
-- Valkey/Redis опционально (`REDIS_URL` / `TOOAPP_VALKEY_URL`). Нет адреса — сообщения сразу в Postgres
+- Valkey/Redis опционально (`REDIS_URL` / `SALAM_VALKEY_URL`). Нет адреса — сообщения сразу в Postgres
 - MinIO / S3 опционально
-- OTP в dev: `TOOAPP_OTP_DEV=true` → `dev_code`. SMS stub без ключа
+- OTP в dev: `SALAM_OTP_DEV=true` → `dev_code`. SMS stub без ключа
 
 ### Клиенты
 

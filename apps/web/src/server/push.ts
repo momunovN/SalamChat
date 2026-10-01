@@ -63,7 +63,7 @@ function vapidKeys() {
   const publicKey = env("VAPID_PUBLIC_KEY");
   const privateKey = env("VAPID_PRIVATE_KEY");
   vapidCache = publicKey && privateKey ? { publicKey, privateKey } : derivedVapid(jwtSecret());
-  const raw = env("VAPID_SUBJECT") || env("TOOAPP_PUBLIC_URL") || "https://salam-chat.ru";
+  const raw = env("VAPID_SUBJECT") || env("SALAM_PUBLIC_URL") || env("TOOAPP_PUBLIC_URL") || "https://salam-chat.ru";
   const subject = raw.startsWith("https://") || raw.startsWith("mailto:") ? raw : "https://salam-chat.ru";
   webpush.setVapidDetails(subject, vapidCache.publicKey, vapidCache.privateKey);
   return vapidCache;

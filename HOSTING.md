@@ -25,17 +25,19 @@
 
 ## 3. Переменные окружения
 
+Имена теперь начинаются с `SALAM_`. Старые `TOOAPP_*` продолжают работать, поэтому менять их в панели можно не спеша; если заданы оба, берётся `SALAM_*`.
+
 Скопируйте ключи из `apps/web/.env.relaxdev.example` во вкладку **Переменные**.
 
 Обязательно:
 
 | Ключ | Значение |
 |---|---|
-| `TOOAPP_PUBLIC_URL` | `https://salam-chat.ru` |
-| `TOOAPP_JWT_SECRET` | длинный случайный секрет |
-| `TOOAPP_OTP_DEV` | `false` в проде |
+| `SALAM_PUBLIC_URL` | `https://salam-chat.ru` |
+| `SALAM_JWT_SECRET` | длинный случайный секрет |
+| `SALAM_OTP_DEV` | `false` в проде |
 | `DATABASE_URL` | строка Postgres |
-| `TOOAPP_DATABASE_URL` | та же строка |
+| `SALAM_DATABASE_URL` | та же строка |
 | `SMTP_HOST` `SMTP_PORT` `SMTP_USER` `SMTP_PASS` `SMTP_FROM` | Яндекс, иначе код на почту не уйдёт |
 | `SMS_PROVIDER` `SMS_API_KEY` | `p1sms` и ключ кабинета, иначе вход только по почте |
 | `LIVEKIT_URL` `LIVEKIT_API_KEY` `LIVEKIT_API_SECRET` | звонки. Пустые ключи дают токен-заглушку |
@@ -45,7 +47,7 @@
 
 После смены переменных — редеплой.
 
-Быстрые сообщения идут через Valkey. Docker в репозитории не нужен: в панели проекта откройте **Redis** и подключите его. RelaxDev сам добавит `REDIS_URL`. Приложение читает `TOOAPP_VALKEY_URL`, затем `VALKEY_URL`, затем `REDIS_URL`. Локально без Docker Valkey слушает `127.0.0.1:6379`. Если адреса нет, сообщения пишутся сразу в Postgres.
+Быстрые сообщения идут через Valkey. Docker в репозитории не нужен: в панели проекта откройте **Redis** и подключите его. RelaxDev сам добавит `REDIS_URL`. Приложение читает `SALAM_VALKEY_URL`, затем `VALKEY_URL`, затем `REDIS_URL`. Локально без Docker Valkey слушает `127.0.0.1:6379`. Если адреса нет, сообщения пишутся сразу в Postgres.
 
 ## 4. Проверка
 
