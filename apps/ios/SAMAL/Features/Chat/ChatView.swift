@@ -2,7 +2,6 @@ import AVFoundation
 import CoreLocation
 import GRDB
 import PhotosUI
-import QuickLook
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -185,7 +184,6 @@ struct ChatView: View {
     @State private var photoItem: PhotosPickerItem?
     @State private var pickFile = false
     @State private var viewer: ChatMedia?
-    @State private var previewURL: URL?
     @State private var openingFile = false
     @State private var openFailed = false
     @StateObject private var locator = Locator()
@@ -237,7 +235,6 @@ struct ChatView: View {
         .fullScreenCover(item: $viewer) { item in
             MediaCover(item: item) { viewer = nil }
         }
-        .quickLookPreview($previewURL)
         .alert(L10n.mediaFail, isPresented: $openFailed) {
             Button(L10n.cancel, role: .cancel) {}
         }
@@ -417,7 +414,7 @@ struct ChatView: View {
             let local = await materializeMedia(url, name: name)
             openingFile = false
             if let local {
-                previewURL = local
+                viewer = ChatMedia(url: local, name: name, kind: "doc")
             } else {
                 openFailed = true
             }

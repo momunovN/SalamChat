@@ -1001,13 +1001,7 @@ export function ChatPane({
         />
       ) : null}
       {openDoc ? (
-        <FileStage
-          doc={openDoc}
-          closeLabel={t.cancel}
-          openLabel={t.openFile}
-          failLabel={t.previewFail}
-          onClose={() => setOpenDoc(null)}
-        />
+        <FileStage doc={openDoc} closeLabel={t.cancel} failLabel={t.previewFail} onClose={() => setOpenDoc(null)} />
       ) : null}
     </div>
   );
@@ -1120,13 +1114,11 @@ function ChatFile({
 function FileStage({
   doc,
   closeLabel,
-  openLabel,
   failLabel,
   onClose,
 }: {
   doc: OpenDoc;
   closeLabel: string;
-  openLabel: string;
   failLabel: string;
   onClose: () => void;
 }) {
@@ -1164,11 +1156,8 @@ function FileStage({
         ) : doc.mode === "text" ? (
           <TextBody key={doc.url} url={doc.url} failLabel={failLabel} />
         ) : (
-          <div className="flex flex-col items-center gap-4 text-white">
-            <p className="max-w-sm text-center text-sm">{doc.name}</p>
-            <a href={doc.url} target="_blank" rel="noreferrer" className="rounded-full bg-accent px-5 py-2 text-sm text-white">
-              {openLabel}
-            </a>
+          <div className="h-full w-full">
+            <AnyBody key={doc.url} url={doc.url} name={doc.name} mime={doc.mime} failLabel={failLabel} />
           </div>
         )}
       </div>
@@ -1199,6 +1188,359 @@ function TextBody({ url, failLabel }: { url: string; failLabel: string }) {
   if (fail) return <p className="text-sm text-white">{failLabel}</p>;
   if (text == null) return null;
   return <pre className="h-full w-full overflow-auto whitespace-pre-wrap text-sm text-white">{text}</pre>;
+}
+
+type AnyView =
+  | { kind: "loading" }
+  | { kind: "fail" }
+  | { kind: "image"; src: string }
+  | { kind: "video"; src: string }
+  | { kind: "audio"; src: string }
+  | { kind: "pdf"; src: string }
+  | { kind: "text"; body: string }
+  | { kind: "bare"; name: string; size: number };
+
+function AnyBody({ url, name, mime, failLabel }: { url: string; name: string; mime: string; failLabel: string }) {
+  const [view, setView] = useState<AnyView>({ kind: "loading" });
+  const [zoom, setZoom] = useState(1);
+  useEffect(() => {
+    let gone = false;
+    let made = "";
+    const ctrl = new AbortController();
+    fetch(url, { signal: ctrl.signal })
+      .then((r) => {
+        if (!r.ok) throw new Error("bad");
+        return r.arrayBuffer();
+      })
+      .then(async (buf) => {
+        if (gone) return;
+        const found = await classifyFile(new Uint8Array(buf), name, mime);
+        if (gone) {
+          if (found.url) URL.revokeObjectURL(found.url);
+          return;
+        }
+        made = found.url || "";
+        setView(found.view);
+      })
+      .catch(() => {
+        if (!gone) setView({ kind: "fail" });
+      });
+    return () => {
+      gone = true;
+      ctrl.abort();
+      if (made) URL.revokeObjectURL(made);
+    };
+  }, [url, name, mime]);
+  if (view.kind === "loading") {
+    return (
+      <div className="flex h-full items-center justify-center">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+      </div>
+    );
+  }
+  if (view.kind === "fail") return <p className="flex h-full items-center justify-center text-sm text-white">{failLabel}</p>;
+  if (view.kind === "text") {
+    return <pre className="h-full w-full overflow-auto whitespace-pre-wrap text-sm text-white">{view.body}</pre>;
+  }
+  if (view.kind === "pdf") return <iframe title={name} src={view.src} className="h-full w-full bg-white" />;
+  if (view.kind === "image") {
+    return (
+      <div className="flex h-full items-center justify-center">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={view.src}
+          alt={name}
+          onClick={() => setZoom((v) => (v > 1 ? 1 : 2))}
+          style={{ transform: `scale(${zoom})` }}
+          className="max-h-full max-w-full cursor-zoom-in object-contain"
+        />
+      </div>
+    );
+  }
+  if (view.kind === "video") {
+    return (
+      <div className="flex h-full items-center justify-center">
+        <video src={view.src} controls autoPlay className="max-h-full max-w-full" />
+      </div>
+    );
+  }
+  if (view.kind === "audio") {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-4 text-white">
+        <p className="max-w-sm text-center text-sm">{name}</p>
+        <audio src={view.src} controls autoPlay />
+      </div>
+    );
+  }
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-2 text-white">
+      <p className="max-w-sm text-center text-sm">{view.name}</p>
+      <p className="text-xs text-white/70">{formatSize(view.size)}</p>
+    </div>
+  );
+}
+
+function formatSize(n: number) {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+async function classifyFile(bytes: Uint8Array, name: string, mime: string): Promise<{ view: AnyView; url?: string }> {
+  const type = (mime || "").split(";")[0].trim().toLowerCase();
+  const ext = extOf(name);
+  if (asciiAt(bytes, 0, "%PDF")) return blobView(bytes, "application/pdf", "pdf");
+  if (imageMagic(bytes)) return blobView(bytes, imageMime(bytes, type, ext), "image");
+  if (audioMagic(bytes, ext, type)) return blobView(bytes, audioMime(bytes, type, ext), "audio");
+  if (videoMagic(bytes, ext, type)) return blobView(bytes, videoMime(bytes, type, ext), "video");
+  if (zipMagic(bytes) || ["docx", "xlsx", "pptx", "zip", "odt", "ods", "odp"].includes(ext)) {
+    const text = await zipText(bytes);
+    if (text.trim()) return { view: { kind: "text", body: text.slice(0, 200_000) } };
+  }
+  if (asciiAt(bytes, 0, "{\\rtf") || ext === "rtf") {
+    const body = rtfToText(decodeText(bytes));
+    if (body) return { view: { kind: "text", body } };
+  }
+  if (type === "application/pdf" || ext === "pdf") return blobView(bytes, "application/pdf", "pdf");
+  if (type.startsWith("image/") || ["jpg", "jpeg", "png", "gif", "webp", "bmp", "heic"].includes(ext)) {
+    return blobView(bytes, imageMime(bytes, type, ext), "image");
+  }
+  if (type.startsWith("audio/") || ["mp3", "m4a", "aac", "ogg", "opus", "wav", "flac", "oga"].includes(ext)) {
+    return blobView(bytes, audioMime(bytes, type, ext), "audio");
+  }
+  if (type.startsWith("video/") || ["mp4", "mov", "webm", "m4v", "mkv"].includes(ext)) {
+    return blobView(bytes, videoMime(bytes, type, ext), "video");
+  }
+  if (looksText(bytes) || type.startsWith("text/")) {
+    const body = decodeText(bytes).trim();
+    if (body) return { view: { kind: "text", body } };
+  }
+  return { view: { kind: "bare", name: name || "file", size: bytes.byteLength } };
+}
+
+function blobView(bytes: Uint8Array, mime: string, kind: "image" | "video" | "audio" | "pdf") {
+  const url = URL.createObjectURL(asBlob(bytes, mime));
+  return { view: { kind, src: url } as AnyView, url };
+}
+
+function asBlob(bytes: Uint8Array, mime: string) {
+  const copy = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+  return new Blob([copy as ArrayBuffer], { type: mime });
+}
+
+function extOf(name: string) {
+  const clean = (name.split("/").pop() || "").split("?")[0].split("#")[0];
+  const dot = clean.lastIndexOf(".");
+  if (dot < 0 || dot === clean.length - 1) return "";
+  return clean.slice(dot + 1).toLowerCase();
+}
+
+function asciiAt(bytes: Uint8Array, offset: number, text: string) {
+  if (offset < 0 || bytes.length < offset + text.length) return false;
+  for (let i = 0; i < text.length; i++) {
+    if (bytes[offset + i] !== text.charCodeAt(i)) return false;
+  }
+  return true;
+}
+
+function brandAt(bytes: Uint8Array) {
+  if (bytes.length < 12) return "";
+  return String.fromCharCode(bytes[8], bytes[9], bytes[10], bytes[11]).toLowerCase();
+}
+
+function heifMagic(bytes: Uint8Array) {
+  if (!asciiAt(bytes, 4, "ftyp")) return false;
+  const brand = brandAt(bytes);
+  return brand.startsWith("hei") || brand === "mif1" || brand === "msf1";
+}
+
+function imageMagic(bytes: Uint8Array) {
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return true;
+  if (bytes.length >= 4 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) return true;
+  if (asciiAt(bytes, 0, "GIF8") || asciiAt(bytes, 0, "BM")) return true;
+  if (asciiAt(bytes, 0, "RIFF") && asciiAt(bytes, 8, "WEBP")) return true;
+  return heifMagic(bytes);
+}
+
+function audioMagic(bytes: Uint8Array, ext: string, type: string) {
+  if (heifMagic(bytes)) return false;
+  if (asciiAt(bytes, 0, "ID3") || asciiAt(bytes, 0, "fLaC") || asciiAt(bytes, 0, "OggS")) return true;
+  if (asciiAt(bytes, 0, "RIFF") && asciiAt(bytes, 8, "WAVE")) return true;
+  if (asciiAt(bytes, 4, "ftyp")) {
+    const brand = brandAt(bytes);
+    if (brand.startsWith("m4a") || ext === "m4a" || ext === "aac" || type.startsWith("audio/")) return true;
+  }
+  return bytes.length >= 2 && bytes[0] === 0xff && (bytes[1] & 0xe0) === 0xe0 && (ext === "mp3" || type === "audio/mpeg");
+}
+
+function videoMagic(bytes: Uint8Array, ext: string, type: string) {
+  if (heifMagic(bytes) || audioMagic(bytes, ext, type)) return false;
+  if (asciiAt(bytes, 4, "ftyp")) return true;
+  return bytes.length >= 4 && bytes[0] === 0x1a && bytes[1] === 0x45 && bytes[2] === 0xdf && bytes[3] === 0xa3;
+}
+
+function zipMagic(bytes: Uint8Array) {
+  return bytes.length >= 4 && bytes[0] === 0x50 && bytes[1] === 0x4b && (bytes[2] === 0x03 || bytes[2] === 0x05 || bytes[2] === 0x07);
+}
+
+function imageMime(bytes: Uint8Array, type: string, ext: string) {
+  if (type.startsWith("image/")) return type;
+  if (asciiAt(bytes, 0, "GIF8") || ext === "gif") return "image/gif";
+  if ((bytes.length > 0 && bytes[0] === 0x89) || ext === "png") return "image/png";
+  if ((asciiAt(bytes, 0, "RIFF") && asciiAt(bytes, 8, "WEBP")) || ext === "webp") return "image/webp";
+  if (asciiAt(bytes, 0, "BM") || ext === "bmp") return "image/bmp";
+  if (heifMagic(bytes) || ext === "heic") return "image/heic";
+  return "image/jpeg";
+}
+
+function audioMime(bytes: Uint8Array, type: string, ext: string) {
+  if (type.startsWith("audio/")) return type;
+  if (asciiAt(bytes, 0, "OggS") || ext === "ogg" || ext === "opus" || ext === "oga") return "audio/ogg";
+  if ((asciiAt(bytes, 0, "RIFF") && asciiAt(bytes, 8, "WAVE")) || ext === "wav") return "audio/wav";
+  if (asciiAt(bytes, 0, "fLaC") || ext === "flac") return "audio/flac";
+  if (ext === "m4a" || ext === "aac") return "audio/mp4";
+  return "audio/mpeg";
+}
+
+function videoMime(bytes: Uint8Array, type: string, ext: string) {
+  if (type.startsWith("video/")) return type;
+  if (ext === "mkv") return "video/x-matroska";
+  if (ext === "webm" || (bytes.length > 1 && bytes[0] === 0x1a && bytes[1] === 0x45)) return "video/webm";
+  if (ext === "mov") return "video/quicktime";
+  return "video/mp4";
+}
+
+function looksText(bytes: Uint8Array) {
+  const n = Math.min(bytes.length, 4096);
+  if (n === 0) return false;
+  let controls = 0;
+  for (let i = 0; i < n; i++) {
+    const b = bytes[i];
+    if (b === 0) return false;
+    if (b < 9 || (b > 13 && b < 32)) controls++;
+  }
+  return controls * 20 < n;
+}
+
+function decodeText(bytes: Uint8Array) {
+  return new TextDecoder("utf-8", { fatal: false }).decode(bytes.subarray(0, 200_000));
+}
+
+function rtfToText(raw: string) {
+  return raw
+    .replace(/\\par[d]?/g, "\n")
+    .replace(/\\'([0-9a-fA-F]{2})/g, (_, hex: string) => String.fromCharCode(parseInt(hex, 16)))
+    .replace(/\\u(-?\d+)\??/g, (_, num: string) => {
+      let code = Number(num);
+      if (code < 0) code += 65536;
+      return String.fromCharCode(code);
+    })
+    .replace(/\\[a-zA-Z]+-?\d* ?/g, "")
+    .replace(/[{}]/g, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim()
+    .slice(0, 200_000);
+}
+
+function xmlToText(xml: string) {
+  return xml
+    .replace(/<\/w:p>|<w:br\s*\/?>|<\/a:p>|<a:br\s*\/?>|<\/si>|<br\s*\/?>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#10;/g, "\n")
+    .replace(/[ \t]*\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function u16(bytes: Uint8Array, offset: number) {
+  return bytes[offset] | (bytes[offset + 1] << 8);
+}
+
+function u32(bytes: Uint8Array, offset: number) {
+  return (bytes[offset] | (bytes[offset + 1] << 8) | (bytes[offset + 2] << 16) | (bytes[offset + 3] << 24)) >>> 0;
+}
+
+type ZipEntry = { name: string; method: number; compSize: number; uncompSize: number; dataOff: number };
+
+function zipEntries(bytes: Uint8Array): ZipEntry[] {
+  let eocd = -1;
+  const start = Math.max(0, bytes.length - 22 - 65535);
+  for (let i = bytes.length - 22; i >= start; i--) {
+    if (bytes[i] === 0x50 && bytes[i + 1] === 0x4b && bytes[i + 2] === 0x05 && bytes[i + 3] === 0x06) {
+      eocd = i;
+      break;
+    }
+  }
+  if (eocd < 0) return [];
+  const count = u16(bytes, eocd + 10);
+  let pos = u32(bytes, eocd + 16);
+  const out: ZipEntry[] = [];
+  for (let n = 0; n < count && n < 500 && pos + 46 <= bytes.length; n++) {
+    if (u32(bytes, pos) !== 0x02014b50) break;
+    const method = u16(bytes, pos + 10);
+    const compSize = u32(bytes, pos + 20);
+    const uncompSize = u32(bytes, pos + 24);
+    const nameLen = u16(bytes, pos + 28);
+    const extraLen = u16(bytes, pos + 30);
+    const commentLen = u16(bytes, pos + 32);
+    const localOff = u32(bytes, pos + 42);
+    const name = new TextDecoder("utf-8").decode(bytes.subarray(pos + 46, pos + 46 + nameLen));
+    let dataOff = -1;
+    if (localOff + 30 <= bytes.length && u32(bytes, localOff) === 0x04034b50) {
+      const localName = u16(bytes, localOff + 26);
+      const localExtra = u16(bytes, localOff + 28);
+      dataOff = localOff + 30 + localName + localExtra;
+    }
+    out.push({ name, method, compSize, uncompSize, dataOff });
+    pos += 46 + nameLen + extraLen + commentLen;
+  }
+  return out;
+}
+
+async function inflateRaw(data: Uint8Array) {
+  if (typeof DecompressionStream === "undefined") return null;
+  try {
+    const stream = asBlob(data, "application/octet-stream").stream().pipeThrough(new DecompressionStream("deflate-raw"));
+    return new Uint8Array(await new Response(stream).arrayBuffer());
+  } catch {
+    return null;
+  }
+}
+
+async function readZipText(bytes: Uint8Array, entry: ZipEntry) {
+  if (entry.dataOff < 0 || entry.uncompSize > 1_500_000 || entry.dataOff + entry.compSize > bytes.length) return "";
+  const slice = bytes.subarray(entry.dataOff, entry.dataOff + entry.compSize);
+  const raw = entry.method === 0 ? slice : entry.method === 8 ? await inflateRaw(slice) : null;
+  if (!raw) return "";
+  return new TextDecoder("utf-8", { fatal: false }).decode(raw);
+}
+
+async function zipText(bytes: Uint8Array) {
+  const entries = zipEntries(bytes);
+  const parts: string[] = [];
+  const slides: { n: number; text: string }[] = [];
+  for (const entry of entries) {
+    const path = entry.name.replace(/\\/g, "/").toLowerCase();
+    const slide = /^ppt\/slides\/slide(\d+)\.xml$/.exec(path);
+    const wanted = path === "word/document.xml" || path === "xl/sharedstrings.xml" || path === "content.xml" || slide;
+    if (!wanted) continue;
+    const plain = xmlToText(await readZipText(bytes, entry));
+    if (!plain) continue;
+    if (slide) slides.push({ n: Number(slide[1]), text: plain });
+    else parts.push(plain);
+  }
+  slides.sort((a, b) => a.n - b.n);
+  const body = [...parts, ...slides.map((slide) => slide.text)].join("\n\n").trim();
+  if (body) return body.slice(0, 200_000);
+  return entries
+    .map((entry) => entry.name.replace(/\\/g, "/"))
+    .filter((entry) => entry && !entry.endsWith("/") && !entry.includes("__MACOSX/") && !entry.endsWith(".DS_Store"))
+    .slice(0, 200)
+    .join("\n");
 }
 
 async function shrinkPhoto(file: File) {
