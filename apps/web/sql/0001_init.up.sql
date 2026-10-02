@@ -1,5 +1,15 @@
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
-CREATE EXTENSION IF NOT EXISTS pg_trgm;
+-- Optional: gen_random_uuid() is built in since Postgres 13, and the trigram index below only
+-- speeds up text search. A managed database whose user may not create extensions still works.
+DO $$ BEGIN
+    CREATE EXTENSION IF NOT EXISTS pgcrypto;
+EXCEPTION WHEN others THEN
+    RAISE NOTICE 'pgcrypto not available: %', SQLERRM;
+END $$;
+DO $$ BEGIN
+    CREATE EXTENSION IF NOT EXISTS pg_trgm;
+EXCEPTION WHEN others THEN
+    RAISE NOTICE 'pg_trgm not available: %', SQLERRM;
+END $$;
 
 CREATE TABLE IF NOT EXISTS users (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -75,7 +85,11 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS messages_client_id_uidx ON messages (client_id);
 CREATE INDEX IF NOT EXISTS messages_chat_created_idx ON messages (chat_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS messages_text_trgm_idx ON messages USING gin ((payload->>'text') gin_trgm_ops);
+DO $$ BEGIN
+    IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_trgm') THEN
+        CREATE INDEX IF NOT EXISTS messages_text_trgm_idx ON messages USING gin ((payload->>'text') gin_trgm_ops);
+    END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS attachments (
     id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),

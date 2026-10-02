@@ -159,9 +159,21 @@ function splitSQL(sqlText: string) {
   return out;
 }
 
+let lastDbError: string | null = null;
+
+/** Why the database is not usable right now, without the address or password; null when fine. */
+export function dbError() {
+  return lastDbError;
+}
+
+function describe(err: unknown) {
+  const msg = err instanceof Error ? err.message : String(err);
+  return msg.replace(/postgres(ql)?:\/\/\S+/gi, "postgres://…").slice(0, 300);
+}
+
 export async function migrate() {
   if (g.__samalMigrated) return g.__samalMigrated;
-  g.__samalMigrated = (async () => {
+  const run = (async () => {
     await query(`
       CREATE TABLE IF NOT EXISTS schema_migrations (
         version TEXT PRIMARY KEY,
@@ -185,5 +197,16 @@ export async function migrate() {
       await query(`INSERT INTO schema_migrations(version) VALUES ($1)`, [version]);
     }
   })();
-  return g.__samalMigrated;
+  g.__samalMigrated = run;
+  try {
+    await run;
+    lastDbError = null;
+  } catch (err) {
+    // Forget the failure so the next request tries again (database woke up, rights fixed),
+    // instead of answering 500 to everything until a restart.
+    if (g.__samalMigrated === run) g.__samalMigrated = undefined;
+    lastDbError = describe(err);
+    console.error("db migrate", lastDbError);
+    throw err;
+  }
 }

@@ -34,7 +34,7 @@ import {
 } from "./calls";
 import { buildInfo } from "./build";
 import { databaseSource } from "./env";
-import { migrate, query, usesNeonHttp } from "./db";
+import { dbError, migrate, query, usesNeonHttp } from "./db";
 import { envelope, hub, presence } from "./hub";
 import { bearer, corsHeaders, errorResponse, HttpError, json, readJSON } from "./http";
 import { deleteMessage, editMessage, listMessages, receipts, sendMessage } from "./messages";
@@ -142,12 +142,14 @@ export async function handleRequest(req: Request): Promise<Response> {
     return new Response(null, { status: 204, headers: corsHeaders });
   }
   try {
-    await migrate();
     const url = new URL(req.url);
     const pathname = url.pathname.replace(/\/$/, "") || "/";
+    // Health answers even when the database does not, and says why.
     if (pathname === "/healthz") {
-      return json(200, { ok: true, name: "salam", valkey: valkeyReady() ? "up" : "down", db: usesNeonHttp() ? "neon-https" : "pg", db_from: databaseSource(), ...buildInfo() });
+      await migrate().catch(() => undefined);
+      return json(200, { ok: !dbError(), name: "salam", valkey: valkeyReady() ? "up" : "down", db: usesNeonHttp() ? "neon-https" : "pg", db_from: databaseSource(), db_error: dbError(), ...buildInfo() });
     }
+    await migrate();
     if (pathname.startsWith("/media/id/")) {
       let id = "";
       try {
