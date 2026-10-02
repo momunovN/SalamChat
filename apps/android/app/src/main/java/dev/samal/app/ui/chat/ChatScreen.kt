@@ -58,6 +58,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -112,6 +113,9 @@ import java.util.Locale
 import java.util.UUID
 import kotlin.math.roundToInt
 
+/** Messages read from Room per step of the chat window. */
+private const val PAGE = 100
+
 @Composable
 fun ChatScreen(
     chat: ChatEntity,
@@ -123,8 +127,11 @@ fun ChatScreen(
     onOpenChat: (ChatEntity) -> Unit,
 ) {
     val ctx = LocalContext.current
-    val messages by dao.messages(chat.id, "").collectAsState(initial = emptyList())
-    val liveChats by dao.chats("", "").collectAsState(initial = emptyList())
+    // Only the newest window is read; "earlier" grows it. The Flow is remembered: building it
+    // inline re-ran the query on every recomposition, e.g. on each typed letter.
+    var window by remember(chat.id) { mutableIntStateOf(PAGE) }
+    val messages by remember(dao, chat.id, window) { dao.recent(chat.id, window) }.collectAsState(initial = emptyList())
+    val liveChats by remember(dao) { dao.chats("", "") }.collectAsState(initial = emptyList())
     val current = liveChats.find { it.id == chat.id } ?: chat
     val typingMap by NavBus.typingUntil.collectAsState()
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
@@ -180,7 +187,8 @@ fun ChatScreen(
         if (cursor.isBlank()) hasOlder = false
     }
 
-    LaunchedEffect(messages.size) {
+    // Follow new messages at the bottom, but stay put when an older page is loaded.
+    LaunchedEffect(messages.firstOrNull()?.id) {
         if (messages.isNotEmpty()) listState.scrollToItem(0)
     }
 
@@ -199,7 +207,6 @@ fun ChatScreen(
         }
     }
 
-    val ordered = messages.asReversed()
     val typing = typingUntil > now
 
     Column(Modifier.fillMaxSize().background(Bg)) {
@@ -253,12 +260,13 @@ fun ChatScreen(
                     onAuthor = { msg.authorId?.let { profile = it } },
                 )
             }
-            if (hasOlder) {
+            if (hasOlder || messages.size >= window) {
                 item {
                     Text(
                         stringResource(R.string.earlier),
                         color = Accent,
                         modifier = Modifier.clickable {
+                            window += PAGE
                             val cursor = older ?: return@clickable
                             scope.launch {
                                 val page = withContext(Dispatchers.IO) {
@@ -533,9 +541,6 @@ fun ChatScreen(
             MediaStage(msg.mediaUrl, msg.text.ifBlank { stringResource(R.string.file) }, kind) { stage = null }
         }
     }
-
-    // silence unused ordered if reverse layout uses messages directly
-    if (ordered.isEmpty()) Unit
 }
 
 @Composable

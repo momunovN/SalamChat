@@ -90,14 +90,21 @@ class Inbox(
 
     private suspend fun catchUp(me: String, chats: List<dev.samal.app.data.db.ChatEntity>) {
         for (chat in chats) {
-            val at = dao.latestServerAt(chat.id) ?: continue
+            var at = dao.latestServerAt(chat.id) ?: continue
             if (chat.lastAt <= at + 500) continue
-            val page = runCatching { api.messagesAfter(chat.id, Instant.ofEpochMilli(at).toString()) }.getOrNull() ?: continue
-            val arr = page.optJSONArray("items") ?: continue
-            if (arr.length() == 0) continue
-            val msgs = (0 until arr.length()).map { messageEntity(arr.getJSONObject(it), me) }
-            dao.upsertMessages(msgs)
-            msgs.forEach { if (it.clientId.isNotBlank()) dao.dropClientCopy(it.clientId, it.id) }
+            // The server returns the oldest messages after `at`; page forward until the gap is
+            // closed so a long offline stretch does not leave a hole in the middle of the history.
+            for (step in 0 until 20) {
+                val page = runCatching { api.messagesAfter(chat.id, Instant.ofEpochMilli(at).toString()) }.getOrNull() ?: break
+                val arr = page.optJSONArray("items") ?: break
+                if (arr.length() == 0) break
+                val msgs = (0 until arr.length()).map { messageEntity(arr.getJSONObject(it), me) }
+                dao.upsertMessages(msgs)
+                msgs.forEach { if (it.clientId.isNotBlank()) dao.dropClientCopy(it.clientId, it.id) }
+                val newest = msgs.maxOf { it.createdAt }
+                if (!page.optBoolean("more") || newest <= at) break
+                at = newest
+            }
         }
     }
 

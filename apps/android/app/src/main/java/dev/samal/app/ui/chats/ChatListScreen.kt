@@ -77,7 +77,8 @@ fun ChatListScreen(dao: SamalDao, api: SamalApi, me: String, onOpen: (ChatEntity
         "group" -> "group"
         else -> ""
     }
-    val chats by dao.chats(type, q).collectAsState(initial = emptyList())
+    // remember: a new Flow on every recomposition re-ran the query on each keystroke.
+    val chats by remember(dao, type, q) { dao.chats(type, q) }.collectAsState(initial = emptyList())
     val scope = rememberCoroutineScope()
 
     Column(Modifier.fillMaxSize().background(Bg)) {

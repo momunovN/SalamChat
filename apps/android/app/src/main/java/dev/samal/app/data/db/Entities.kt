@@ -3,6 +3,7 @@ package dev.samal.app.data.db
 import androidx.room.Dao
 import androidx.room.Database
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.PrimaryKey
@@ -24,7 +25,12 @@ data class ChatEntity(
     val peerId: String = "",
 )
 
-@Entity(tableName = "messages")
+// Every chat screen and sync step filters by chatId (ordered by createdAt) or by clientId.
+// Without these indexes each of those queries scanned the whole messages table.
+@Entity(
+    tableName = "messages",
+    indices = [Index(value = ["chatId", "createdAt"]), Index(value = ["clientId"])],
+)
 data class MessageEntity(
     @PrimaryKey val id: String,
     val chatId: String,
@@ -77,8 +83,9 @@ interface SamalDao {
     @Query("UPDATE chats SET title = :title WHERE id = :id")
     suspend fun renameLocal(id: String, title: String)
 
-    @Query("SELECT * FROM messages WHERE chatId = :chatId AND (:q = '' OR text LIKE '%'||:q||'%') ORDER BY createdAt DESC")
-    fun messages(chatId: String, q: String): Flow<List<MessageEntity>>
+    /** Newest [limit] messages of a chat. The screen grows the window when "earlier" is tapped. */
+    @Query("SELECT * FROM messages WHERE chatId = :chatId ORDER BY createdAt DESC LIMIT :limit")
+    fun recent(chatId: String, limit: Int): Flow<List<MessageEntity>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertMessages(items: List<MessageEntity>)
@@ -104,7 +111,7 @@ interface SamalDao {
     @Query("SELECT COUNT(*) FROM messages WHERE id = :id")
     suspend fun countId(id: String): Int
 
-    @Query("SELECT createdAt FROM messages WHERE chatId = :id AND status != 'sending' ORDER BY createdAt DESC LIMIT 1")
+    @Query("SELECT createdAt FROM messages WHERE chatId = :id AND status NOT IN ('sending', 'failed') ORDER BY createdAt DESC LIMIT 1")
     suspend fun latestServerAt(id: String): Long?
 
     @Query("UPDATE messages SET status = 'sent' WHERE id = :id AND status IN ('sending', 'failed')")
@@ -156,7 +163,14 @@ val MIGRATION_3_4 = object : Migration(3, 4) {
     }
 }
 
-@Database(entities = [ChatEntity::class, MessageEntity::class, OutboxEntity::class], version = 4)
+val MIGRATION_4_5 = object : Migration(4, 5) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_messages_chatId_createdAt` ON `messages` (`chatId`, `createdAt`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_messages_clientId` ON `messages` (`clientId`)")
+    }
+}
+
+@Database(entities = [ChatEntity::class, MessageEntity::class, OutboxEntity::class], version = 5)
 abstract class SamalDb : RoomDatabase() {
     abstract fun dao(): SamalDao
 }

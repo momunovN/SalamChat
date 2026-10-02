@@ -79,7 +79,7 @@ data class Stage(
 @Composable
 fun CallsScreen(api: SamalApi, dao: SamalDao) {
     var rows by remember { mutableStateOf(listOf<JSONObject>()) }
-    val chats by dao.chats("", "").collectAsState(initial = emptyList())
+    val chats by remember(dao) { dao.chats("", "") }.collectAsState(initial = emptyList())
     LaunchedEffect(Unit) {
         while (isActive) {
             rows = kotlinx.coroutines.withContext(Dispatchers.IO) {

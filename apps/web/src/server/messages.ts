@@ -205,13 +205,19 @@ export async function listMessages(
        AND ($5::timestamptz IS NULL OR m.created_at > $5::timestamptz)
        AND ($6::timestamptz IS NULL OR m.created_at > $6::timestamptz)
        AND ($3 = '' OR (m.payload->>'text') ILIKE '%'||$3||'%')
-     ORDER BY m.created_at DESC
+     ORDER BY m.created_at ${since ? "ASC" : "DESC"}
      LIMIT $4`,
     [chatId, before.toISOString(), q, limit + 1, cleared, since ? since.toISOString() : null],
   );
   let next: string | undefined;
+  let more = false;
   let pgItems = rows.map(mapMsg);
-  if (pgItems.length > limit) {
+  if (since) {
+    // Catch-up after a gap takes the OLDEST messages after `after`, so a client paging
+    // forward never skips the middle of a long gap. Returned newest-first like any page.
+    more = pgItems.length > limit;
+    pgItems = pgItems.slice(0, limit).reverse();
+  } else if (pgItems.length > limit) {
     next = pgItems[limit - 1].created_at;
     pgItems = pgItems.slice(0, limit);
   }
@@ -232,6 +238,7 @@ export async function listMessages(
       if (!msg?.id || seen.has(msg.id) || msg.deleted_at) continue;
       if (msg.client_id && pgItems.some((item) => item.client_id === msg.client_id)) continue;
       if (cleared && msg.created_at <= cleared) continue;
+      if (since && new Date(msg.created_at) <= since) continue;
       if (new Date(msg.created_at) >= before) continue;
       if (needle) {
         const text = String(parsePayload(msg.payload).text || "").toLowerCase();
@@ -263,7 +270,7 @@ export async function listMessages(
     if (m.author_id === userId && pgIds.has(m.id)) m.status = statuses.get(m.id) || "sent";
     else if (m.author_id === userId && !m.status) m.status = "sent";
   }
-  return { items, cursor: next ?? null };
+  return since ? { items, cursor: null, more } : { items, cursor: next ?? null };
 }
 
 type SendInput = {
