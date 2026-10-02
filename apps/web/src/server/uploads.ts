@@ -7,7 +7,42 @@ import { HttpError } from "./http";
 import { openBytes, sealBytes } from "./seal";
 
 const MAX_BYTES = 20 * 1024 * 1024;
-const CHUNK = 12 * 1024;
+// Postgres backup copy of an upload. Was 12 KB hex text per row: ~430 sequential INSERTs
+// for a 5 MB photo. Now 1 MB binary rows. Reading concatenates by idx, so old rows still work.
+const CHUNK = 1024 * 1024;
+
+// Opened media kept in memory. Safari plays audio/video through many Range requests and
+// every one of them used to re-read the whole file from disk, Postgres or remote storage.
+const CACHE_LIMIT = 128 * 1024 * 1024;
+const CACHE_ITEM_MAX = 24 * 1024 * 1024;
+type Cached = { buf: Buffer; mime: string };
+const mediaCache = new Map<string, Cached>();
+let cacheBytes = 0;
+
+function recall(key: string) {
+  const hit = mediaCache.get(key);
+  if (!hit) return null;
+  mediaCache.delete(key);
+  mediaCache.set(key, hit);
+  return hit;
+}
+
+function remember(key: string, value: Cached) {
+  if (value.buf.length > CACHE_ITEM_MAX) return value;
+  const prev = mediaCache.get(key);
+  if (prev) {
+    cacheBytes -= prev.buf.length;
+    mediaCache.delete(key);
+  }
+  mediaCache.set(key, value);
+  cacheBytes += value.buf.length;
+  for (const [k, v] of mediaCache) {
+    if (cacheBytes <= CACHE_LIMIT) break;
+    mediaCache.delete(k);
+    cacheBytes -= v.buf.length;
+  }
+  return value;
+}
 
 function uploadRoots() {
   const preferred = envFirst("", "SALAM_UPLOAD_DIR", "TOOAPP_UPLOAD_DIR") || path.join(process.cwd(), "data", "uploads");
@@ -132,15 +167,21 @@ async function writeAnywhere(objectKey: string, buf: Buffer) {
 }
 
 async function persistChunks(uploadId: string, buf: Buffer) {
-  let idx = 0;
-  for (let i = 0; i < buf.length; i += CHUNK) {
-    const part = buf.subarray(i, Math.min(buf.length, i + CHUNK));
-    await query(
-      `INSERT INTO upload_chunks (upload_id, idx, body) VALUES ($1,$2,decode($3,'hex'))
-       ON CONFLICT (upload_id, idx) DO UPDATE SET body = EXCLUDED.body`,
-      [uploadId, idx, Buffer.from(part).toString("hex")],
+  const parts: { idx: number; body: Buffer }[] = [];
+  for (let i = 0, idx = 0; i < buf.length; i += CHUNK, idx++) {
+    parts.push({ idx, body: buf.subarray(i, Math.min(buf.length, i + CHUNK)) });
+  }
+  // A few in flight at once; the pool keeps them on open connections.
+  for (let i = 0; i < parts.length; i += 4) {
+    await Promise.all(
+      parts.slice(i, i + 4).map((part) =>
+        query(
+          `INSERT INTO upload_chunks (upload_id, idx, body) VALUES ($1,$2,$3)
+           ON CONFLICT (upload_id, idx) DO UPDATE SET body = EXCLUDED.body`,
+          [uploadId, part.idx, part.body],
+        ),
+      ),
     );
-    idx += 1;
   }
 }
 
@@ -182,21 +223,32 @@ export async function readMedia(objectKey: string) {
       if (code !== "ENOENT" && !denied(err)) throw err;
     }
   }
-  const row = await queryOne<{ id: string; body: string | null }>(
-    `SELECT id, encode(body, 'hex') AS body FROM uploads WHERE object_key=$1`,
-    [safe],
-  );
-  if (row?.body) return Buffer.from(String(row.body), "hex");
+  const row = await queryOne<{ id: string; body: Buffer | null }>(`SELECT id, body FROM uploads WHERE object_key=$1`, [safe]);
   if (!row) throw new HttpError(404, "not_found", "not found");
-  const chunks = await query<{ body: string }>(
-    `SELECT encode(body, 'hex') AS body FROM upload_chunks WHERE upload_id=$1 ORDER BY idx`,
-    [row.id],
-  );
-  if (!chunks.length) throw new HttpError(404, "not_found", "not found");
-  return Buffer.concat(chunks.map((c) => Buffer.from(String(c.body), "hex")));
+  let buf: Buffer;
+  if (row.body?.length) {
+    buf = Buffer.from(row.body);
+  } else {
+    const chunks = await query<{ body: Buffer }>(`SELECT body FROM upload_chunks WHERE upload_id=$1 ORDER BY idx`, [row.id]);
+    if (!chunks.length) throw new HttpError(404, "not_found", "not found");
+    buf = Buffer.concat(chunks.map((c) => Buffer.from(c.body)));
+  }
+  // The disk copy was lost (redeploy, new container): put it back so the next read skips Postgres.
+  void writeAnywhere(safe, buf).catch(() => undefined);
+  return buf;
 }
 
-export async function readSealedUpload(id: string) {
+/** /media/<key>: opened bytes plus type, cached for repeated and ranged reads. */
+export async function readPublicMedia(objectKey: string): Promise<Cached> {
+  const hit = recall(`key:${objectKey}`);
+  if (hit) return hit;
+  const [raw, mime] = await Promise.all([readMedia(objectKey), mediaType(objectKey)]);
+  return remember(`key:${objectKey}`, { buf: openBytes(raw), mime });
+}
+
+export async function readSealedUpload(id: string): Promise<Cached> {
+  const hit = recall(`id:${id}`);
+  if (hit) return hit;
   const row = await queryOne<{ object_key: string; mime: string }>(
     `SELECT object_key, mime FROM uploads WHERE id=$1`,
     [id],
@@ -211,5 +263,5 @@ export async function readSealedUpload(id: string) {
     buf = await readMedia(row.object_key);
   }
   const mime = (row.mime || "application/octet-stream").split(";")[0].trim() || "application/octet-stream";
-  return { buf: openBytes(buf), mime };
+  return remember(`id:${id}`, { buf: openBytes(buf), mime });
 }

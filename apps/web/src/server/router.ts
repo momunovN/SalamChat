@@ -39,9 +39,8 @@ import { deleteMessage, editMessage, listMessages, receipts, sendMessage } from 
 import { listContacts, syncContacts } from "./contacts";
 import { profileLibrary } from "./profile";
 import { getUserPublic, lookupPhones, resolveSlug, searchUsers } from "./users";
-import { completeUpload, createIntent, mediaType, putUpload, readMedia, readSealedUpload } from "./uploads";
+import { completeUpload, createIntent, putUpload, readPublicMedia, readSealedUpload } from "./uploads";
 import { dropPushSubscription, savePushSubscription, vapidPublicKey } from "./push";
-import { openBytes } from "./seal";
 import { sseResponse } from "./stream";
 import { markTyping, membersCached, valkeyReady } from "./valkey";
 
@@ -165,9 +164,8 @@ export async function handleRequest(req: Request): Promise<Response> {
       } catch {
         throw new HttpError(400, "bad_request", "bad key");
       }
-      const buf = openBytes(await readMedia(key));
-      const type = await mediaType(key);
-      return mediaResponse(req, buf, type, "public, max-age=86400");
+      const media = await readPublicMedia(key);
+      return mediaResponse(req, media.buf, media.mime, "public, max-age=86400");
     }
     if (!pathname.startsWith("/v1/")) {
       return json(404, { error: { code: "not_found", message: "not found" } });
