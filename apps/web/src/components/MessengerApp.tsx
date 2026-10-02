@@ -139,6 +139,9 @@ export function MessengerApp() {
   const refreshGen = useRef(0);
   const groupBusy = useRef(false);
   const paintRef = useRef<(chatId: string, patch: (chat: Chat) => Chat) => void>(() => undefined);
+  const refreshRef = useRef<() => Promise<void>>(async () => undefined);
+  const refreshTimer = useRef<number | null>(null);
+  const [resync, setResync] = useState(0);
   const errorTimer = useRef<number | null>(null);
   const chatsRef = useRef(chats);
   const routerRef = useRef(router);
@@ -278,6 +281,19 @@ export function MessengerApp() {
   }, [query, seg]);
 
   useEffect(() => {
+    refreshRef.current = refreshChats;
+  }, [refreshChats]);
+
+  // Several events in a row (a burst of messages, chat.updated) cost one list reload, not one each.
+  const scheduleRefresh = useCallback(() => {
+    if (refreshTimer.current) window.clearTimeout(refreshTimer.current);
+    refreshTimer.current = window.setTimeout(() => {
+      refreshTimer.current = null;
+      void refreshRef.current().catch(() => undefined);
+    }, 400);
+  }, []);
+
+  useEffect(() => {
     if (!session) return;
     const id = window.setTimeout(() => {
       void refreshChats().catch(() => undefined);
@@ -342,7 +358,7 @@ export function MessengerApp() {
     return () => {
       cancelled = true;
     };
-  }, [session, activeId, me]);
+  }, [session, activeId, me, resync]);
 
   useEffect(() => {
     const userId = session?.user.id;
@@ -411,10 +427,15 @@ export function MessengerApp() {
     }
   }, []);
 
+  const sessionUser = session?.user.id;
   useEffect(() => {
-    if (!session) return;
-    const es = new EventSource(`/v1/stream?token=${encodeURIComponent(session.access_token)}`);
-    es.onmessage = (ev) => {
+    if (!sessionUser) return;
+    let es: EventSource | null = null;
+    let closed = false;
+    let opened = false;
+    let fails = 0;
+    let retry: number | undefined;
+    const onEvent = (ev: MessageEvent) => {
       try {
         const env = JSON.parse(ev.data) as Envelope;
         const openId = activeIdRef.current;
@@ -443,7 +464,8 @@ export function MessengerApp() {
               : [...prev, msg];
             return dedupeMessages(next);
           });
-          void refreshChats();
+          // The row is already repainted above; reload the list only for a chat we do not have yet.
+          if (!chatsRef.current.some((chat) => chat.id === msg.chat_id)) scheduleRefresh();
           if (!mine && msg.author_id) {
             const row = chatsRef.current.find((chat) => chat.id === msg.chat_id) || pinnedChats.current.get(msg.chat_id);
             const until = row?.muted_until ? new Date(row.muted_until).getTime() : 0;
@@ -467,20 +489,21 @@ export function MessengerApp() {
             if (!openId || msg.chat_id !== openId) return prev;
             return prev.map((m) => (m.id === msg.id ? { ...m, ...msg } : m));
           });
-          void refreshChats();
         }
         if (env.type === "message.deleted") {
           const body = env.body as { id: string; chat_id: string };
+          // Only the server knows the new last message when the last one is deleted.
+          const wasLast = chatsRef.current.some((chat) => chat.id === body.chat_id && chat.last_message?.id === body.id);
           paintRef.current(body.chat_id, (chat) => (chat.last_message?.id === body.id ? { ...chat, last_message: null } : chat));
           setMessages((prev) => {
             if (!openId || body.chat_id !== openId) return prev;
             return prev.filter((m) => m.id !== body.id);
           });
-          void refreshChats();
+          if (wasLast) scheduleRefresh();
         }
         if (env.type === "chat.updated") {
           setRosterTick((n) => n + 1);
-          void refreshChats();
+          scheduleRefresh();
         }
         if (env.type === "message.ack") {
           const body = env.body as { id?: string; client_id?: string };
@@ -506,17 +529,60 @@ export function MessengerApp() {
         }
         if (env.type === "call.updated") {
           applyRemoteCall(env.body as Call);
-          void api
-            .calls()
-            .then((r) => setCalls(r.items ?? []))
-            .catch(() => undefined);
         }
       } catch {
         /* ignore */
       }
     };
-    return () => es.close();
-  }, [session, refreshChats, applyRemoteCall]);
+    const open = () => {
+      if (closed) return;
+      // Read the token at connect time: a REST call may have refreshed it since the effect ran.
+      const token = loadSession()?.access_token;
+      if (!token) return;
+      const source = new EventSource(`/v1/stream?token=${encodeURIComponent(token)}`);
+      es = source;
+      source.onmessage = onEvent;
+      source.onopen = () => {
+        fails = 0;
+        // After a drop (sleep, network switch) fetch what arrived while we were away.
+        if (opened) {
+          scheduleRefresh();
+          setResync((n) => n + 1);
+        }
+        opened = true;
+      };
+      source.onerror = () => {
+        // CONNECTING: the browser retries by itself. CLOSED: it gave up (e.g. 401 on an expired token).
+        if (closed || source.readyState !== EventSource.CLOSED) return;
+        source.close();
+        fails += 1;
+        const wait = Math.min(30_000, 1000 * 2 ** Math.min(fails, 5));
+        // Any authed call refreshes an expired token before we reconnect.
+        void api
+          .me()
+          .catch(() => undefined)
+          .finally(() => {
+            if (!closed) retry = window.setTimeout(open, wait);
+          });
+      };
+    };
+    const wake = () => {
+      if (closed || document.visibilityState !== "visible") return;
+      if (es && es.readyState !== EventSource.CLOSED) return;
+      if (retry) window.clearTimeout(retry);
+      open();
+    };
+    open();
+    window.addEventListener("online", wake);
+    document.addEventListener("visibilitychange", wake);
+    return () => {
+      closed = true;
+      if (retry) window.clearTimeout(retry);
+      window.removeEventListener("online", wake);
+      document.removeEventListener("visibilitychange", wake);
+      es?.close();
+    };
+  }, [sessionUser, applyRemoteCall, scheduleRefresh]);
 
   useEffect(() => {
     if (!session) return;
@@ -536,7 +602,7 @@ export function MessengerApp() {
         .finally(() => {
           busy = false;
         });
-    }, 1000);
+    }, 3000);
     return () => {
       stop = true;
       window.clearInterval(timer);
@@ -1628,7 +1694,7 @@ export function MessengerApp() {
       isTyping={isTyping}
       rosterTick={rosterTick}
       onBack={() => leaveChat()}
-      onRefreshChats={() => void refreshChats()}
+      onRefreshChats={scheduleRefresh}
       onOpenDirect={(userId) => void openDirect(userId)}
       onOpenChat={(id) => void openKnown(id)}
       onMuted={(chatId, mutedUntil) => paintChat(chatId, (chat) => ({ ...chat, muted_until: mutedUntil }))}

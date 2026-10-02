@@ -237,7 +237,6 @@ export function ChatPane({
         const msg = await api.editMessage(id, trimmed);
         setMessages((prev) => prev.map((m) => (m.id === id ? msg : m)));
         onLocal(msg);
-        onRefreshChats();
       } catch {
         /* keep old */
       }
@@ -267,7 +266,6 @@ export function ChatPane({
       const msg = await api.send(chat.id, clientId, "text", { text: trimmed }, undefined, quoted?.id);
       setMessages((prev) => prev.map((m) => (m.client_id === clientId ? msg : m)));
       onLocal(msg);
-      onRefreshChats();
     } catch {
       const failed = { ...optimistic, status: "failed" };
       setMessages((prev) => prev.map((m) => (m.client_id === clientId ? failed : m)));
@@ -312,7 +310,6 @@ export function ChatPane({
         setMessages((prev) => prev.map((x) => (x.client_id === m.client_id ? msg : x)));
         onLocal(msg);
       }
-      onRefreshChats();
     } catch {
       const failed = { ...m, status: "failed" };
       setMessages((prev) => prev.map((x) => (x.client_id === m.client_id ? failed : x)));
@@ -481,7 +478,6 @@ export function ChatPane({
       localUrls.current.delete(localUrl);
       setMessages((prev) => prev.map((m) => (m.client_id === clientId ? msg : m)));
       onLocal(msg);
-      onRefreshChats();
     } catch {
       noteVoiceError(t.voiceFail);
       const failed = { ...optimistic, status: "failed" };
@@ -538,7 +534,6 @@ export function ChatPane({
       setMessages((prev) => prev.map((m) => (m.client_id === clientId ? msg : m)));
       queueMicrotask(() => URL.revokeObjectURL(localUrl));
       onLocal(msg);
-      onRefreshChats();
     } catch {
       const failed = { ...optimistic, status: "failed" };
       setMessages((prev) => prev.map((m) => (m.client_id === clientId ? failed : m)));

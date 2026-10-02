@@ -85,18 +85,25 @@ async function open() {
   }
   try {
     const { createClient } = await import("redis");
+    // Before the first successful connect, give up after a few tries: connect() otherwise
+    // retries forever and the whole server never starts listening while Valkey is down.
+    let up = false;
     const client = createClient({
       url,
       disableOfflineQueue: true,
       socket: {
         connectTimeout: 1500,
-        reconnectStrategy: (retries) => Math.min(100 * 2 ** retries, 3000),
+        reconnectStrategy: (retries) => {
+          if (!up && retries >= 2) return new Error("valkey unreachable");
+          return Math.min(100 * 2 ** retries, 3000);
+        },
       },
     }) as Redis;
     client.on("error", (err: Error) => {
       console.error("valkey", err.message);
     });
     await client.connect();
+    up = true;
     const sub = client.duplicate();
     sub.on("error", (err: Error) => {
       console.error("valkey sub", err.message);

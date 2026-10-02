@@ -17,8 +17,7 @@ function key(userId: string) {
   return `salam.box.${userId}`;
 }
 
-function read(userId: string): Store {
-  if (!userId || typeof localStorage === "undefined") return empty();
+function load(userId: string): Store {
   try {
     const raw = localStorage.getItem(key(userId));
     if (!raw) return empty();
@@ -33,8 +32,59 @@ function read(userId: string): Store {
   }
 }
 
+// Parsing and stringifying the whole box on every message and receipt blocked the main thread.
+// The box now lives in memory; localStorage gets a debounced copy (and one on page hide).
+const memory = new Map<string, Store>();
+const dirty = new Set<string>();
+let flushTimer: ReturnType<typeof setTimeout> | null = null;
+let hooked = false;
+
+function hook() {
+  if (hooked || typeof window === "undefined") return;
+  hooked = true;
+  window.addEventListener("pagehide", flushNow);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") flushNow();
+  });
+  // Another tab wrote the box: drop ours so the next read sees theirs.
+  window.addEventListener("storage", (e) => {
+    if (!e.key?.startsWith("salam.box.")) return;
+    const userId = e.key.slice("salam.box.".length);
+    if (!dirty.has(userId)) memory.delete(userId);
+  });
+}
+
+function read(userId: string): Store {
+  if (!userId || typeof localStorage === "undefined") return empty();
+  hook();
+  let store = memory.get(userId);
+  if (!store) {
+    store = load(userId);
+    memory.set(userId, store);
+  }
+  return store;
+}
+
 function write(userId: string, store: Store) {
   if (!userId || typeof localStorage === "undefined") return;
+  hook();
+  memory.set(userId, store);
+  dirty.add(userId);
+  if (flushTimer) return;
+  flushTimer = setTimeout(flushNow, 600);
+}
+
+function flushNow() {
+  if (flushTimer) clearTimeout(flushTimer);
+  flushTimer = null;
+  for (const userId of [...dirty]) {
+    dirty.delete(userId);
+    const store = memory.get(userId);
+    if (store) persist(userId, store);
+  }
+}
+
+function persist(userId: string, store: Store) {
   const chats = dedupeChats(store.chats).slice(0, MAX_CHATS);
   const threads: Record<string, Message[]> = {};
   for (const chat of chats) {
