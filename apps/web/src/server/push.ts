@@ -2,6 +2,8 @@ import { createECDH, createHash } from "crypto";
 import * as webpush from "web-push";
 import { query } from "./db";
 import { env, jwtSecret } from "./env";
+import { fcmToUsers } from "./fcm";
+import { presence } from "./hub";
 import { HttpError } from "./http";
 
 export type PushNote = {
@@ -126,9 +128,27 @@ export async function dropPushSubscription(userId: string, endpointRaw: string) 
   return { ok: true };
 }
 
-export async function pushToUsers(userIds: string[], note: PushNote) {
-  const ids = [...new Set(userIds.filter(Boolean))];
+export type PushExtra = {
+  /** Message pushes skip members who muted this chat. */
+  chatId?: string;
+  /** Extra fields for the Android data push (call id, call JSON, ...). */
+  data?: Record<string, string>;
+};
+
+export async function pushToUsers(userIds: string[], note: PushNote, extra: PushExtra = {}) {
+  let ids = [...new Set(userIds.filter(Boolean))];
   if (!ids.length) return;
+  if (note.kind === "message" && extra.chatId) {
+    const muted = await query<{ user_id: string }>(
+      `SELECT user_id::text AS user_id FROM chat_members
+       WHERE chat_id=$1 AND user_id = ANY($2::uuid[]) AND muted_until IS NOT NULL AND muted_until > now()`,
+      [extra.chatId, ids],
+    ).catch(() => [] as { user_id: string }[]);
+    const quiet = new Set(muted.map((r) => r.user_id));
+    ids = ids.filter((id) => !quiet.has(id));
+    if (!ids.length) return;
+  }
+  void pushAndroid(ids, note, extra);
   try {
     vapidKeys();
     const rows = await query<SubRow>(
@@ -163,4 +183,25 @@ export async function pushToUsers(userIds: string[], note: PushNote) {
   } catch (err) {
     console.error("push", err instanceof Error ? err.message : err);
   }
+}
+
+/**
+ * Android gets a data push it renders itself. A user with a live socket already received the
+ * event (and the app shows its own notification), so message pushes skip them; a call always
+ * goes out so a phone with the app closed still rings.
+ */
+async function pushAndroid(ids: string[], note: PushNote, extra: PushExtra) {
+  const targets = note.kind === "call" ? ids : ids.filter((id) => !presence.online(id));
+  if (!targets.length) return;
+  const text = note.type === "text" ? clip(note.text.trim(), 140) : "";
+  await fcmToUsers(
+    targets,
+    { kind: note.kind, type: note.type, title: clip(note.author || "Salam", 80), text, ...(extra.data || {}) },
+    note.kind === "call" ? 45 : 86_400,
+  );
+}
+
+/** Tells phones to drop a ringing-call notification: answered elsewhere, missed or cancelled. */
+export function cancelCallPush(userIds: string[], callId: string) {
+  void fcmToUsers(userIds, { kind: "call_end", call_id: callId }, 60);
 }

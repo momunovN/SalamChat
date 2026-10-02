@@ -4,7 +4,7 @@ import { env } from "./env";
 import { envelope, hub } from "./hub";
 import { HttpError, iso } from "./http";
 import { memberIds, mustMember } from "./chats";
-import { pushToUsers } from "./push";
+import { cancelCallPush, pushToUsers } from "./push";
 
 export type Call = {
   id: string;
@@ -117,7 +117,7 @@ export async function startCall(userId: string, chatId: string, kind: string) {
       text: "",
       tag: `call-${id}`,
       url: "/",
-    });
+    }, { data: { call_id: id, chat_id: chatId, call: JSON.stringify(call) } });
   })();
   return { ...call, ...withIce(signed) };
 }
@@ -160,7 +160,9 @@ export async function expireRinging(id?: string) {
     void query(`INSERT INTO call_events (call_id, event, payload) VALUES ($1,'end','{"reason":"timeout"}'::jsonb)`, [call.id]).catch(
       () => undefined,
     );
-    hub.publishMany(await memberIds(call.chat_id), envelope("call.updated", call));
+    const members = await memberIds(call.chat_id);
+    hub.publishMany(members, envelope("call.updated", call));
+    cancelCallPush(members, call.id);
   }
   return rows.length;
 }
@@ -193,7 +195,9 @@ async function transit(
   await query(`UPDATE calls SET status=$2, ${tsCol}=now() WHERE id=$1`, [id, status]);
   await query(`INSERT INTO call_events (call_id, user_id, event) VALUES ($1,$2,$3)`, [id, userId, event]);
   const next = await getCall(userId, id);
-  hub.publishMany(await memberIds(call.chat_id), envelope("call.updated", next));
+  const members = await memberIds(call.chat_id);
+  hub.publishMany(members, envelope("call.updated", next));
+  if (call.status === "ringing") cancelCallPush(members, id);
   return next;
 }
 
@@ -215,6 +219,7 @@ export async function answerCall(userId: string, id: string) {
   const [members, signed] = await Promise.all([memberIds(call.chat_id), signLiveKitToken(userId, call.sfu_room || "")]);
   noteEvent(id, userId, "join");
   hub.publishMany(members, envelope("call.updated", call));
+  cancelCallPush(members, id);
   return { ...call, ...withIce(signed) };
 }
 
@@ -234,6 +239,7 @@ export async function hangupCall(userId: string, id: string) {
   await query(`INSERT INTO call_events (call_id, user_id, event) VALUES ($1,$2,'end')`, [id, userId]);
   const next = await getCall(userId, id);
   hub.publishMany(members, envelope("call.updated", next));
+  if (call.status === "ringing") cancelCallPush(members, id);
   return next;
 }
 

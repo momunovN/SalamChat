@@ -126,6 +126,9 @@ class SamalApi(
 
     fun deleteMessage(id: String): JSONObject = delete("/v1/messages/$id")
 
+    /** This device's FCM token, so the server can wake it for messages and calls. */
+    fun registerPush(token: String): JSONObject = post("/v1/devices/push", JSONObject().put("token", token), true)
+
     fun receipts(ids: List<String>, status: String): JSONObject {
         val arr = JSONArray()
         ids.forEach { arr.put(it) }

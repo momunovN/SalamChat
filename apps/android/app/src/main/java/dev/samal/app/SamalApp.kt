@@ -8,6 +8,7 @@ import dev.samal.app.data.db.MIGRATION_2_3
 import dev.samal.app.data.db.MIGRATION_3_4
 import dev.samal.app.data.db.MIGRATION_4_5
 import dev.samal.app.data.db.SamalDb
+import dev.samal.app.data.notify.Push
 import dev.samal.app.data.session.SessionStore
 import dev.samal.app.data.sync.InboxService
 
@@ -24,6 +25,8 @@ class SamalApp : Application() {
             .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
             .build()
         session = SessionStore(this, api)
+        Push.init(this)
         if (session.isLoggedIn) InboxService.start(this)
+        Push.sync(this)
     }
 }

@@ -45,6 +45,8 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import dev.samal.app.data.db.ChatEntity
 import dev.samal.app.data.contacts.needsDisplayName
+import dev.samal.app.data.notify.Notifier
+import dev.samal.app.data.notify.Push
 import dev.samal.app.data.sync.NavBus
 import dev.samal.app.ui.auth.PhoneAuthScreen
 import dev.samal.app.ui.auth.ProfileOnboardingScreen
@@ -79,6 +81,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        handleIntent(intent)
         val app = application as SamalApp
         setContent {
             SamalTheme {
@@ -97,7 +100,21 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        handleIntent(intent)
+    }
+
+    /** Notification taps: open a chat, or show the incoming call (over the lock screen). */
+    private fun handleIntent(intent: Intent?) {
+        intent ?: return
         intent.getStringExtra("chat_id")?.let { NavBus.pendingChat.value = it }
+        intent.getStringExtra("incoming_call")?.let { raw ->
+            intent.removeExtra("incoming_call")
+            if (Build.VERSION.SDK_INT >= 27) {
+                setShowWhenLocked(true)
+                setTurnScreenOn(true)
+            }
+            NavBus.incoming.value = raw
+        }
     }
 }
 
@@ -113,6 +130,8 @@ private fun MainShell(app: SamalApp) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val startCall = rememberCallStarter(app.api) { stage = it }
     val answer = rememberCallAnswerer(app.api) { stage = it }
+    // Signed in (fresh login or app start): hand this device's push token to the server.
+    LaunchedEffect(me) { if (me.isNotBlank()) Push.sync(app) }
     val notif = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
     val activity = LocalContext.current as MainActivity
 
@@ -220,10 +239,12 @@ private fun MainShell(app: SamalApp) {
                     video = call.optString("kind") == "video",
                     onAnswer = {
                         NavBus.incoming.value = null
+                        Notifier.cancelCall(activity, call.optString("id"))
                         answer(call, title)
                     },
                     onDecline = {
                         NavBus.incoming.value = null
+                        Notifier.cancelCall(activity, call.optString("id"))
                         scope.launch(Dispatchers.IO) { runCatching { app.api.rejectCall(call.getString("id")) } }
                     },
                 )

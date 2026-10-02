@@ -9,6 +9,8 @@ import android.content.Intent
 import org.json.JSONArray
 import java.time.Instant
 import android.media.AudioAttributes
+import android.media.RingtoneManager
+import org.json.JSONObject
 import android.media.MediaPlayer
 import android.os.Handler
 import android.os.Looper
@@ -19,6 +21,7 @@ import dev.samal.app.R
 object Notifier {
     private const val ONGOING = "salam.ongoing"
     private const val MESSAGES = "salam.messages.v2"
+    private const val CALLS = "salam.calls.v1"
     private const val ONGOING_ID = 41
 
     fun ensure(ctx: Context) {
@@ -27,6 +30,19 @@ object Notifier {
             nm.createNotificationChannel(
                 NotificationChannel(ONGOING, ctx.getString(R.string.app_name), NotificationManager.IMPORTANCE_LOW),
             )
+        }
+        if (nm.getNotificationChannel(CALLS) == null) {
+            val ch = NotificationChannel(CALLS, ctx.getString(R.string.tab_calls), NotificationManager.IMPORTANCE_HIGH)
+            ch.setSound(
+                RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE),
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build(),
+            )
+            ch.enableVibration(true)
+            ch.lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+            nm.createNotificationChannel(ch)
         }
         if (nm.getNotificationChannel(MESSAGES) == null) {
             val ch = NotificationChannel(MESSAGES, ctx.getString(R.string.tab_chats), NotificationManager.IMPORTANCE_HIGH)
@@ -65,6 +81,50 @@ object Notifier {
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .build()
     }
+
+    /**
+     * Ringing call while the app is not on screen: full-screen on a locked phone, heads-up
+     * otherwise. Tapping opens the app on the incoming-call screen. Rings at most 45s, the
+     * same as the server's ring timeout.
+     */
+    fun incomingCall(ctx: Context, call: JSONObject, caller: String) {
+        ensure(ctx)
+        val id = call.optString("id")
+        if (id.isBlank()) return
+        val open = Intent(ctx, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            putExtra("incoming_call", call.toString())
+        }
+        val pi = PendingIntent.getActivity(
+            ctx,
+            id.hashCode(),
+            open,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val video = call.optString("kind") == "video"
+        val note = NotificationCompat.Builder(ctx, CALLS)
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setContentTitle(caller.ifBlank { ctx.getString(R.string.app_name) })
+            .setContentText(ctx.getString(if (video) R.string.incoming_video else R.string.incoming_audio))
+            .setCategory(NotificationCompat.CATEGORY_CALL)
+            .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setContentIntent(pi)
+            .setFullScreenIntent(pi, true)
+            .setOngoing(true)
+            .setAutoCancel(true)
+            .setTimeoutAfter(45_000)
+            .build()
+        note.flags = note.flags or Notification.FLAG_INSISTENT
+        ctx.getSystemService(NotificationManager::class.java).notify(callNoteId(id), note)
+    }
+
+    fun cancelCall(ctx: Context, callId: String) {
+        if (callId.isBlank()) return
+        ctx.getSystemService(NotificationManager::class.java).cancel(callNoteId(callId))
+    }
+
+    private fun callNoteId(callId: String) = "call:$callId".hashCode()
 
     fun message(ctx: Context, chatId: String, title: String, body: String) {
         ensure(ctx)

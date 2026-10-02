@@ -231,7 +231,12 @@ class Inbox(
                 val body = env.optJSONObject("body") ?: return
                 if (body.optString("initiator_id") != me && body.optString("status") == "ringing") {
                     NavBus.incoming.value = body.toString()
+                    if (!NavBus.resumed) {
+                        val title = dao.chat(body.optString("chat_id"))?.title.orEmpty()
+                        Notifier.incomingCall(app, body, title)
+                    }
                 } else if (body.optString("status") != "ringing") {
+                    Notifier.cancelCall(app, body.optString("id"))
                     if (body.optString("status") in setOf("ended", "missed", "declined")) {
                         NavBus.ended.value = body.optString("id")
                     }

@@ -33,7 +33,7 @@ import {
   startCall,
 } from "./calls";
 import { buildInfo } from "./build";
-import { migrate } from "./db";
+import { migrate, query } from "./db";
 import { envelope, hub, presence } from "./hub";
 import { bearer, corsHeaders, errorResponse, HttpError, json, readJSON } from "./http";
 import { deleteMessage, editMessage, listMessages, receipts, sendMessage } from "./messages";
@@ -205,6 +205,19 @@ async function dispatch(method: string, parts: string[], req: Request, url: URL)
   }
   if (method === "POST" && p("auth/logout")) {
     return json(200, await logout(auth.deviceId));
+  }
+  if (method === "POST" && p("devices/push")) {
+    // The phone's FCM token for this signed-in device; an empty token turns pushes off.
+    const body = await readJSON<{ token?: string }>(req);
+    const token = String(body.token || "").trim();
+    if (token.length > 4096) throw new HttpError(400, "bad_request", "bad token");
+    if (token) await query(`UPDATE devices SET push_token='' WHERE push_token=$1 AND id<>$2`, [token, auth.deviceId]);
+    await query(`UPDATE devices SET push_token=$2, last_seen_at=now() WHERE id=$1 AND user_id=$3`, [
+      auth.deviceId,
+      token,
+      auth.userId,
+    ]);
+    return json(200, { ok: true });
   }
   if (method === "POST" && p("push/subscribe")) {
     const body = await readJSON<{ endpoint?: string; keys?: { p256dh?: string; auth?: string }; lang?: string }>(req);

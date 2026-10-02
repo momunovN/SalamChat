@@ -358,6 +358,7 @@ function fanoutNew(chatId: string, members: string[], msg: Message) {
         tag: `chat-${chatId}`,
         url: "/",
       },
+      { chatId, data: { chat_id: chatId, message_id: msg.id } },
     );
   }
 }
