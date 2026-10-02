@@ -24,9 +24,19 @@ export function loadEnv() {
   }
 }
 
+/**
+ * RelaxDev fills every variable it finds in the code but the panel lacks with a placeholder,
+ * at build time and at runtime: "auto-generated-stub-for-build", or for URLs an address on
+ * build-stub-domain.com. Treated as unset, so a deleted SALAM_DATABASE_URL falls through to
+ * the DATABASE_URL of the RelaxDev database instead of a host that does not exist.
+ */
+function isStub(v: string) {
+  return /auto-generated-stub|build-stub-domain/i.test(v);
+}
+
 function liveValue(key: string) {
   const v = process.env[key];
-  if (!v || v === "auto-generated-stub-for-build") return "";
+  if (!v || isStub(v)) return "";
   return v;
 }
 
