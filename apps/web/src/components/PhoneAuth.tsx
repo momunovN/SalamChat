@@ -351,6 +351,9 @@ export function PhoneAuth({
           <Link className="underline decoration-white/20 underline-offset-2" href="/privacy">
             {t.privacy}
           </Link>
+          <Link className="underline decoration-white/20 underline-offset-2" href="/download">
+            {t.downloadAndroid}
+          </Link>
         </p>
       </div>
     </div>

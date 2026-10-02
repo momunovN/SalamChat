@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { usePathname, useRouter } from "next/navigation";
+import Link from "next/link";
 import { flushSync } from "react-dom";
 import {
   Check,
@@ -13,6 +14,7 @@ import {
   Phone,
   Search,
   Settings,
+  Smartphone,
   Users,
   Video,
   X,
@@ -1654,10 +1656,16 @@ export function MessengerApp() {
                 ))}
               </div>
             </div>
+            <Link
+              href="/download"
+              className="mt-6 flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-elevated font-semibold text-ink hover:bg-line"
+            >
+              <Smartphone size={16} /> {t.downloadAndroid}
+            </Link>
             <button
               type="button"
               onClick={logout}
-              className="mt-6 mb-4 flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-elevated font-semibold text-danger"
+              className="mt-3 mb-4 flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-elevated font-semibold text-danger"
             >
               <LogOut size={16} /> {t.logout}
             </button>
