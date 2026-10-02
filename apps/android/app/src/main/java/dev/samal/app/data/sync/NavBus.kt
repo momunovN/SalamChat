@@ -7,5 +7,7 @@ object NavBus {
     var resumed: Boolean = false
     val pendingChat = MutableStateFlow<String?>(null)
     val incoming = MutableStateFlow<String?>(null)
+    /** Id of the last call the server reported as ended, missed or declined. */
+    val ended = MutableStateFlow<String?>(null)
     val typingUntil = MutableStateFlow<Map<String, Long>>(emptyMap())
 }

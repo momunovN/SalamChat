@@ -100,4 +100,7 @@
     <string name="empty_groups">Азырынча жалпы топ жок</string>
     <string name="group_nick">Топтун ники</string>
     <string name="phone_label">Номер</string>
+    <string name="dialing">Чалуу…</string>
+    <string name="mic">Микрофон</string>
+    <string name="camera">Камера</string>
 </resources>

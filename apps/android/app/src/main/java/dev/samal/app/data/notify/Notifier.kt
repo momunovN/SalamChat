@@ -47,6 +47,25 @@ object Notifier {
             .build()
     }
 
+    fun inCall(ctx: Context, title: String): Notification {
+        ensure(ctx)
+        val open = PendingIntent.getActivity(
+            ctx,
+            42,
+            Intent(ctx, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
+            PendingIntent.FLAG_IMMUTABLE,
+        )
+        return NotificationCompat.Builder(ctx, ONGOING)
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setContentTitle(ctx.getString(R.string.in_call))
+            .setContentText(title)
+            .setContentIntent(open)
+            .setOngoing(true)
+            .setSilent(true)
+            .setCategory(NotificationCompat.CATEGORY_CALL)
+            .build()
+    }
+
     fun message(ctx: Context, chatId: String, title: String, body: String) {
         ensure(ctx)
         val open = Intent(ctx, MainActivity::class.java).apply {

@@ -52,7 +52,7 @@ import dev.samal.app.ui.calls.CallStage
 import dev.samal.app.ui.calls.CallsScreen
 import dev.samal.app.ui.calls.IncomingCall
 import dev.samal.app.ui.calls.Stage
-import dev.samal.app.ui.calls.answerCall
+import dev.samal.app.ui.calls.rememberCallAnswerer
 import dev.samal.app.ui.calls.rememberCallStarter
 import dev.samal.app.ui.chat.ChatScreen
 import dev.samal.app.ui.chats.ChatListScreen
@@ -112,6 +112,7 @@ private fun MainShell(app: SamalApp) {
     val pending by NavBus.pendingChat.collectAsState()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val startCall = rememberCallStarter(app.api) { stage = it }
+    val answer = rememberCallAnswerer(app.api) { stage = it }
     val notif = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
     val activity = LocalContext.current as MainActivity
 
@@ -219,9 +220,7 @@ private fun MainShell(app: SamalApp) {
                     video = call.optString("kind") == "video",
                     onAnswer = {
                         NavBus.incoming.value = null
-                        scope.launch {
-                            answerCall(app.api, call, title) { stage = it }
-                        }
+                        answer(call, title)
                     },
                     onDecline = {
                         NavBus.incoming.value = null
@@ -231,7 +230,7 @@ private fun MainShell(app: SamalApp) {
             }
         }
         stage?.let { current ->
-            CallStage(current) {
+            CallStage(current, app.api) {
                 val id = current.id
                 stage = null
                 scope.launch(Dispatchers.IO) { runCatching { app.api.hangupCall(id) } }

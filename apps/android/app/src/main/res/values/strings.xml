@@ -106,4 +106,7 @@
     <string name="empty_groups">Пока нет общих групп</string>
     <string name="group_nick">Ник группы</string>
     <string name="phone_label">Номер</string>
+    <string name="dialing">Вызов…</string>
+    <string name="mic">Микрофон</string>
+    <string name="camera">Камера</string>
 </resources>

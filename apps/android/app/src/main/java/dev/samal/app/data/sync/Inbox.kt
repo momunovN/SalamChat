@@ -232,6 +232,9 @@ class Inbox(
                 if (body.optString("initiator_id") != me && body.optString("status") == "ringing") {
                     NavBus.incoming.value = body.toString()
                 } else if (body.optString("status") != "ringing") {
+                    if (body.optString("status") in setOf("ended", "missed", "declined")) {
+                        NavBus.ended.value = body.optString("id")
+                    }
                     val current = NavBus.incoming.value
                     if (current != null && JSONObject(current).optString("id") == body.optString("id")) {
                         NavBus.incoming.value = null

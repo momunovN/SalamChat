@@ -1,6 +1,25 @@
 package dev.samal.app.ui.calls
 
 import android.Manifest
+import android.content.Context
+import android.widget.Toast
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.MicOff
+import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material.icons.filled.VideocamOff
+import androidx.compose.runtime.key
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import dev.samal.app.data.sync.CallService
+import dev.samal.app.data.sync.NavBus
+import io.livekit.android.room.track.DataPublishReliability
+import io.livekit.android.room.track.Track
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.withContext
 import android.app.Application
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -164,30 +183,102 @@ private fun CallButton(label: String, color: androidx.compose.ui.graphics.Color,
     }
 }
 
+/** Same topic and payload the web client sends, so either side can end the call for both. */
+private const val HANGUP_TOPIC = "salam.call"
+private const val HANGUP = "hangup"
+private val CLOSED = setOf("ended", "missed", "declined")
+
 @Composable
-fun CallStage(stage: Stage, onHangup: () -> Unit) {
+fun CallStage(stage: Stage, api: SamalApi, onHangup: () -> Unit) {
     val ctx = LocalContext.current
     val app = ctx.applicationContext as Application
     val room = remember { LiveKit.create(app) }
+    val scope = rememberCoroutineScope()
     var phase by remember { mutableStateOf("link") }
+    var peer by remember { mutableStateOf(false) }
     var remote by remember { mutableStateOf<VideoTrack?>(null) }
+    var local by remember { mutableStateOf<VideoTrack?>(null) }
+    var mic by remember { mutableStateOf(true) }
+    var cam by remember { mutableStateOf(stage.video) }
     var since by remember { mutableLongStateOf(0L) }
     var tick by remember { mutableLongStateOf(0L) }
+    var done by remember { mutableStateOf(false) }
     val failed = stringResource(R.string.call_failed)
+    val latestHangup by rememberUpdatedState(onHangup)
+
+    // Leave once, whoever ends it: our button, the peer, the server (missed/declined) or a drop.
+    fun finish(notifyPeer: Boolean) {
+        if (done) return
+        done = true
+        scope.launch {
+            if (notifyPeer) {
+                runCatching {
+                    room.localParticipant.publishData(HANGUP.toByteArray(), DataPublishReliability.RELIABLE, HANGUP_TOPIC)
+                }
+            }
+            runCatching { room.disconnect() }
+            latestHangup()
+        }
+    }
+
     DisposableEffect(room) {
+        CallService.start(ctx, stage.title, stage.video)
         onDispose {
+            CallService.stop(ctx)
             runCatching { room.disconnect() }
         }
     }
+
+    val ended by NavBus.ended.collectAsState()
+    LaunchedEffect(ended) {
+        if (ended == stage.id) finish(false)
+    }
+
+    // Safety net when a socket event is missed: the server is the source of truth for the call.
+    LaunchedEffect(stage.id) {
+        while (isActive && !done) {
+            delay(4_000)
+            val status = withContext(Dispatchers.IO) {
+                runCatching { api.call(stage.id).optString("status") }.getOrNull()
+            }
+            if (status != null && status in CLOSED) finish(false)
+        }
+    }
+
     LaunchedEffect(stage.id) {
         if (!stage.url.startsWith("ws") || stage.token.startsWith("stub")) {
             phase = "fail"
             return@LaunchedEffect
         }
         launch {
+            var leaveJob: Job? = null
             room.events.collect { event ->
-                if (event is RoomEvent.TrackSubscribed && event.track is VideoTrack) {
-                    remote = event.track as VideoTrack
+                when (event) {
+                    is RoomEvent.TrackSubscribed -> {
+                        peer = true
+                        if (since == 0L) since = System.currentTimeMillis()
+                        val track = event.track
+                        if (track is VideoTrack) remote = track
+                    }
+                    is RoomEvent.TrackUnsubscribed -> if (event.track == remote) remote = null
+                    is RoomEvent.ParticipantConnected -> {
+                        leaveJob?.cancel()
+                        peer = true
+                        if (since == 0L) since = System.currentTimeMillis()
+                    }
+                    is RoomEvent.ParticipantDisconnected -> {
+                        // A short grace period: LiveKit reconnects a peer that switched networks.
+                        leaveJob?.cancel()
+                        leaveJob = launch {
+                            delay(1_500)
+                            if (room.remoteParticipants.isEmpty()) finish(false)
+                        }
+                    }
+                    is RoomEvent.DataReceived -> {
+                        if (event.topic == HANGUP_TOPIC && String(event.data) == HANGUP) finish(false)
+                    }
+                    is RoomEvent.Disconnected -> if (phase == "live") finish(false)
+                    else -> Unit
                 }
             }
         }
@@ -195,52 +286,141 @@ fun CallStage(stage: Stage, onHangup: () -> Unit) {
             room.prepareConnection(stage.url, stage.token)
             room.connect(stage.url, stage.token)
             coroutineScope {
-                val mic = async { room.localParticipant.setMicrophoneEnabled(true) }
-                val cam = async { if (stage.video) room.localParticipant.setCameraEnabled(true) else true }
-                mic.await()
-                cam.await()
+                val micOn = async { room.localParticipant.setMicrophoneEnabled(true) }
+                val camOn = async { if (stage.video) room.localParticipant.setCameraEnabled(true) else true }
+                micOn.await()
+                camOn.await()
             }
         }.isSuccess
-        if (!ok) phase = "fail" else {
-            since = System.currentTimeMillis()
-            phase = "live"
+        if (!ok) {
+            phase = "fail"
+            return@LaunchedEffect
         }
+        phase = "live"
+        if (room.remoteParticipants.isNotEmpty()) {
+            peer = true
+            if (since == 0L) since = System.currentTimeMillis()
+        }
+        if (stage.video) local = room.localParticipant.getTrackPublication(Track.Source.CAMERA)?.track as? VideoTrack
     }
-    LaunchedEffect(phase) {
-        while (isActive && phase == "live") {
+
+    LaunchedEffect(phase, peer) {
+        while (isActive && phase == "live" && peer) {
             tick = System.currentTimeMillis()
             delay(500)
         }
     }
+
     Box(Modifier.fillMaxSize().background(Bg)) {
         val track = remote
         if (track != null) {
-            AndroidView(
-                factory = { viewCtx ->
-                    SurfaceViewRenderer(viewCtx).also { renderer ->
-                        room.initVideoRenderer(renderer)
-                        track.addRenderer(renderer)
-                    }
-                },
-                modifier = Modifier.fillMaxSize(),
-                onRelease = { it.release() },
-            )
+            key(track) {
+                AndroidView(
+                    factory = { viewCtx ->
+                        SurfaceViewRenderer(viewCtx).also { renderer ->
+                            room.initVideoRenderer(renderer)
+                            track.addRenderer(renderer)
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize(),
+                    onRelease = { renderer ->
+                        track.removeRenderer(renderer)
+                        renderer.release()
+                    },
+                )
+            }
+        }
+        val self = local
+        if (self != null && cam) {
+            key(self) {
+                AndroidView(
+                    factory = { viewCtx ->
+                        SurfaceViewRenderer(viewCtx).also { renderer ->
+                            room.initVideoRenderer(renderer)
+                            renderer.setMirror(true)
+                            renderer.setZOrderMediaOverlay(true)
+                            self.addRenderer(renderer)
+                        }
+                    },
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(16.dp)
+                        .size(width = 110.dp, height = 160.dp)
+                        .clip(RoundedCornerShape(14.dp)),
+                    onRelease = { renderer ->
+                        self.removeRenderer(renderer)
+                        renderer.release()
+                    },
+                )
+            }
         }
         Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
             Text(stage.title, color = Text, fontSize = 28.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(8.dp))
             Text(
-                when (phase) {
-                    "live" -> clock(since, tick)
-                    "fail" -> failed
+                when {
+                    phase == "fail" -> failed
+                    phase == "live" && peer -> clock(since, tick)
+                    phase == "live" -> stringResource(R.string.dialing)
                     else -> stringResource(R.string.connecting)
                 },
                 color = Muted,
                 fontSize = 16.sp,
             )
-            Spacer(Modifier.height(28.dp))
-            CallButton(stringResource(R.string.hangup), Danger, onHangup)
         }
+        Row(
+            Modifier.align(Alignment.BottomCenter).padding(bottom = 48.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            ToggleButton(
+                label = stringResource(R.string.mic),
+                on = mic,
+                iconOn = Icons.Default.Mic,
+                iconOff = Icons.Default.MicOff,
+            ) {
+                val next = !mic
+                mic = next
+                scope.launch { runCatching { room.localParticipant.setMicrophoneEnabled(next) } }
+            }
+            if (stage.video) {
+                Spacer(Modifier.width(20.dp))
+                ToggleButton(
+                    label = stringResource(R.string.camera),
+                    on = cam,
+                    iconOn = Icons.Default.Videocam,
+                    iconOff = Icons.Default.VideocamOff,
+                ) {
+                    val next = !cam
+                    cam = next
+                    scope.launch {
+                        runCatching { room.localParticipant.setCameraEnabled(next) }
+                        if (next) local = room.localParticipant.getTrackPublication(Track.Source.CAMERA)?.track as? VideoTrack
+                    }
+                }
+            }
+            Spacer(Modifier.width(20.dp))
+            CallButton(stringResource(R.string.hangup), Danger) { finish(true) }
+        }
+    }
+}
+
+@Composable
+private fun ToggleButton(
+    label: String,
+    on: Boolean,
+    iconOn: ImageVector,
+    iconOff: ImageVector,
+    onClick: () -> Unit,
+) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable(onClick = onClick)) {
+        Box(
+            Modifier.clip(CircleShape)
+                .background(if (on) Color.White.copy(alpha = 0.15f) else Color.White)
+                .padding(22.dp),
+        ) {
+            Icon(if (on) iconOn else iconOff, label, tint = if (on) Color.White else Color.Black)
+        }
+        Text(label, color = Muted, modifier = Modifier.padding(top = 8.dp))
     }
 }
 
@@ -250,29 +430,85 @@ private fun clock(since: Long, now: Long): String {
     return "%02d:%02d".format(s / 60, s % 60)
 }
 
+private fun missingCallPermissions(ctx: Context, video: Boolean): List<String> {
+    val need = buildList {
+        add(Manifest.permission.RECORD_AUDIO)
+        if (video) add(Manifest.permission.CAMERA)
+    }
+    return need.filter {
+        androidx.core.content.ContextCompat.checkSelfPermission(ctx, it) != android.content.pm.PackageManager.PERMISSION_GRANTED
+    }
+}
+
+private fun granted(result: Map<String, Boolean>, video: Boolean): Boolean {
+    val needed = buildList {
+        add(Manifest.permission.RECORD_AUDIO)
+        if (video) add(Manifest.permission.CAMERA)
+    }
+    // Only what was just asked comes back in the result; the rest was granted before.
+    return needed.all { result[it] ?: true }
+}
+
 @Composable
 fun rememberCallStarter(api: SamalApi, onStage: (Stage) -> Unit): (String, String, String) -> Unit {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
+    val failed = stringResource(R.string.call_failed)
     var pending by remember { mutableStateOf<Triple<String, String, String>?>(null) }
-    val perm = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { granted ->
+    val go: (Triple<String, String, String>) -> Unit = { ask ->
+        scope.launch {
+            if (!openCall(api, ask.first, ask.second, ask.third, onStage)) {
+                Toast.makeText(ctx, failed, Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+    val perm = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
         val ask = pending ?: return@rememberLauncherForActivityResult
         pending = null
-        if (granted[Manifest.permission.RECORD_AUDIO] != true) return@rememberLauncherForActivityResult
-        if (ask.third == "video" && granted[Manifest.permission.CAMERA] != true) return@rememberLauncherForActivityResult
-        scope.launch { openCall(api, ask.first, ask.second, ask.third, onStage) }
+        if (granted(result, ask.third == "video")) go(ask)
     }
     return { chatId, title, kind ->
-        val need = buildList {
-            add(Manifest.permission.RECORD_AUDIO)
-            if (kind == "video") add(Manifest.permission.CAMERA)
+        val ask = Triple(chatId, title, kind)
+        val missing = missingCallPermissions(ctx, kind == "video")
+        if (missing.isEmpty()) {
+            go(ask)
+        } else {
+            pending = ask
+            perm.launch(missing.toTypedArray())
         }
-        val missing = need.filter {
-            androidx.core.content.ContextCompat.checkSelfPermission(ctx, it) != android.content.pm.PackageManager.PERMISSION_GRANTED
+    }
+}
+
+/** Answering needs the mic (and camera) too; before, a callee without them joined and failed. */
+@Composable
+fun rememberCallAnswerer(api: SamalApi, onStage: (Stage) -> Unit): (JSONObject, String) -> Unit {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val failed = stringResource(R.string.call_failed)
+    var pending by remember { mutableStateOf<Pair<JSONObject, String>?>(null) }
+    val go: (Pair<JSONObject, String>) -> Unit = { ask ->
+        scope.launch {
+            if (!answerCall(api, ask.first, ask.second, onStage)) {
+                Toast.makeText(ctx, failed, Toast.LENGTH_SHORT).show()
+            }
         }
-        if (missing.isEmpty()) scope.launch { openCall(api, chatId, title, kind, onStage) }
-        else {
-            pending = Triple(chatId, title, kind)
+    }
+    val perm = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
+        val ask = pending ?: return@rememberLauncherForActivityResult
+        pending = null
+        if (granted(result, ask.first.optString("kind") == "video")) {
+            go(ask)
+        } else {
+            scope.launch(Dispatchers.IO) { runCatching { api.rejectCall(ask.first.getString("id")) } }
+        }
+    }
+    return { call, title ->
+        val ask = call to title
+        val missing = missingCallPermissions(ctx, call.optString("kind") == "video")
+        if (missing.isEmpty()) {
+            go(ask)
+        } else {
+            pending = ask
             perm.launch(missing.toTypedArray())
         }
     }
@@ -285,15 +521,24 @@ private fun joinCreds(call: JSONObject): JSONObject? {
     return null
 }
 
-suspend fun openCall(api: SamalApi, chatId: String, title: String, kind: String, onStage: (Stage) -> Unit) {
-    val call = kotlinx.coroutines.withContext(Dispatchers.IO) { runCatching { api.startCall(chatId, kind) }.getOrNull() } ?: return
-    val token = joinCreds(call) ?: kotlinx.coroutines.withContext(Dispatchers.IO) { runCatching { api.callToken(call.getString("id")) }.getOrNull() } ?: return
+/** False when the call could not be placed; the caller shows an error instead of nothing. */
+suspend fun openCall(api: SamalApi, chatId: String, title: String, kind: String, onStage: (Stage) -> Unit): Boolean {
+    val call = withContext(Dispatchers.IO) { runCatching { api.startCall(chatId, kind) }.getOrNull() } ?: return false
+    val token = joinCreds(call)
+        ?: withContext(Dispatchers.IO) { runCatching { api.callToken(call.getString("id")) }.getOrNull() }
+        ?: return false
     onStage(Stage(call.getString("id"), title, kind == "video", token.optString("url"), token.optString("token")))
+    return true
 }
 
-suspend fun answerCall(api: SamalApi, call: JSONObject, title: String, onStage: (Stage) -> Unit) {
+suspend fun answerCall(api: SamalApi, call: JSONObject, title: String, onStage: (Stage) -> Unit): Boolean {
     val id = call.getString("id")
-    val answered = kotlinx.coroutines.withContext(Dispatchers.IO) { runCatching { api.answerCall(id) }.getOrNull() } ?: return
-    val token = joinCreds(answered) ?: kotlinx.coroutines.withContext(Dispatchers.IO) { runCatching { api.callToken(id) }.getOrNull() } ?: return
+    val answered = withContext(Dispatchers.IO) { runCatching { api.answerCall(id) }.getOrNull() } ?: return false
+    // Too late: it already timed out or the caller hung up.
+    if (answered.optString("status") in CLOSED) return false
+    val token = joinCreds(answered)
+        ?: withContext(Dispatchers.IO) { runCatching { api.callToken(id) }.getOrNull() }
+        ?: return false
     onStage(Stage(id, title, call.optString("kind") == "video", token.optString("url"), token.optString("token")))
+    return true
 }
