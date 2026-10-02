@@ -172,6 +172,11 @@ final class SessionStore: ObservableObject {
            let page = try? await api.messagesPage(chatID: id) {
             try? db.upsertMessages(page.items, me: me.id)
         }
+        // A call that started ringing before the stream was (re)connected sent us no event.
+        if incomingCall == nil, activeCall == nil, let calls = try? await api.calls(),
+           let ringing = calls.first(where: { $0.status == "ringing" && $0.initiatorID != me.id }) {
+            incomingCall = ringing
+        }
     }
 
     private func flushOutbox() async {

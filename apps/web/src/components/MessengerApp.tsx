@@ -413,6 +413,7 @@ export function MessengerApp() {
       return;
     }
     if (call.status === "ringing" && call.initiator_id !== myId) {
+      if (closedCalls.current.has(call.id)) return;
       setIncoming((c) => (c?.id === call.id ? c : call));
       return;
     }
@@ -546,6 +547,16 @@ export function MessengerApp() {
       source.onmessage = onEvent;
       source.onopen = () => {
         fails = 0;
+        // A call that started ringing before this stream existed (page just opened, or the
+        // stream was reconnecting) produced no event for us: ask for it.
+        void api
+          .calls()
+          .then((r) => {
+            const me = meRef.current;
+            const ringing = (r.items ?? []).find((c) => c.status === "ringing" && c.initiator_id !== me);
+            if (ringing) applyRemoteCall(ringing);
+          })
+          .catch(() => undefined);
         // After a drop (sleep, network switch) fetch what arrived while we were away.
         if (opened) {
           scheduleRefresh();

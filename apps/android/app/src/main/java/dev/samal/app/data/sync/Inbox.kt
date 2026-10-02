@@ -174,8 +174,10 @@ class Inbox(
                     return@withContext false
                 }
                 if (!resp.isSuccessful) return@withContext false
-                // (Re)connected: fetch whatever arrived while there was no stream.
+                // (Re)connected: fetch whatever arrived while there was no stream, including a
+                // call that started ringing before we were listening.
                 scope.launch { runCatching { pull(me) } }
+                scope.launch { runCatching { ringingCatchUp(me) } }
                 val source = resp.body?.source() ?: return@withContext false
                 val data = StringBuilder()
                 while (true) {
@@ -193,6 +195,20 @@ class Inbox(
             }
         } finally {
             cancel?.dispose()
+        }
+    }
+
+    private suspend fun ringingCatchUp(me: String) {
+        val calls = api.calls()
+        for (i in 0 until calls.length()) {
+            val call = calls.optJSONObject(i) ?: continue
+            if (call.optString("status") != "ringing" || call.optString("initiator_id") == me) continue
+            if (NavBus.incoming.value == null) NavBus.incoming.value = call.toString()
+            if (!NavBus.resumed) {
+                val title = dao.chat(call.optString("chat_id"))?.title.orEmpty()
+                Notifier.incomingCall(app, call, title)
+            }
+            return
         }
     }
 
