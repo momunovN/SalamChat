@@ -6,8 +6,6 @@ const nextConfig: NextConfig = {
     "web-push",
     "ws",
     "@neondatabase/serverless",
-    "@prisma/client",
-    "@prisma/adapter-neon",
   ],
 };
 
