@@ -105,6 +105,7 @@ export async function startCall(userId: string, chatId: string, kind: string) {
   const call = mapCall(row);
   const [signed, members] = await Promise.all([credsPromise, membersPromise]);
   noteEvent(id, userId, "invite");
+  armRingTimeout(id);
   hub.publishMany(members, envelope("call.updated", call));
   const peers = members.filter((member) => member !== userId);
   void (async () => {
@@ -135,6 +136,49 @@ export async function listCalls(userId: string) {
 }
 
 const closed = new Set(["ended", "missed", "declined"]);
+
+/** Unanswered calls stop ringing after this long and become "missed" for everyone. */
+export const RING_TIMEOUT_MS = 45_000;
+const CALL_COLS = `id, chat_id, initiator_id, kind, status, sfu_room, started_at, answered_at, ended_at`;
+
+/**
+ * Marks ringing calls older than the timeout as missed and tells every member.
+ * With `id` it checks one call (its own timer); without, it sweeps all of them, which also
+ * catches calls whose timer was lost in a restart. The UPDATE is atomic, so with several
+ * processes only one of them announces each call.
+ */
+export async function expireRinging(id?: string) {
+  const rows = await query<CallRow>(
+    `UPDATE calls SET status='missed', ended_at=now()
+     WHERE status='ringing' AND ($1::uuid IS NULL OR id=$1::uuid)
+       AND started_at <= now() - make_interval(secs => $2::double precision)
+     RETURNING ${CALL_COLS}`,
+    [id ?? null, (RING_TIMEOUT_MS - 2000) / 1000],
+  );
+  for (const row of rows) {
+    const call = mapCall(row);
+    void query(`INSERT INTO call_events (call_id, event, payload) VALUES ($1,'end','{"reason":"timeout"}'::jsonb)`, [call.id]).catch(
+      () => undefined,
+    );
+    hub.publishMany(await memberIds(call.chat_id), envelope("call.updated", call));
+  }
+  return rows.length;
+}
+
+function armRingTimeout(id: string) {
+  const timer = setTimeout(() => {
+    void expireRinging(id).catch((err) => console.error("call timeout", err instanceof Error ? err.message : err));
+  }, RING_TIMEOUT_MS);
+  timer.unref?.();
+}
+
+const g = globalThis as typeof globalThis & { __salamRingSweep?: ReturnType<typeof setInterval> };
+if (!g.__salamRingSweep) {
+  g.__salamRingSweep = setInterval(() => {
+    void expireRinging().catch(() => undefined);
+  }, 15_000);
+  g.__salamRingSweep.unref?.();
+}
 
 async function transit(
   userId: string,

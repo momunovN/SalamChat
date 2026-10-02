@@ -32,6 +32,7 @@ import {
   rejectCall,
   startCall,
 } from "./calls";
+import { buildInfo } from "./build";
 import { migrate } from "./db";
 import { envelope, hub, presence } from "./hub";
 import { bearer, corsHeaders, errorResponse, HttpError, json, readJSON } from "./http";
@@ -144,7 +145,7 @@ export async function handleRequest(req: Request): Promise<Response> {
     const url = new URL(req.url);
     const pathname = url.pathname.replace(/\/$/, "") || "/";
     if (pathname === "/healthz") {
-      return json(200, { ok: true, name: "salam", valkey: valkeyReady() ? "up" : "down" });
+      return json(200, { ok: true, name: "salam", valkey: valkeyReady() ? "up" : "down", ...buildInfo() });
     }
     if (pathname.startsWith("/media/id/")) {
       let id = "";
