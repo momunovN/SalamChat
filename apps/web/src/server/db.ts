@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync } from "fs";
 import path from "path";
+import { neon, types as neonTypes, type NeonQueryFunction } from "@neondatabase/serverless";
 import pg from "pg";
 import { databaseURL, loadEnv } from "./env";
 
@@ -8,9 +9,11 @@ loadEnv();
 // DATE columns stay "YYYY-MM-DD" strings. As a JS Date they would land on local midnight
 // and shift a day when the server is not on UTC.
 pg.types.setTypeParser(1082, (v: string) => v);
+neonTypes.setTypeParser(1082, (v: string) => v);
 
 const g = globalThis as typeof globalThis & {
   __samalPool?: pg.Pool;
+  __samalNeon?: NeonQueryFunction<false, false>;
   __samalMigrated?: Promise<void>;
 };
 
@@ -41,7 +44,22 @@ function poolConfig(): pg.PoolConfig {
     idleTimeoutMillis: 30_000,
     connectionTimeoutMillis: 10_000,
     keepAlive: true,
+    // OS default is 2 hours: a NAT that dropped an idle socket would hang the next query.
+    keepAliveInitialDelayMillis: 10_000,
   };
+}
+
+/**
+ * Neon is reached over its HTTPS driver, not raw Postgres TCP. From RelaxDev the TCP
+ * connections to Neon (US) stalled and timed out ("db timeout" on every request), while
+ * HTTPS, which the app used before, works. A database inside RelaxDev uses the pg pool.
+ */
+function neonSql() {
+  return (g.__samalNeon ??= neon(databaseURL(), { fetchOptions: { cache: "no-store" } }));
+}
+
+export function usesNeonHttp() {
+  return isNeon(databaseURL()) && process.env.SALAM_DB_DRIVER !== "pg";
 }
 
 /**
@@ -61,7 +79,7 @@ function isRetryable(err: unknown) {
   const msg = err instanceof Error ? err.message : String(err);
   const code = (err as { code?: string }).code || "";
   if (/^(57P01|57P02|57P03|08\w{3})$/.test(code)) return true;
-  return /terminat|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EPIPE|Connection terminated|timeout exceeded when trying to connect|socket|control plane/i.test(
+  return /terminat|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EPIPE|Connection terminated|timeout exceeded when trying to connect|socket|control plane|fetch failed|network|(429|502|503|504)/i.test(
     msg,
   );
 }
@@ -86,6 +104,10 @@ export async function query<T extends Record<string, unknown> = Record<string, u
 ): Promise<T[]> {
   return withRetry(async () => {
     try {
+      if (usesNeonHttp()) {
+        const rows = await neonSql().query(text, params);
+        return (Array.isArray(rows) ? rows : []) as T[];
+      }
       const res = await pool().query(text, params);
       return (Array.isArray(res.rows) ? res.rows : []) as T[];
     } catch (err) {
@@ -107,7 +129,7 @@ export async function queryOne<T extends Record<string, unknown> = Record<string
 export async function warmup() {
   try {
     await query("SELECT 1 AS ok");
-    console.log("db ready (pg pool)");
+    console.log(`db ready (${usesNeonHttp() ? "neon https" : "pg pool"})`);
   } catch (err) {
     console.error("db warmup", err instanceof Error ? err.message : err);
   }
