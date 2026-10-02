@@ -756,7 +756,9 @@ private suspend fun enqueueFile(ctx: Context, dao: SamalDao, chatId: String, me:
     }
     val dest = File(ctx.cacheDir, "out/${UUID.randomUUID()}-$named")
     dest.parentFile?.mkdirs()
-    ctx.contentResolver.openInputStream(uri)?.use { input -> dest.outputStream().use { input.copyTo(it) } } ?: return
+    val input = ctx.contentResolver.openInputStream(uri)
+    if (input == null) return@withContext
+    input.use { src -> dest.outputStream().use { src.copyTo(it) } }
     val kind = when {
         mime.startsWith("image/") -> "photo"
         mime.startsWith("video/") -> "video"
