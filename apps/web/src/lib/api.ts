@@ -155,6 +155,12 @@ export const api = {
     if (cursor) p.set("cursor", cursor);
     return request<{ items: Message[]; cursor?: string | null }>(`/v1/chats/${chatId}/messages?${p}`);
   },
+  /** Text search inside one chat; the server decrypts and matches, newest first. */
+  searchMessages: (chatId: string, q: string, cursor = "") => {
+    const p = new URLSearchParams({ limit: "30", q });
+    if (cursor) p.set("cursor", cursor);
+    return request<{ items: Message[]; cursor?: string | null }>(`/v1/chats/${chatId}/messages?${p}`, { timeoutMs: 30000 });
+  },
   send: (chatId: string, clientId: string, type: string, payload: unknown, uploadIds?: string[], replyToId?: string) =>
     request<Message>(`/v1/chats/${chatId}/messages`, {
       method: "POST",

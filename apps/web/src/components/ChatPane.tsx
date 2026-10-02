@@ -35,6 +35,7 @@ import { Avatar } from "./Avatar";
 import { ProfileSheet } from "./ProfileSheet";
 import { PermitToast } from "./PermitToast";
 import { PeopleResults, useUserSearch } from "./PeopleSearch";
+import { ChatSearch } from "./ChatSearch";
 import { VoiceNote } from "./VoiceNote";
 
 function fmtTime(iso: string) {
@@ -99,6 +100,8 @@ export function ChatPane({
   const [adding, setAdding] = useState(false);
   const [addQ, setAddQ] = useState("");
   const [loadingOlder, setLoadingOlder] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [flashId, setFlashId] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -214,6 +217,35 @@ export function ChatPane({
     } finally {
       setLoadingOlder(false);
     }
+  }
+
+  /** Search result click: page back until the message is loaded, then scroll to it and flash it. */
+  async function jumpTo(target: Message) {
+    stick.current = false;
+    if (!messages.some((m) => m.id === target.id)) {
+      let cur = cursor;
+      const older: Message[] = [];
+      for (let i = 0; i < 40 && cur; i++) {
+        try {
+          const r = await api.messages(chat.id, cur);
+          const page = [...(r.items ?? [])].reverse();
+          older.unshift(...page);
+          cur = r.cursor ?? null;
+          if (page.some((m) => m.id === target.id)) break;
+        } catch {
+          break;
+        }
+      }
+      setMessages((prev) => dedupeMessages([...older, ...prev]));
+      setCursor(cur);
+    }
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        document.getElementById(`msg-${target.id}`)?.scrollIntoView({ block: "center" });
+        setFlashId(target.id);
+        window.setTimeout(() => setFlashId((cur) => (cur === target.id ? null : cur)), 1800);
+      }),
+    );
   }
 
   function asPreview(m: Message): ReplyPreview {
@@ -601,6 +633,14 @@ export function ChatPane({
         </button>
         <button
           type="button"
+          onClick={() => setSearchOpen((open) => !open)}
+          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-ink hover:bg-elevated ${searchOpen ? "bg-elevated" : ""}`}
+          aria-label={t.searchMessages}
+        >
+          <Search size={18} />
+        </button>
+        <button
+          type="button"
           onClick={() => onCall("audio")}
           className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-ink hover:bg-elevated"
           aria-label={t.audio}
@@ -616,6 +656,18 @@ export function ChatPane({
           <Video size={18} />
         </button>
       </div>
+
+      {searchOpen ? (
+        <ChatSearch
+          key={chat.id}
+          chatId={chat.id}
+          me={me}
+          t={t}
+          lang={lang}
+          onPick={(m) => void jumpTo(m)}
+          onClose={() => setSearchOpen(false)}
+        />
+      ) : null}
 
       <div
         ref={scrollRef}
@@ -637,7 +689,11 @@ export function ChatPane({
             const showDay = !prev || dayKey(prev.created_at) !== dayKey(m.created_at);
             const showName = group && !mine && m.author_id && m.author_id !== prev?.author_id;
             return (
-              <div key={m.id}>
+              <div
+                key={m.id}
+                id={`msg-${m.id}`}
+                className={`rounded-xl transition-colors duration-500 ${flashId === m.id ? "bg-accent/15" : ""}`}
+              >
                 {showDay ? (
                   <div className="my-3 flex justify-center">
                     <span className="rounded-full bg-elevated px-3 py-0.5 text-[12px] font-medium text-muted">

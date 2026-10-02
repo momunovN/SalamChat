@@ -175,6 +175,59 @@ export async function getMessage(userId: string, id: string, req?: Request) {
   return msg;
 }
 
+type ScanRow = MsgRow & { at_key: string };
+
+const SEARCH_BATCH = 400;
+const SEARCH_SCAN_MAX = 6000;
+
+/** Case-insensitive, "ё" = "е", composed forms unified: what a person expects from search. */
+function searchable(text: string) {
+  return text.normalize("NFKC").toLowerCase().replace(/ё/g, "е");
+}
+
+/**
+ * Text and captions are stored encrypted (random IV), so SQL cannot match them: the old
+ * ILIKE ran on ciphertext and found nothing. This walks the chat newest-first in batches,
+ * decrypts and matches in memory. At most SEARCH_SCAN_MAX messages per call; the returned
+ * cursor continues from where it stopped.
+ */
+async function searchChat(chatId: string, q: string, before: Date, cleared: string | null, limit: number) {
+  const needle = searchable(q);
+  const found: Message[] = [];
+  let atKey = before.toISOString();
+  let idKey: string | null = null;
+  let scanned = 0;
+  let lastAt: string | null = null;
+  for (;;) {
+    const rows: ScanRow[] = await query<ScanRow>(
+      `SELECT ${MSG_COLS}, m.created_at::text AS at_key
+       FROM messages m
+       LEFT JOIN users u ON u.id = m.author_id
+       WHERE m.chat_id=$1 AND m.deleted_at IS NULL AND m.type <> 'voice'
+         AND ($2::timestamptz IS NULL OR m.created_at > $2::timestamptz)
+         AND (m.created_at < $3::timestamptz OR ($4::uuid IS NOT NULL AND m.created_at = $3::timestamptz AND m.id < $4::uuid))
+       ORDER BY m.created_at DESC, m.id DESC
+       LIMIT ${SEARCH_BATCH}`,
+      [chatId, cleared, atKey, idKey],
+    );
+    for (const r of rows) {
+      const payload = openPayload(parsePayload(r.payload));
+      const text = `${typeof payload.text === "string" ? payload.text : ""} ${typeof payload.caption === "string" ? payload.caption : ""}`;
+      if (searchable(text).includes(needle)) {
+        found.push(mapMsg(r));
+        if (found.length >= limit) return { items: found, next: found[found.length - 1].created_at };
+      }
+    }
+    scanned += rows.length;
+    if (rows.length < SEARCH_BATCH) return { items: found, next: null };
+    const tail: ScanRow = rows[rows.length - 1];
+    atKey = tail.at_key;
+    idKey = tail.id;
+    lastAt = iso(tail.created_at) || null;
+    if (scanned >= SEARCH_SCAN_MAX) return { items: found, next: lastAt };
+  }
+}
+
 export async function listMessages(
   userId: string,
   chatId: string,
@@ -197,17 +250,21 @@ export async function listMessages(
   const since = after ? new Date(after) : null;
   if (since && Number.isNaN(since.getTime())) throw new HttpError(400, "bad_request", "bad after");
   const cleared = iso(member.cleared_at) ?? null;
+  if (q) {
+    const found = await searchChat(chatId, q, before, cleared, limit);
+    await enrich(userId, found.items, req);
+    return { items: found.items, cursor: found.next };
+  }
   const rows = await query<MsgRow>(
     `SELECT ${MSG_COLS}
      FROM messages m
      LEFT JOIN users u ON u.id = m.author_id
      WHERE m.chat_id=$1 AND m.created_at < $2 AND m.deleted_at IS NULL
+       AND ($4::timestamptz IS NULL OR m.created_at > $4::timestamptz)
        AND ($5::timestamptz IS NULL OR m.created_at > $5::timestamptz)
-       AND ($6::timestamptz IS NULL OR m.created_at > $6::timestamptz)
-       AND ($3 = '' OR (m.payload->>'text') ILIKE '%'||$3||'%')
      ORDER BY m.created_at ${since ? "ASC" : "DESC"}
-     LIMIT $4`,
-    [chatId, before.toISOString(), q, limit + 1, cleared, since ? since.toISOString() : null],
+     LIMIT $3`,
+    [chatId, before.toISOString(), limit + 1, cleared, since ? since.toISOString() : null],
   );
   let next: string | undefined;
   let more = false;
@@ -227,7 +284,6 @@ export async function listMessages(
     const hot = await readRecent(chatId);
     const extra: Message[] = [];
     const seen = new Set(pgIds);
-    const needle = q.toLowerCase();
     for (const raw of hot) {
       let msg: Message;
       try {
@@ -240,10 +296,6 @@ export async function listMessages(
       if (cleared && msg.created_at <= cleared) continue;
       if (since && new Date(msg.created_at) <= since) continue;
       if (new Date(msg.created_at) >= before) continue;
-      if (needle) {
-        const text = String(parsePayload(msg.payload).text || "").toLowerCase();
-        if (!text.includes(needle)) continue;
-      }
       seen.add(msg.id);
       extra.push(msg);
     }
@@ -257,20 +309,26 @@ export async function listMessages(
   } catch {
     items = pgItems;
   }
+  await enrich(userId, items, req, pgIds);
+  return since ? { items, cursor: null, more } : { items, cursor: next ?? null };
+}
+
+/** Attachments, delivery status and reply previews for a page of messages, in parallel. */
+async function enrich(userId: string, items: Message[], req?: Request, stored?: Set<string>) {
+  const inDb = stored ?? new Set(items.map((m) => m.id));
   const [atts, statuses] = await Promise.all([
     attachmentsFor(
-      items.map((m) => m.id).filter((id) => pgIds.has(id)),
+      items.map((m) => m.id).filter((id) => inDb.has(id)),
       req,
     ),
-    statusesFor(items.filter((m) => m.author_id === userId && pgIds.has(m.id)).map((m) => m.id)),
+    statusesFor(items.filter((m) => m.author_id === userId && inDb.has(m.id)).map((m) => m.id)),
     attachReplies(items),
   ]);
   for (const m of items) {
     if (!m.attachments?.length) m.attachments = atts.get(m.id) || [];
-    if (m.author_id === userId && pgIds.has(m.id)) m.status = statuses.get(m.id) || "sent";
+    if (m.author_id === userId && inDb.has(m.id)) m.status = statuses.get(m.id) || "sent";
     else if (m.author_id === userId && !m.status) m.status = "sent";
   }
-  return since ? { items, cursor: null, more } : { items, cursor: next ?? null };
 }
 
 type SendInput = {
