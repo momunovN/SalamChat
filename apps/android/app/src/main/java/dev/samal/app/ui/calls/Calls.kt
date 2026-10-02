@@ -1,6 +1,9 @@
 package dev.samal.app.ui.calls
 
 import android.Manifest
+import androidx.compose.material.icons.automirrored.filled.VolumeOff
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
+import com.twilio.audioswitch.AudioDevice
 import android.content.Context
 import android.widget.Toast
 import androidx.compose.foundation.layout.size
@@ -200,6 +203,8 @@ fun CallStage(stage: Stage, api: SamalApi, onHangup: () -> Unit) {
     var local by remember { mutableStateOf<VideoTrack?>(null) }
     var mic by remember { mutableStateOf(true) }
     var cam by remember { mutableStateOf(stage.video) }
+    var speaker by remember { mutableStateOf(true) }
+    val micFailed = stringResource(R.string.mic_failed)
     var since by remember { mutableLongStateOf(0L) }
     var tick by remember { mutableLongStateOf(0L) }
     var done by remember { mutableStateOf(false) }
@@ -282,16 +287,28 @@ fun CallStage(stage: Stage, api: SamalApi, onHangup: () -> Unit) {
                 }
             }
         }
+        // Loudspeaker unless a headset is plugged in. LiveKit's default puts a call on the
+        // earpiece, which held in front of you sounds like "connected, but no sound".
+        room.audioSwitchHandler?.preferredDeviceList = listOf(
+            AudioDevice.BluetoothHeadset::class.java,
+            AudioDevice.WiredHeadset::class.java,
+            AudioDevice.Speakerphone::class.java,
+            AudioDevice.Earpiece::class.java,
+        )
+        var micOk = true
         val ok = runCatching {
             room.prepareConnection(stage.url, stage.token)
             room.connect(stage.url, stage.token)
             coroutineScope {
-                val micOn = async { room.localParticipant.setMicrophoneEnabled(true) }
+                val micOn = async { runCatching { room.localParticipant.setMicrophoneEnabled(true) }.getOrDefault(false) }
                 val camOn = async { if (stage.video) room.localParticipant.setCameraEnabled(true) else true }
-                micOn.await()
+                micOk = micOn.await()
                 camOn.await()
             }
         }.isSuccess
+        // Before, a mic that failed to start was silently ignored: the call "worked" and the
+        // other side heard nothing.
+        if (ok && !micOk) Toast.makeText(ctx, micFailed, Toast.LENGTH_LONG).show()
         if (!ok) {
             phase = "fail"
             return@LaunchedEffect
@@ -372,6 +389,21 @@ fun CallStage(stage: Stage, api: SamalApi, onHangup: () -> Unit) {
             Modifier.align(Alignment.BottomCenter).padding(bottom = 48.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            ToggleButton(
+                label = stringResource(R.string.speaker),
+                on = speaker,
+                iconOn = Icons.AutoMirrored.Filled.VolumeUp,
+                iconOff = Icons.AutoMirrored.Filled.VolumeOff,
+            ) {
+                val next = !speaker
+                speaker = next
+                val handler = room.audioSwitchHandler
+                val device = handler?.availableAudioDevices?.firstOrNull {
+                    if (next) it is AudioDevice.Speakerphone else it is AudioDevice.Earpiece
+                }
+                if (handler != null && device != null) handler.selectDevice(device)
+            }
+            Spacer(Modifier.width(20.dp))
             ToggleButton(
                 label = stringResource(R.string.mic),
                 on = mic,

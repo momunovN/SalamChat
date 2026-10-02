@@ -139,14 +139,11 @@ final class SessionStore: ObservableObject {
             let client = RealtimeClient { [weak api] in
                 guard let api, let token = api.accessToken else { return nil }
                 let root = api.baseURL.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-                let wsRoot = root
-                    .replacingOccurrences(of: "https://", with: "wss://")
-                    .replacingOccurrences(of: "http://", with: "ws://")
-                let encoded = token.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? token
-                return URL(string: "\(wsRoot)/v1/ws?token=\(encoded)")
+                let encoded = token.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? token
+                return URL(string: "\(root)/v1/stream?token=\(encoded)")
             }
             client.onFailure = { [weak self] failures in
-                // The handshake fails with 401 once the 30-minute access token expires.
+                // The stream answers 401 once the access token expires.
                 // Any authed REST call refreshes it; the next reconnect then uses the new one.
                 guard failures == 1 || failures % 4 == 0 else { return }
                 Task { @MainActor in _ = try? await self?.api.chats() }

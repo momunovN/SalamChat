@@ -103,4 +103,6 @@
     <string name="dialing">Чалуу…</string>
     <string name="mic">Микрофон</string>
     <string name="camera">Камера</string>
+    <string name="speaker">Динамик</string>
+    <string name="mic_failed">Микрофонго уруксат жок — маектешиңиз сизди укпайт</string>
 </resources>
