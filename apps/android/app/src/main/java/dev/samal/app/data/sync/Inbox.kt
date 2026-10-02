@@ -7,19 +7,17 @@ import dev.samal.app.data.notify.Mutes
 import dev.samal.app.data.notify.Notifier
 import dev.samal.app.data.session.SessionStore
 import dev.samal.app.ui.previewLabel
-import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
-import okhttp3.Response
-import okhttp3.WebSocket
-import okhttp3.WebSocketListener
 import org.json.JSONObject
 import java.io.File
 import java.time.Instant
@@ -35,7 +33,8 @@ class Inbox(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val stream = OkHttpClient.Builder()
         .connectTimeout(8, TimeUnit.SECONDS)
-        .readTimeout(0, TimeUnit.MILLISECONDS)
+        // The server sends a pong every 20s; a silent minute means the stream is dead.
+        .readTimeout(60, TimeUnit.SECONDS)
         .build()
     private val seen = ArrayDeque<String>()
     private val seenSet = HashSet<String>()
@@ -149,42 +148,51 @@ class Inbox(
         return sent
     }
 
+    /**
+     * Server events over SSE (GET /v1/stream), the same stream the website uses. The host runs
+     * the plain Next.js server, which has no WebSocket endpoint: /v1/ws answered 502, so the
+     * phone never heard about incoming calls or new messages while the app stayed open.
+     */
     private suspend fun listen(token: String, me: String) {
         if (api.token != token) return
-        while (kotlinx.coroutines.currentCoroutineContext().isActive && session.user?.id == me) {
-            val closed = CompletableDeferred<Unit>()
-            val socket = stream.newWebSocket(api.wsRequest(), object : WebSocketListener() {
-                override fun onOpen(webSocket: WebSocket, response: Response) {
-                    scope.launch { runCatching { pull(me) } }
-                }
+        var fails = 0
+        while (currentCoroutineContext().isActive && session.user?.id == me) {
+            val opened = runCatching { readStream(me) }.getOrDefault(false)
+            fails = if (opened) 0 else fails + 1
+            delay((1_000L shl fails.coerceAtMost(5)).coerceAtMost(30_000L))
+        }
+    }
 
-                override fun onMessage(webSocket: WebSocket, text: String) {
-                    scope.launch { runCatching { apply(text, me) } }
+    /** Reads one stream until it ends. True when it was open (so the next retry is quick). */
+    private suspend fun readStream(me: String): Boolean = withContext(Dispatchers.IO) {
+        val call = stream.newCall(api.streamRequest())
+        val cancel = coroutineContext[Job]?.invokeOnCompletion { call.cancel() }
+        try {
+            call.execute().use { resp ->
+                if (resp.code == 401) {
+                    runCatching { api.refresh() }
+                    return@withContext false
                 }
-
-                override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
-                    webSocket.close(1000, null)
+                if (!resp.isSuccessful) return@withContext false
+                // (Re)connected: fetch whatever arrived while there was no stream.
+                scope.launch { runCatching { pull(me) } }
+                val source = resp.body?.source() ?: return@withContext false
+                val data = StringBuilder()
+                while (true) {
+                    val line = source.readUtf8Line() ?: break
+                    when {
+                        line.startsWith("data:") -> data.append(line.removePrefix("data:").trimStart())
+                        line.isEmpty() && data.isNotEmpty() -> {
+                            val text = data.toString()
+                            data.setLength(0)
+                            scope.launch { runCatching { apply(text, me) } }
+                        }
+                    }
                 }
-
-                override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                    if (!closed.isCompleted) closed.complete(Unit)
-                }
-
-                override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                    if (response?.code == 401) runCatching { api.refresh() }
-                    if (!closed.isCompleted) closed.complete(Unit)
-                }
-            })
-            val ping = scope.launch {
-                while (isActive) {
-                    delay(20_000)
-                    socket.send("""{"type":"ping"}""")
-                }
+                true
             }
-            closed.await()
-            ping.cancel()
-            socket.cancel()
-            delay(1_500)
+        } finally {
+            cancel?.dispose()
         }
     }
 

@@ -239,13 +239,12 @@ class SamalApi(
     fun direct(userId: String): JSONObject =
         post("/v1/chats/direct", JSONObject().put("user_id", userId), true)
 
-    fun wsRequest(): Request {
-        val tokenEnc = enc(token.orEmpty())
-        val root = base.trimEnd('/').replace("https://", "wss://").replace("http://", "ws://")
-        return Request.Builder()
-            .url("$root/v1/ws?token=$tokenEnc")
-            .build()
-    }
+    /** Server-sent events: the realtime stream (messages, receipts, calls, typing, presence). */
+    fun streamRequest(): Request = Request.Builder()
+        .url(base.trimEnd('/') + "/v1/stream")
+        .header("Authorization", "Bearer ${token.orEmpty()}")
+        .header("Accept", "text/event-stream")
+        .build()
 
     private fun get(path: String): JSONObject = exec({ Request.Builder().url(base + path).get() })
 
