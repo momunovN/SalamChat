@@ -67,14 +67,16 @@ export function jwtSecret() {
   return secret;
 }
 
+const DATABASE_KEYS = ["SALAM_DATABASE_URL", "TOOAPP_DATABASE_URL", "SAMAL_DATABASE_URL", "DATABASE_URL"];
+
 function rawDatabaseURL() {
-  return envFirst(
-    "postgres://salam:salam@localhost:5432/salam?sslmode=disable",
-    "SALAM_DATABASE_URL",
-    "TOOAPP_DATABASE_URL",
-    "SAMAL_DATABASE_URL",
-    "DATABASE_URL",
-  );
+  return envFirst("postgres://salam:salam@localhost:5432/salam?sslmode=disable", ...DATABASE_KEYS);
+}
+
+/** Which variable the database address came from (for /healthz; the value itself stays secret). */
+export function databaseSource() {
+  loadEnv();
+  return DATABASE_KEYS.find((key) => liveValue(key)) || "default";
 }
 
 /** Long-running Node API uses the DIRECT Neon host (same as Go). Pooler breaks pg prepared statements. */

@@ -33,6 +33,7 @@ import {
   startCall,
 } from "./calls";
 import { buildInfo } from "./build";
+import { databaseSource } from "./env";
 import { migrate, query, usesNeonHttp } from "./db";
 import { envelope, hub, presence } from "./hub";
 import { bearer, corsHeaders, errorResponse, HttpError, json, readJSON } from "./http";
@@ -145,7 +146,7 @@ export async function handleRequest(req: Request): Promise<Response> {
     const url = new URL(req.url);
     const pathname = url.pathname.replace(/\/$/, "") || "/";
     if (pathname === "/healthz") {
-      return json(200, { ok: true, name: "salam", valkey: valkeyReady() ? "up" : "down", db: usesNeonHttp() ? "neon-https" : "pg", ...buildInfo() });
+      return json(200, { ok: true, name: "salam", valkey: valkeyReady() ? "up" : "down", db: usesNeonHttp() ? "neon-https" : "pg", db_from: databaseSource(), ...buildInfo() });
     }
     if (pathname.startsWith("/media/id/")) {
       let id = "";
