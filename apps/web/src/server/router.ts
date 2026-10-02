@@ -44,7 +44,7 @@ import { getUserPublic, lookupPhones, resolveSlug, searchUsers } from "./users";
 import { completeUpload, createIntent, putUpload, readPublicMedia, readSealedUpload } from "./uploads";
 import { dropPushSubscription, savePushSubscription, vapidPublicKey } from "./push";
 import { sseResponse } from "./stream";
-import { markTyping, membersCached, valkeyReady } from "./valkey";
+import { connectValkey, markTyping, membersCached, valkeyReady, valkeyStatus } from "./valkey";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -146,8 +146,8 @@ export async function handleRequest(req: Request): Promise<Response> {
     const pathname = url.pathname.replace(/\/$/, "") || "/";
     // Health answers even when the database does not, and says why.
     if (pathname === "/healthz") {
-      await migrate().catch(() => undefined);
-      return json(200, { ok: !dbError(), name: "salam", valkey: valkeyReady() ? "up" : "down", db: usesNeonHttp() ? "neon-https" : "pg", db_from: databaseSource(), db_error: dbError(), ...buildInfo() });
+      await Promise.all([migrate().catch(() => undefined), connectValkey().catch(() => undefined)]);
+      return json(200, { ok: !dbError(), name: "salam", valkey: valkeyReady() ? "up" : "down", db: usesNeonHttp() ? "neon-https" : "pg", db_from: databaseSource(), db_error: dbError(), ...valkeyStatus(), ...buildInfo() });
     }
     await migrate();
     if (pathname.startsWith("/media/id/")) {

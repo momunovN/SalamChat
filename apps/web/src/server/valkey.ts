@@ -51,8 +51,21 @@ export function onPersist(fn: (job: PersistJob) => Promise<void>) {
   persist = fn;
 }
 
+function clean(msg: string) {
+  return msg.replace(/rediss?:\/\/\S+/gi, "redis://…").slice(0, 300);
+}
+
+const VALKEY_KEYS = ["SALAM_VALKEY_URL", "TOOAPP_VALKEY_URL", "VALKEY_URL", "REDIS_URL"];
+let lastError: string | null = null;
+
+/** For /healthz: which variable the address came from and why the last connect failed. */
+export function valkeyStatus() {
+  const from = VALKEY_KEYS.find((key) => envFirst("", key)) || null;
+  return { valkey_from: from, valkey_error: pub?.isOpen ? null : lastError };
+}
+
 export function valkeyURL() {
-  const set = envFirst("", "SALAM_VALKEY_URL", "TOOAPP_VALKEY_URL", "VALKEY_URL", "REDIS_URL");
+  const set = envFirst("", ...VALKEY_KEYS);
   if (set) return set;
   if (process.env.NODE_ENV === "production") return "";
   return "redis://127.0.0.1:6379";
@@ -80,6 +93,7 @@ async function open() {
   const url = valkeyURL();
   if (!url) {
     console.log("valkey off (set REDIS_URL or SALAM_VALKEY_URL)");
+    lastError = "not configured";
     nextTry = Date.now() + 60_000;
     return;
   }
@@ -101,6 +115,7 @@ async function open() {
     }) as Redis;
     client.on("error", (err: Error) => {
       console.error("valkey", err.message);
+      if (!up) lastError = clean(err.message);
     });
     await client.connect();
     up = true;
@@ -122,13 +137,17 @@ async function open() {
     });
     pub = client;
     nextTry = 0;
+    lastError = null;
     console.log("valkey ready");
     await recoverWork();
     void drain();
   } catch (err) {
     pub = null;
     nextTry = Date.now() + 5000;
-    console.error("valkey down", err instanceof Error ? err.message : err);
+    const msg = clean(err instanceof Error ? err.message : String(err));
+    // "valkey unreachable" is ours; keep the socket error that caused it (DNS, auth, refused).
+    if (!lastError || msg !== "valkey unreachable") lastError = msg;
+    console.error("valkey down", lastError);
   }
 }
 
