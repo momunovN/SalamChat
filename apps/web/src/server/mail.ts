@@ -98,7 +98,8 @@ export async function sendLoginCode(to: string, code: string, kind: MailKind = "
   const from = namedFrom || (user ? `Salam <${user}>` : "");
   const yandex = /(^|\.)yandex\.(ru|com)$/i.test(host);
   if (!host || !pass || !user) {
-    console.log(`Salam OTP email ${to} ${code}`);
+    if (process.env.NODE_ENV === "production") console.log(`Salam OTP email stub for ${to.replace(/^(.).*@/, "$1***@")}`);
+    else console.log(`Salam OTP email ${to} ${code}`);
     return "stub" as const;
   }
   const port = Number(env("SMTP_PORT", yandex ? "465" : "587")) || (yandex ? 465 : 587);

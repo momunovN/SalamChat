@@ -83,6 +83,9 @@ export async function sendOTP(phone: string, code: string) {
     await sendP1(phone, code);
     return "p1sms";
   }
-  console.log(`Salam OTP ${phone} ${code}`);
+  // The code itself is printed only in local development: in production the log is readable
+  // by whoever has panel access, and a code there is a login into someone else's account.
+  if (process.env.NODE_ENV === "production") console.log(`Salam OTP stub for ***${phone.slice(-4)}`);
+  else console.log(`Salam OTP ${phone} ${code}`);
   return "stub";
 }
