@@ -360,6 +360,7 @@ export async function hideChat(userId: string, chatId: string) {
     ]);
   } catch {
     await query(`DELETE FROM chat_members WHERE chat_id=$1 AND user_id=$2`, [chatId, userId]);
+    await bustMembers(chatId).catch(() => undefined);
   }
   return { ok: true };
 }

@@ -16,7 +16,7 @@ JSON envelopes both ways.
 { "type": "pong", "ts": "...", "body": {} }
 ```
 
-`message.created` and `receipt.upserted` are still sent as aliases of `message.new` and `receipt`.
+`message.created` and `receipt.upserted` are no longer sent. Clients may keep handling them, but the server emits only `message.new` and `receipt`.
 
 ## Client → server
 

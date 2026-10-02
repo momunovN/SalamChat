@@ -1,13 +1,16 @@
 import { readdirSync, readFileSync } from "fs";
 import path from "path";
-import { PrismaClient } from "@prisma/client";
-import { PrismaNeonHttp } from "@prisma/adapter-neon";
+import pg from "pg";
 import { databaseURL, loadEnv } from "./env";
 
 loadEnv();
 
+// DATE columns stay "YYYY-MM-DD" strings. As a JS Date they would land on local midnight
+// and shift a day when the server is not on UTC.
+pg.types.setTypeParser(1082, (v: string) => v);
+
 const g = globalThis as typeof globalThis & {
-  __samalPrisma?: PrismaClient;
+  __samalPool?: pg.Pool;
   __samalMigrated?: Promise<void>;
 };
 
@@ -15,35 +18,55 @@ function isNeon(url: string) {
   return /neon\.tech/i.test(url);
 }
 
-function pooledURL() {
-  const url = databaseURL();
-  if (!isNeon(url) || url.includes("-pooler")) return url;
-  return url.replace(/(@)([^:/?]+)/, (_m, at: string, host: string) => {
-    const name = host.split(".")[0];
-    if (name.endsWith("-pooler")) return at + host;
-    return at + host.replace(name, `${name}-pooler`);
-  });
+/** pg reads sslmode from the URL in its own way; strip it and set ssl explicitly. */
+function poolConfig(): pg.PoolConfig {
+  const raw = databaseURL();
+  let connectionString = raw;
+  let ssl: pg.PoolConfig["ssl"] = undefined;
+  try {
+    const u = new URL(raw);
+    const mode = (u.searchParams.get("sslmode") || "").toLowerCase();
+    u.searchParams.delete("sslmode");
+    u.searchParams.delete("channel_binding");
+    connectionString = u.toString();
+    if (isNeon(raw) || (mode && mode !== "disable")) ssl = { rejectUnauthorized: mode !== "no-verify" };
+  } catch {
+    if (isNeon(raw)) ssl = { rejectUnauthorized: true };
+  }
+  return {
+    connectionString,
+    ssl,
+    max: Number(process.env.SALAM_DB_POOL || 10) || 10,
+    // Below Neon's idle suspend, so the pool drops sockets before the compute kills them.
+    idleTimeoutMillis: 30_000,
+    connectionTimeoutMillis: 10_000,
+    keepAlive: true,
+  };
 }
 
-function createPrisma() {
-  const url = pooledURL();
-  process.env.DATABASE_URL = url;
-  const adapter = new PrismaNeonHttp(url, { fetchOptions: { cache: "no-store" } });
-  return new PrismaClient({ adapter });
-}
-
-export function prisma() {
-  return (g.__samalPrisma ??= createPrisma());
+/**
+ * One long-lived pool for the whole process. Each query reuses an open TCP+TLS socket
+ * instead of a fresh HTTPS round trip to Neon (the old PrismaNeonHttp path).
+ */
+export function pool() {
+  if (g.__samalPool) return g.__samalPool;
+  const p = new pg.Pool(poolConfig());
+  // A socket killed while idle (Neon suspend, network blip) must not crash the process.
+  p.on("error", (err) => console.error("db pool", err.message));
+  g.__samalPool = p;
+  return p;
 }
 
 function isRetryable(err: unknown) {
   const msg = err instanceof Error ? err.message : String(err);
-  return /terminat|ECONNRESET|ECONNREFUSED|fetch failed|network|socket|timeout|429|503|unavailable|control plane/i.test(
+  const code = (err as { code?: string }).code || "";
+  if (/^(57P01|57P02|57P03|08\w{3})$/.test(code)) return true;
+  return /terminat|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EPIPE|Connection terminated|timeout exceeded when trying to connect|socket|control plane/i.test(
     msg,
   );
 }
 
-async function withRetry<T>(fn: () => Promise<T>, attempts = 4): Promise<T> {
+async function withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
   let last: unknown;
   for (let i = 0; i < attempts; i++) {
     try {
@@ -51,16 +74,10 @@ async function withRetry<T>(fn: () => Promise<T>, attempts = 4): Promise<T> {
     } catch (err) {
       last = err;
       if (!isRetryable(err) || i === attempts - 1) throw err;
-      g.__samalPrisma = undefined;
-      await new Promise((r) => setTimeout(r, 500 * 2 ** i));
+      await new Promise((r) => setTimeout(r, 300 * 2 ** i));
     }
   }
   throw last;
-}
-
-function looksLikeRows(text: string) {
-  const t = text.trim();
-  return /^(select|with)\b/i.test(t) || /\breturning\b/i.test(t);
 }
 
 export async function query<T extends Record<string, unknown> = Record<string, unknown>>(
@@ -69,13 +86,8 @@ export async function query<T extends Record<string, unknown> = Record<string, u
 ): Promise<T[]> {
   return withRetry(async () => {
     try {
-      const db = prisma();
-      if (looksLikeRows(text)) {
-        const rows = (await db.$queryRawUnsafe(text, ...params)) as T[];
-        return Array.isArray(rows) ? rows : [];
-      }
-      await db.$executeRawUnsafe(text, ...params);
-      return [];
+      const res = await pool().query(text, params);
+      return (Array.isArray(res.rows) ? res.rows : []) as T[];
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error("sql", text.slice(0, 100).replace(/\s+/g, " "), msg);
@@ -95,7 +107,7 @@ export async function queryOne<T extends Record<string, unknown> = Record<string
 export async function warmup() {
   try {
     await query("SELECT 1 AS ok");
-    console.log("db ready (prisma)");
+    console.log("db ready (pg pool)");
   } catch (err) {
     console.error("db warmup", err instanceof Error ? err.message : err);
   }

@@ -6,7 +6,7 @@ import { WebSocket, WebSocketServer } from "ws";
 import { parseAccess } from "./auth";
 import { memberIds, peerUserIds } from "./chats";
 import { envelope, hub, presence } from "./hub";
-import { beatSocket, clearOnline, dropSocket, markTyping, noteSocket } from "./valkey";
+import { beatSocket, clearOnline, dropSocket, markTyping, membersCached, noteSocket } from "./valkey";
 
 export async function announcePresence(userId: string, online: boolean) {
   const peers = await peerUserIds(userId).catch(() => [] as string[]);
@@ -55,8 +55,10 @@ export function attachWs(
               void beatSocket(userId, connId);
             }
             if (msg.type === "typing" && msg.chat_id) {
-              markTyping(msg.chat_id, userId);
-              const ids = await memberIds(msg.chat_id);
+              const chatId = msg.chat_id;
+              const ids = await membersCached(chatId, () => memberIds(chatId));
+              if (!ids.includes(userId)) return;
+              markTyping(chatId, userId);
               hub.publishMany(
                 ids.filter((id) => id !== userId),
                 envelope("typing", { chat_id: msg.chat_id, user_id: userId }),

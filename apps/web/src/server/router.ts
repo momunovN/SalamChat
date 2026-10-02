@@ -18,6 +18,7 @@ import {
   listChats,
   listMembers,
   markRead,
+  memberIds,
   removeMember,
   renameChat,
   setDirectNotifications,
@@ -42,7 +43,7 @@ import { completeUpload, createIntent, mediaType, putUpload, readMedia, readSeal
 import { dropPushSubscription, savePushSubscription, vapidPublicKey } from "./push";
 import { openBytes } from "./seal";
 import { sseResponse } from "./stream";
-import { markTyping, valkeyReady } from "./valkey";
+import { markTyping, membersCached, valkeyReady } from "./valkey";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -445,12 +446,15 @@ async function dispatch(method: string, parts: string[], req: Request, url: URL)
   if (method === "POST" && p("typing")) {
     const body = await readJSON<{ chat_id?: string }>(req);
     if (body.chat_id) {
-      markTyping(body.chat_id, auth.userId);
-      const members = await (await import("./chats")).memberIds(body.chat_id);
-      hub.publishMany(
-        members.filter((id) => id !== auth.userId),
-        envelope("typing", { chat_id: body.chat_id, user_id: auth.userId }),
-      );
+      const chatId = body.chat_id;
+      const members = await membersCached(chatId, () => memberIds(chatId));
+      if (members.includes(auth.userId)) {
+        markTyping(chatId, auth.userId);
+        hub.publishMany(
+          members.filter((id) => id !== auth.userId),
+          envelope("typing", { chat_id: chatId, user_id: auth.userId }),
+        );
+      }
     }
     return json(200, { ok: true });
   }
