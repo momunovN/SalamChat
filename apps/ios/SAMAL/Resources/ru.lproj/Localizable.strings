@@ -103,3 +103,18 @@
 "media.geo" = "Гео";
 "media.fail" = "Не открылось";
 "media.sealed" = "Зашифровано";
+
+"status.mine" = "Мой статус";
+"status.add" = "Добавить статус";
+"status.photo" = "Фото или видео";
+"status.text" = "Текст";
+"status.placeholder" = "Напишите статус";
+"status.publish" = "Опубликовать";
+"status.failed" = "Не удалось опубликовать статус";
+"status.views" = "Просмотры";
+"status.noViews" = "Пока никто не смотрел";
+"status.delete" = "Удалить статус";
+"status.tooBig" = "Файл больше 20 МБ";
+"status.now" = "только что";
+"status.minutes" = "{n} мин назад";
+"status.hours" = "{n} ч назад";

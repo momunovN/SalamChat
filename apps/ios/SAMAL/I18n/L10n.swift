@@ -109,6 +109,21 @@ enum L10n {
     static var mediaFail: String { t("media.fail") }
     static var sealed: String { t("media.sealed") }
 
+    static var myStatus: String { t("status.mine") }
+    static var addStatus: String { t("status.add") }
+    static var statusPhoto: String { t("status.photo") }
+    static var statusText: String { t("status.text") }
+    static var statusPlaceholder: String { t("status.placeholder") }
+    static var statusPublish: String { t("status.publish") }
+    static var statusFailed: String { t("status.failed") }
+    static var statusViews: String { t("status.views") }
+    static var statusNoViews: String { t("status.noViews") }
+    static var statusDelete: String { t("status.delete") }
+    static var statusTooBig: String { t("status.tooBig") }
+    static var statusNow: String { t("status.now") }
+    static func statusMinutes(_ n: Int) -> String { t("status.minutes").replacingOccurrences(of: "{n}", with: String(n)) }
+    static func statusHours(_ n: Int) -> String { t("status.hours").replacingOccurrences(of: "{n}", with: String(n)) }
+
     static var code: String {
         UserDefaults.standard.string(forKey: "samal.lang")
             ?? (Locale.current.language.languageCode?.identifier == "ky" ? "ky" : "ru")

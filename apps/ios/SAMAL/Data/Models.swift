@@ -100,6 +100,7 @@ struct APIMessage: Codable, Identifiable, Hashable {
     }
 
     struct ReplyPreview: Codable, Hashable {
+        var id: UUID?
         var text: String?
     }
 
@@ -273,5 +274,52 @@ struct NotifyResult: Decodable {
         case enabled
         case chatID = "chat_id"
         case mutedUntil = "muted_until"
+    }
+}
+
+/// A status: photo, video or a text card that lasts 24 hours.
+struct APIStory: Codable, Hashable, Identifiable {
+    var id: String
+    var kind: String
+    var text: String
+    var bg: String
+    var url: String?
+    var mime: String?
+    var createdAt: Date
+    var viewed: Bool
+    var views: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case id, kind, text, bg, url, mime, viewed, views
+        case createdAt = "created_at"
+    }
+}
+
+struct APIStoryGroup: Codable, Hashable, Identifiable {
+    struct Author: Codable, Hashable {
+        var id: String
+        var displayName: String
+        var avatarURL: String?
+
+        enum CodingKeys: String, CodingKey {
+            case id
+            case displayName = "display_name"
+            case avatarURL = "avatar_url"
+        }
+    }
+
+    var user: Author
+    var stories: [APIStory]
+    var unseen: Bool
+    var id: String { user.id }
+}
+
+struct APIStoryViewer: Codable, Hashable, Identifiable {
+    var id: String
+    var displayName: String
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case displayName = "display_name"
     }
 }

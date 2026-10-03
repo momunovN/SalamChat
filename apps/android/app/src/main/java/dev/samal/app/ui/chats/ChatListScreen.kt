@@ -62,6 +62,12 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import dev.samal.app.ui.theme.LetterAvatar
+import dev.samal.app.ui.stories.StoryGroup
+import dev.samal.app.ui.stories.StoryStrip
+import dev.samal.app.ui.stories.StoryViewer
+import dev.samal.app.ui.stories.StoryComposer
+import dev.samal.app.ui.stories.parseStories
+import dev.samal.app.data.sync.NavBus
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.Spacer
@@ -85,6 +91,23 @@ fun ChatListScreen(dao: SamalDao, api: SamalApi, me: String, onOpen: (ChatEntity
     // remember: a new Flow on every recomposition re-ran the query on each keystroke.
     val chats by remember(dao, type, q) { dao.chats(type, q) }.collectAsState(initial = emptyList())
     val scope = rememberCoroutineScope()
+    val app = androidx.compose.ui.platform.LocalContext.current.applicationContext as dev.samal.app.SamalApp
+    var stories by remember { mutableStateOf<List<StoryGroup>>(emptyList()) }
+    var storyOpen by remember { mutableStateOf<Int?>(null) }
+    var composing by remember { mutableStateOf(false) }
+    val storiesTick by NavBus.storiesTick.collectAsState()
+    suspend fun loadStories() {
+        val fresh = withContext(Dispatchers.IO) { runCatching { parseStories(api.stories()) }.getOrNull() }
+        if (fresh != null) stories = fresh
+    }
+    LaunchedEffect(storiesTick) { loadStories() }
+    LaunchedEffect(Unit) {
+        // Statuses expire on their own: a light refresh keeps the strip honest.
+        while (true) {
+            delay(5 * 60_000L)
+            loadStories()
+        }
+    }
 
     Column(Modifier.fillMaxSize().background(Bg)) {
         Row(
@@ -135,6 +158,15 @@ fun ChatListScreen(dao: SamalDao, api: SamalApi, me: String, onOpen: (ChatEntity
                 )
             }
         }
+        if (!picking && q.isBlank()) {
+            StoryStrip(
+                stories,
+                me,
+                app.session.user?.displayName.orEmpty(),
+                onOpen = { storyOpen = it },
+                onAdd = { composing = true },
+            )
+        }
         if (chats.isEmpty()) {
             Text(stringResource(R.string.chats_empty), color = Muted, modifier = Modifier.padding(24.dp))
         } else {
@@ -155,6 +187,29 @@ fun ChatListScreen(dao: SamalDao, api: SamalApi, me: String, onOpen: (ChatEntity
                 }
             }
         }
+    }
+
+    storyOpen?.let { start ->
+        StoryViewer(
+            stories,
+            start,
+            me,
+            api,
+            onClose = { storyOpen = null },
+            onSeen = { id ->
+                stories = stories.map { g ->
+                    if (g.stories.none { it.id == id }) g
+                    else {
+                        val list = g.stories.map { if (it.id == id) it.copy(viewed = true) else it }
+                        g.copy(stories = list, unseen = list.any { !it.viewed })
+                    }
+                }
+            },
+            onChanged = { scope.launch { loadStories() } },
+        )
+    }
+    if (composing) {
+        StoryComposer(api, onClose = { composing = false }, onPosted = { scope.launch { loadStories() } })
     }
 
     if (confirm) {

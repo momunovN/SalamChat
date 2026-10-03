@@ -33,6 +33,8 @@ struct LocalMessage: Codable, FetchableRecord, PersistableRecord, Identifiable, 
     var waveform: String = ""
     var localPath: String = ""
     var authorName: String = ""
+    /// Id of the message this one answers, so a tap on the quote can go to it.
+    var replyToID: String = ""
 }
 
 struct OutboxRow: Codable, FetchableRecord, PersistableRecord {
@@ -116,6 +118,11 @@ final class AppDatabase {
         m.registerMigration("v3") { db in
             try db.alter(table: "messages") { t in
                 t.add(column: "authorName", .text).notNull().defaults(to: "")
+            }
+        }
+        m.registerMigration("v4") { db in
+            try db.alter(table: "messages") { t in
+                t.add(column: "replyToID", .text).notNull().defaults(to: "")
             }
         }
         return m
@@ -262,7 +269,8 @@ final class AppDatabase {
             mediaURL: att?.url ?? "",
             durationMs: att?.durationMS ?? m.payload.durationMS ?? 0,
             waveform: wave,
-            authorName: m.authorName ?? ""
+            authorName: m.authorName ?? "",
+            replyToID: (m.replyTo?.id ?? m.replyToID)?.uuidString ?? ""
         )
     }
 
@@ -315,7 +323,8 @@ final class AppDatabase {
             mediaURL: mediaURL.isEmpty ? uploadPath : mediaURL,
             durationMs: durationMs,
             waveform: waveform,
-            localPath: uploadPath
+            localPath: uploadPath,
+            replyToID: replyTo
         )
         try dbQueue.write { db in
             try row.insert(db)

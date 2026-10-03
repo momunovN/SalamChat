@@ -184,6 +184,7 @@ struct ChatView: View {
     @State private var photoItem: PhotosPickerItem?
     @State private var pickFile = false
     @State private var viewer: ChatMedia?
+    @State private var flashID: String?
     @State private var openingFile = false
     @State private var openFailed = false
     @State private var profile: ProfileTarget?
@@ -485,7 +486,9 @@ struct ChatView: View {
                             }
                             .buttonStyle(.plain)
                         }
-                        BubbleView(message: msg)
+                        BubbleView(message: msg, onQuote: {
+                            jump(to: msg.replyToID, ordered: ordered, proxy: proxy)
+                        })
                             .onLongPressGesture { vm.menu = msg }
                             .onTapGesture {
                                 if chatMediaKind(msg) != nil {
@@ -495,6 +498,11 @@ struct ChatView: View {
                                 }
                             }
                     }
+                    .background(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(SamalColor.accent.opacity(flashID == msg.id ? 0.25 : 0))
+                    )
+                    .animation(.easeOut(duration: 0.3), value: flashID)
                     .id(msg.id)
                 }
             }
@@ -504,6 +512,18 @@ struct ChatView: View {
         .onChange(of: ordered.count) { _, _ in
             if let last = ordered.last?.id { proxy.scrollTo(last, anchor: .bottom) }
         }
+        }
+    }
+
+    /// Tapping a reply's quote scrolls to the message it answers and lights it up.
+    private func jump(to id: String, ordered: [LocalMessage], proxy: ScrollViewProxy) {
+        guard !id.isEmpty,
+              let target = ordered.first(where: { $0.id.caseInsensitiveCompare(id) == .orderedSame || $0.clientID.caseInsensitiveCompare(id) == .orderedSame })
+        else { return }
+        withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo(target.id, anchor: .center) }
+        flashID = target.id
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
+            if flashID == target.id { flashID = nil }
         }
     }
 
@@ -548,6 +568,7 @@ struct ChatView: View {
 
 struct BubbleView: View {
     let message: LocalMessage
+    var onQuote: () -> Void = {}
     @State private var playing = false
 
     private var metaColor: Color { message.isOutgoing ? Color.white.opacity(0.7) : SamalColor.muted }
@@ -558,7 +579,26 @@ struct BubbleView: View {
             VStack(alignment: message.isOutgoing ? .trailing : .leading, spacing: 4) {
                 VStack(alignment: .leading, spacing: 4) {
                     if !message.replyText.isEmpty {
-                        Text(message.replyText).font(SamalFont.caption()).foregroundStyle(SamalColor.accent).lineLimit(2)
+                        Button(action: onQuote) {
+                            HStack(spacing: 6) {
+                                RoundedRectangle(cornerRadius: 1.5)
+                                    .fill(message.isOutgoing ? Color.white : SamalColor.accent)
+                                    .frame(width: 3)
+                                Text(message.replyText)
+                                    .font(SamalFont.caption())
+                                    .foregroundStyle(message.isOutgoing ? Color.white : SamalColor.text)
+                                    .lineLimit(2)
+                                    .multilineTextAlignment(.leading)
+                            }
+                            .padding(.vertical, 4)
+                            .padding(.trailing, 8)
+                            .background(
+                                (message.isOutgoing ? Color.white : SamalColor.accent).opacity(0.12),
+                                in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(message.replyToID.isEmpty)
                     }
                     content
                     HStack(spacing: 4) {

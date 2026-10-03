@@ -231,6 +231,22 @@ class SamalApi(
 
     fun contacts(): JSONArray = get("/v1/contacts").optJSONArray("items") ?: JSONArray()
 
+    /** Statuses: groups of { user, stories[], unseen }, our own first. */
+    fun stories(): JSONArray = get("/v1/stories").optJSONArray("items") ?: JSONArray()
+
+    fun postStory(kind: String, text: String, bg: String? = null, uploadId: String? = null): JSONObject {
+        val body = JSONObject().put("kind", kind).put("text", text)
+        if (bg != null) body.put("bg", bg)
+        if (uploadId != null) body.put("upload_id", uploadId)
+        return post("/v1/stories", body, true)
+    }
+
+    fun viewStory(id: String): JSONObject = post("/v1/stories/$id/view", JSONObject(), true)
+
+    fun storyViews(id: String): JSONArray = get("/v1/stories/$id/views").optJSONArray("items") ?: JSONArray()
+
+    fun deleteStory(id: String): JSONObject = delete("/v1/stories/$id")
+
     fun users(q: String): JSONArray =
         get("/v1/users?q=${enc(q)}").optJSONArray("items") ?: JSONArray()
 

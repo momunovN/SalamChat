@@ -107,4 +107,18 @@
     <string name="flip_camera">Камераны алмаштыруу</string>
     <string name="speaker">Динамик</string>
     <string name="mic_failed">Микрофонго уруксат жок — маектешиңиз сизди укпайт</string>
+    <string name="my_status">Менин статусум</string>
+    <string name="add_status">Статус кошуу</string>
+    <string name="status_photo">Сүрөт же видео</string>
+    <string name="status_text">Текст</string>
+    <string name="status_placeholder">Статус жазыңыз</string>
+    <string name="status_publish">Жарыялоо</string>
+    <string name="status_failed">Статусту жарыялай алган жокпуз</string>
+    <string name="status_views">Көрүүлөр</string>
+    <string name="status_no_views">Азырынча эч ким көрө элек</string>
+    <string name="status_delete">Статусту өчүрүү</string>
+    <string name="status_hours">%d саат мурун</string>
+    <string name="status_minutes">%d мүн мурун</string>
+    <string name="status_now">азыр эле</string>
+    <string name="status_too_big">Файл 20 МБдан чоң</string>
 </resources>

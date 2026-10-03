@@ -12,6 +12,8 @@ object NavBus {
     /** Id of the last call the server reported as ended, missed or declined. */
     val ended = MutableStateFlow<String?>(null)
     val typingUntil = MutableStateFlow<Map<String, Long>>(emptyMap())
+    /** Bumped when someone we can see posts or removes a status. */
+    val storiesTick = MutableStateFlow(0L)
     /** Calls this device answered, declined or left: never offered again. */
     val left: MutableSet<String> = ConcurrentHashMap.newKeySet()
 

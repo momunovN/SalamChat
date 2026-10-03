@@ -113,4 +113,18 @@
     <string name="flip_camera">Сменить камеру</string>
     <string name="speaker">Динамик</string>
     <string name="mic_failed">Нет доступа к микрофону — собеседник вас не слышит</string>
+    <string name="my_status">Мой статус</string>
+    <string name="add_status">Добавить статус</string>
+    <string name="status_photo">Фото или видео</string>
+    <string name="status_text">Текст</string>
+    <string name="status_placeholder">Напишите статус</string>
+    <string name="status_publish">Опубликовать</string>
+    <string name="status_failed">Не удалось опубликовать статус</string>
+    <string name="status_views">Просмотры</string>
+    <string name="status_no_views">Пока никто не смотрел</string>
+    <string name="status_delete">Удалить статус</string>
+    <string name="status_hours">%d ч назад</string>
+    <string name="status_minutes">%d мин назад</string>
+    <string name="status_now">только что</string>
+    <string name="status_too_big">Файл больше 20 МБ</string>
 </resources>

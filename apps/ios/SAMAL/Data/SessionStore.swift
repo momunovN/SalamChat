@@ -17,6 +17,8 @@ final class SessionStore: ObservableObject {
     @Published var incomingCall: APICall?
     @Published var activeCall: ActiveCall?
     @Published var liveCall: APICall?
+    /// Bumped when someone we can see posts or removes a status.
+    @Published var storiesTick = 0
     /// Calls this device answered, declined or left: never offered again.
     var leftCalls: Set<UUID> = []
 
@@ -293,6 +295,8 @@ final class SessionStore: ObservableObject {
                 try? db.applyReceipt(messageID: id.uppercased(), status: status)
                 try? db.applyReceipt(messageID: id, status: status)
             }
+        case "story.updated":
+            storiesTick += 1
         case "call.updated":
             if let call = try? JSONDecoder.iso.decode(APICall.self, from: body) {
                 liveCall = call

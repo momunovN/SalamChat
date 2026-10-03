@@ -251,6 +251,7 @@ class Inbox(
                 val status = body.optString("status")
                 if (id.isNotBlank() && status.isNotBlank()) dao.setStatus(id, status)
             }
+            "story.updated" -> NavBus.storiesTick.value = System.currentTimeMillis()
             "call.updated" -> {
                 val body = env.optJSONObject("body") ?: return
                 if (body.optString("status") == "active" && NavBus.joinable(body, me)) {

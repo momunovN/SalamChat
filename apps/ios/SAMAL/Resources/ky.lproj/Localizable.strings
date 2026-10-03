@@ -103,3 +103,18 @@
 "media.geo" = "Гео";
 "media.fail" = "Ачылган жок";
 "media.sealed" = "Шифрленген";
+
+"status.mine" = "Менин статусум";
+"status.add" = "Статус кошуу";
+"status.photo" = "Сүрөт же видео";
+"status.text" = "Текст";
+"status.placeholder" = "Статус жазыңыз";
+"status.publish" = "Жарыялоо";
+"status.failed" = "Статусту жарыялай алган жокпуз";
+"status.views" = "Көрүүлөр";
+"status.noViews" = "Азырынча эч ким көрө элек";
+"status.delete" = "Статусту өчүрүү";
+"status.tooBig" = "Файл 20 МБдан чоң";
+"status.now" = "азыр эле";
+"status.minutes" = "{n} мүн мурун";
+"status.hours" = "{n} саат мурун";

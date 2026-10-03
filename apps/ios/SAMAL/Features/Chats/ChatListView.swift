@@ -78,6 +78,14 @@ struct ChatListView: View {
     @State private var renameTitle = ""
     @State private var renameNick = ""
     @State private var renameNickReady = false
+    @State private var stories: [APIStoryGroup] = []
+    @State private var storyStart: StoryStart?
+    @State private var composingStory = false
+
+    private struct StoryStart: Identifiable {
+        let index: Int
+        var id: Int { index }
+    }
 
     var body: some View {
         NavigationStack {
@@ -88,6 +96,15 @@ struct ChatListView: View {
                 if vm.segment == .calls {
                     CallsView().frame(maxHeight: .infinity)
                 } else {
+                    if !picking, vm.query.isEmpty, let user = session.user {
+                        StoryStrip(
+                            groups: stories,
+                            me: user.id.uuidString,
+                            meName: user.displayName,
+                            onOpen: { storyStart = StoryStart(index: $0) },
+                            onAdd: { composingStory = true }
+                        )
+                    }
                     list
                 }
             }
@@ -98,6 +115,40 @@ struct ChatListView: View {
             }
         }
         .onAppear { vm.start(session: session) }
+        .task(id: session.storiesTick) { await loadStories() }
+        .task {
+            // Statuses expire on their own: a light refresh keeps the strip honest.
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(300))
+                await loadStories()
+            }
+        }
+        .fullScreenCover(item: $storyStart) { start in
+            StoryViewerView(
+                groups: stories,
+                start: start.index,
+                me: session.user?.id.uuidString ?? "",
+                onSeen: { id in
+                    stories = stories.map { g in
+                        guard g.stories.contains(where: { $0.id == id }) else { return g }
+                        var copy = g
+                        copy.stories = g.stories.map { s in
+                            var s = s
+                            if s.id == id { s.viewed = true }
+                            return s
+                        }
+                        copy.unseen = copy.stories.contains { !$0.viewed }
+                        return copy
+                    }
+                },
+                onChanged: { Task { await loadStories() } }
+            )
+            .environmentObject(session)
+        }
+        .fullScreenCover(isPresented: $composingStory) {
+            StoryComposerView(onPosted: { Task { await loadStories() } })
+                .environmentObject(session)
+        }
         .onChange(of: session.pendingChatID) { _, id in
             guard let id else { return }
             let rows = (try? AppDatabase.shared.fetchChats(filter: "", query: "")) ?? vm.chats
@@ -149,6 +200,10 @@ struct ChatListView: View {
             }
             Button(L10n.cancel, role: .cancel) {}
         }
+    }
+
+    private func loadStories() async {
+        if let fresh = try? await session.api.stories() { stories = fresh }
     }
 
     private var header: some View {

@@ -109,6 +109,34 @@ final class APIClient {
         let _: JSONValue = try await send("/v1/messages/\(id.uuidString)", method: "DELETE", body: nil, authed: true)
     }
 
+    /// Statuses: groups of { user, stories, unseen }, our own first.
+    func stories() async throws -> [APIStoryGroup] {
+        struct Wrap: Decodable { var items: [APIStoryGroup] }
+        let w: Wrap = try await get("/v1/stories")
+        return w.items
+    }
+
+    func postStory(kind: String, text: String, bg: String? = nil, uploadID: String? = nil) async throws {
+        var body: [String: Any] = ["kind": kind, "text": text]
+        if let bg { body["bg"] = bg }
+        if let uploadID { body["upload_id"] = uploadID }
+        let _: JSONValue = try await post("/v1/stories", body: body)
+    }
+
+    func viewStory(id: String) async throws {
+        let _: JSONValue = try await post("/v1/stories/\(id)/view", body: [:])
+    }
+
+    func storyViews(id: String) async throws -> [APIStoryViewer] {
+        struct Wrap: Decodable { var items: [APIStoryViewer] }
+        let w: Wrap = try await get("/v1/stories/\(id)/views")
+        return w.items
+    }
+
+    func deleteStory(id: String) async throws {
+        let _: JSONValue = try await send("/v1/stories/\(id)", method: "DELETE", body: nil, authed: true)
+    }
+
     func hideChat(id: UUID) async throws {
         let _: JSONValue = try await send("/v1/chats/\(id.uuidString)", method: "DELETE", body: nil, authed: true)
     }
