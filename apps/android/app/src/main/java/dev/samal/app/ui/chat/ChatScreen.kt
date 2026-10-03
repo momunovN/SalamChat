@@ -113,6 +113,11 @@ import java.util.Date
 import java.util.Locale
 import java.util.UUID
 import kotlin.math.roundToInt
+import dev.samal.app.ui.theme.LetterAvatar
+import dev.samal.app.ui.theme.nameColor
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentWidth
 
 /** Messages read from Room per step of the chat window. */
 private const val PAGE = 100
@@ -220,14 +225,19 @@ fun ChatScreen(
                 },
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-            Box(Modifier.size(36.dp).clip(CircleShape).background(Elevated), contentAlignment = Alignment.Center) {
-                Text(current.title.take(1).uppercase(), color = Text)
-            }
-            Column(Modifier.padding(start = 8.dp).weight(1f)) {
+            LetterAvatar(current.title, 40.dp)
+            Column(Modifier.padding(start = 10.dp).weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Default.Lock, stringResource(R.string.sealed), tint = Muted, modifier = Modifier.size(12.dp))
                     Spacer(Modifier.width(4.dp))
-                    Text(current.title, color = Text, maxLines = 1)
+                    Text(
+                        current.title,
+                        color = Text,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 }
                 val sub = when {
                     typing -> stringResource(R.string.typing)
@@ -245,17 +255,21 @@ fun ChatScreen(
             state = listState,
             modifier = Modifier.weight(1f).fillMaxWidth(),
             reverseLayout = true,
-            contentPadding = PaddingValues(12.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp),
         ) {
             itemsIndexed(messages, key = { _, msg -> msg.id }) { index, msg ->
                 val older = messages.getOrNull(index + 1)
                 val showDay = older == null || !sameInstantDay(msg.createdAt, older.createdAt)
+                val newer = messages.getOrNull(index - 1)
                 val showAuthor = current.type == "group" && !msg.outgoing && msg.authorName.isNotBlank() && older?.authorId != msg.authorId
+                // Consecutive messages from one author sit closer; only the last one keeps the tail.
+                val lastInRun = newer == null || newer.authorId != msg.authorId || newer.outgoing != msg.outgoing ||
+                    !sameInstantDay(msg.createdAt, newer.createdAt)
                 Bubble(
                     msg,
                     showDay,
                     showAuthor,
+                    lastInRun,
                     onOpen = { stage = msg },
                     onMenu = { menu = msg },
                     onAuthor = { msg.authorId?.let { profile = it } },
@@ -564,6 +578,7 @@ private fun Bubble(
     msg: MessageEntity,
     showDay: Boolean,
     showAuthor: Boolean,
+    lastInRun: Boolean,
     onOpen: () -> Unit,
     onMenu: () -> Unit,
     onAuthor: () -> Unit,
@@ -571,15 +586,22 @@ private fun Bubble(
     val ctx = LocalContext.current
     val time = remember(msg.createdAt) { SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(msg.createdAt)) }
     val day = dayLabel(msg.createdAt, stringResource(R.string.today), stringResource(R.string.yesterday))
-    Column(Modifier.fillMaxWidth()) {
+    Column(Modifier.fillMaxWidth().padding(bottom = if (lastInRun) 8.dp else 2.dp)) {
         if (showDay) {
-            Text(day, color = Muted, fontSize = 11.sp, modifier = Modifier.align(Alignment.CenterHorizontally).padding(vertical = 2.dp))
+            Text(
+                day,
+                color = Muted,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier.align(Alignment.CenterHorizontally).padding(vertical = 8.dp)
+                    .clip(CircleShape).background(Elevated).padding(horizontal = 12.dp, vertical = 3.dp),
+            )
         }
         if (showAuthor) {
             Text(
                 msg.authorName,
-                color = Accent,
-                fontSize = 12.sp,
+                color = nameColor(msg.authorName),
+                fontSize = 13.sp,
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.clickable(onClick = onAuthor).padding(start = 8.dp, bottom = 2.dp),
             )
@@ -594,11 +616,15 @@ private fun Bubble(
             )
         }) {
             if (msg.outgoing) Spacer(Modifier.weight(1f))
+            val tail = if (lastInRun) 6.dp else 18.dp
             Column(
                 Modifier
-                    .clip(RoundedCornerShape(16.dp, 16.dp, if (msg.outgoing) 4.dp else 16.dp, if (msg.outgoing) 16.dp else 4.dp))
+                    .widthIn(max = 560.dp)
+                    .fillMaxWidth(0.85f)
+                    .wrapContentWidth(if (msg.outgoing) Alignment.End else Alignment.Start)
+                    .clip(RoundedCornerShape(18.dp, 18.dp, if (msg.outgoing) tail else 18.dp, if (msg.outgoing) 18.dp else tail))
                     .background(if (msg.outgoing) Outgoing else Incoming)
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                    .padding(horizontal = 12.dp, vertical = 7.dp),
             ) {
                 if (msg.replyText.isNotBlank()) Text(msg.replyText, color = Accent, fontSize = 12.sp, maxLines = 2)
                 val kind = openKind(msg.type, msg.text, msg.mediaUrl, msg.deleted)
@@ -628,17 +654,18 @@ private fun Bubble(
                     msg.type == "location" -> Text(msg.text.ifBlank { stringResource(R.string.geo) }, color = Text)
                     else -> Text(msg.text, color = Text, fontSize = 16.sp)
                 }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (msg.edited) Text(stringResource(R.string.edited), color = Muted, fontSize = 11.sp)
+                val meta = if (msg.outgoing) Color.White.copy(alpha = 0.7f) else Muted
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.align(Alignment.End).padding(top = 2.dp)) {
+                    if (msg.edited) Text(stringResource(R.string.edited), color = meta, fontSize = 11.sp)
                     Spacer(Modifier.width(6.dp))
-                    Text(time, color = Muted, fontSize = 11.sp)
+                    Text(time, color = meta, fontSize = 11.sp)
                     if (msg.outgoing) {
                         Spacer(Modifier.width(4.dp))
-                        val tint = if (msg.status == "read") Success else Muted
+                        val tint = if (msg.status == "read") Color.White else meta
                         when (msg.status) {
                             "read", "delivered" -> Icon(Icons.Default.DoneAll, null, tint = tint, modifier = Modifier.size(14.dp))
                             "failed" -> Text("!", color = Danger, fontSize = 12.sp)
-                            else -> Icon(Icons.Default.Check, null, tint = Muted, modifier = Modifier.size(14.dp))
+                            else -> Icon(Icons.Default.Check, null, tint = meta, modifier = Modifier.size(14.dp))
                         }
                     }
                 }

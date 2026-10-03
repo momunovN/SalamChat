@@ -57,6 +57,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import dev.samal.app.ui.theme.LetterAvatar
 
 @Composable
 internal fun ProfileSheet(
@@ -137,12 +138,7 @@ internal fun ProfileSheet(
                     modifier = Modifier.size(96.dp).clip(CircleShape),
                 )
             } else {
-                Box(
-                    Modifier.size(96.dp).clip(CircleShape).background(Bg),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(name.take(1).uppercase().ifBlank { "?" }, color = Text, fontSize = 32.sp, fontWeight = FontWeight.SemiBold)
-                }
+                LetterAvatar(name, 96.dp)
             }
             if (user == null && !fail) {
                 CircularProgressIndicator(color = Accent, modifier = Modifier.padding(top = 16.dp))

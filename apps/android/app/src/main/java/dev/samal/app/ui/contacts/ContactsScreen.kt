@@ -48,6 +48,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import dev.samal.app.ui.theme.LetterAvatar
 
 data class ContactRow(val id: String, val title: String, val sub: String)
 
@@ -155,15 +156,7 @@ fun ContactsScreen(api: SamalApi, dao: SamalDao, me: String, onOpen: (ChatEntity
                             .padding(horizontal = 16.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Box(
-                            Modifier
-                                .clip(CircleShape)
-                                .background(Elevated)
-                                .padding(12.dp),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Text(row.title.take(1).uppercase(), color = Text, fontWeight = FontWeight.SemiBold)
-                        }
+                        LetterAvatar(row.title, 46.dp)
                         Column(Modifier.padding(start = 12.dp)) {
                             Text(row.title, color = Text, fontWeight = FontWeight.SemiBold)
                             Text(row.sub, color = Muted, fontSize = 13.sp)

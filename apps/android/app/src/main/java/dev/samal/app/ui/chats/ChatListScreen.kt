@@ -61,6 +61,11 @@ import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import dev.samal.app.ui.theme.LetterAvatar
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
 
 @Composable
 fun ChatListScreen(dao: SamalDao, api: SamalApi, me: String, onOpen: (ChatEntity) -> Unit) {
@@ -336,25 +341,46 @@ private fun ChatRow(chat: ChatEntity, selected: Boolean, onClick: () -> Unit, on
     Row(
         Modifier
             .fillMaxWidth()
-            .height(72.dp)
+            .padding(horizontal = 8.dp, vertical = 1.dp)
+            .clip(RoundedCornerShape(16.dp))
             .background(if (selected) Accent.copy(alpha = 0.16f) else Color.Transparent)
             .pointerInput(chat.id) { detectTapGestures(onTap = { onClick() }, onLongPress = { onLong() }) }
-            .padding(horizontal = 16.dp),
+            .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.size(56.dp).clip(CircleShape).background(Elevated), contentAlignment = Alignment.Center) {
-            Text(chat.title.take(1).uppercase(), color = Text, fontWeight = FontWeight.SemiBold)
-        }
+        LetterAvatar(chat.title, 54.dp)
         Column(Modifier.padding(start = 12.dp).weight(1f)) {
-            Row {
-                Text(chat.title, color = Text, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                Text(time, color = Muted, fontSize = 12.sp)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    chat.title,
+                    color = Text,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(time, color = if (chat.unread > 0) Accent else Muted, fontSize = 12.sp)
             }
-            Row {
-                Text(previewLabel(chat.lastText), color = Muted, fontSize = 14.sp, modifier = Modifier.weight(1f), maxLines = 1)
+            Spacer(Modifier.height(2.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    previewLabel(chat.lastText),
+                    color = Muted,
+                    fontSize = 14.sp,
+                    modifier = Modifier.weight(1f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
                 if (chat.unread > 0) {
-                    Box(Modifier.clip(CircleShape).background(Accent).padding(horizontal = 7.dp, vertical = 2.dp)) {
-                        Text("${chat.unread}", color = Text, fontSize = 12.sp)
+                    Spacer(Modifier.width(8.dp))
+                    Box(
+                        Modifier.defaultMinSize(minWidth = 22.dp, minHeight = 22.dp).clip(CircleShape).background(Accent)
+                            .padding(horizontal = 6.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(if (chat.unread > 99) "99+" else "${chat.unread}", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                     }
                 }
             }

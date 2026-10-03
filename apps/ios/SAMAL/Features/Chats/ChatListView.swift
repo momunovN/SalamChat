@@ -308,13 +308,7 @@ struct ChatRowView: View {
     }
 
     private var avatar: some View {
-        ZStack {
-            Circle().fill(SamalColor.elevated)
-            Text(String(chat.title.prefix(1)).uppercased())
-                .font(.system(size: 20, weight: .semibold))
-                .foregroundStyle(SamalColor.text)
-        }
-        .frame(width: 56, height: 56)
+        LetterAvatar(name: chat.title, size: 54)
     }
 
     private var time: String {

@@ -455,11 +455,7 @@ struct ChatView: View {
     }
 
     private var headerLetter: some View {
-        Text(String(vm.chat.title.first ?? "?").uppercased())
-            .font(SamalFont.caption())
-            .foregroundStyle(SamalColor.text)
-            .frame(width: 36, height: 36)
-            .background(SamalColor.elevated, in: Circle())
+        LetterAvatar(name: vm.chat.title, size: 36)
     }
 
     private var messageList: some View {
@@ -554,6 +550,8 @@ struct BubbleView: View {
     let message: LocalMessage
     @State private var playing = false
 
+    private var metaColor: Color { message.isOutgoing ? Color.white.opacity(0.7) : SamalColor.muted }
+
     var body: some View {
         HStack {
             if message.isOutgoing { Spacer(minLength: 48) }
@@ -564,18 +562,18 @@ struct BubbleView: View {
                     }
                     content
                     HStack(spacing: 4) {
-                        if message.edited { Text(L10n.editedMark).font(SamalFont.caption()).foregroundStyle(SamalColor.muted) }
-                        Text(time).font(SamalFont.caption()).foregroundStyle(SamalColor.muted)
+                        if message.edited { Text(L10n.editedMark).font(.system(size: 11, weight: .medium)).foregroundStyle(metaColor) }
+                        Text(time).font(.system(size: 11, weight: .medium)).monospacedDigit().foregroundStyle(metaColor)
                         if message.isOutgoing {
                             Image(systemName: statusIcon)
                                 .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(message.status == "read" ? SamalColor.success : SamalColor.muted)
+                                .foregroundStyle(message.status == "read" ? Color.white : metaColor)
                         }
                     }
                 }
                 .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(message.isOutgoing ? SamalColor.outgoing : SamalColor.incoming, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .padding(.vertical, 7)
+                .background(message.isOutgoing ? SamalColor.outgoing : SamalColor.incoming, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
             }
             if !message.isOutgoing { Spacer(minLength: 48) }
         }
@@ -927,11 +925,7 @@ struct ProfileSheet: View {
     }
 
     private func profileLetter(_ name: String) -> some View {
-        Text(String(name.first ?? "?").uppercased())
-            .font(SamalFont.title())
-            .foregroundStyle(SamalColor.text)
-            .frame(width: 96, height: 96)
-            .background(SamalColor.elevated, in: Circle())
+        LetterAvatar(name: name, size: 96)
     }
 }
 

@@ -49,3 +49,42 @@ struct SamalFont {
     static func caption() -> Font { .system(size: 12, weight: .medium) }
     static func tab() -> Font { .system(size: 10, weight: .medium) }
 }
+
+/// Same palette and hash as the website and Android, so a person has one color everywhere.
+enum SamalAvatar {
+    private static let fills: [(UInt, UInt)] = [
+        (0x3B82F6, 0x1D4ED8), (0x22C55E, 0x15803D), (0xF59E0B, 0xC2410C), (0xEC4899, 0xBE185D),
+        (0x8B5CF6, 0x6D28D9), (0x06B6D4, 0x0E7490), (0xEF4444, 0xB91C1C), (0x14B8A6, 0x0F766E),
+    ]
+
+    static func fill(_ name: String) -> (Color, Color) {
+        var h: Int32 = 0
+        for scalar in (name.isEmpty ? "?" : name).unicodeScalars {
+            h = h &* 31 &+ Int32(bitPattern: scalar.value)
+        }
+        let idx = Int(h == Int32.min ? 0 : abs(h)) % fills.count
+        return (Color(hex: fills[idx].0), Color(hex: fills[idx].1))
+    }
+
+    /// Author name color in group chats, matching that person's avatar.
+    static func nameColor(_ name: String) -> Color { fill(name).0 }
+
+    static func initial(_ name: String) -> String {
+        let ch = name.first(where: { $0.isLetter || $0.isNumber })
+        return ch.map { String($0).uppercased() } ?? "?"
+    }
+}
+
+struct LetterAvatar: View {
+    let name: String
+    var size: CGFloat = 44
+
+    var body: some View {
+        let (from, to) = SamalAvatar.fill(name)
+        Text(SamalAvatar.initial(name))
+            .font(.system(size: size * 0.4, weight: .semibold))
+            .foregroundStyle(.white)
+            .frame(width: size, height: size)
+            .background(LinearGradient(colors: [from, to], startPoint: .topLeading, endPoint: .bottomTrailing), in: Circle())
+    }
+}
