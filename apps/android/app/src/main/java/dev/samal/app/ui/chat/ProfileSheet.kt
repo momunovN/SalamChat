@@ -42,6 +42,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
+import dev.samal.app.data.api.MediaAuth
 import dev.samal.app.R
 import dev.samal.app.data.api.SamalApi
 import dev.samal.app.data.notify.Mutes
@@ -250,7 +251,7 @@ internal fun ProfileSheet(
                                     modifier = Modifier.fillMaxWidth().clickable {
                                         runCatching {
                                             player.reset()
-                                            player.setDataSource(url)
+                                            MediaAuth.setSource(player, url)
                                             player.setOnPreparedListener { it.start() }
                                             player.prepareAsync()
                                         }

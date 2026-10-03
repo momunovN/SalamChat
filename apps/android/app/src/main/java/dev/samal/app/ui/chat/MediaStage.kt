@@ -57,6 +57,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.FileProvider
 import coil.compose.AsyncImage
+import dev.samal.app.data.api.MediaAuth
 import dev.samal.app.R
 import dev.samal.app.ui.theme.Accent
 import kotlinx.coroutines.Dispatchers
@@ -209,7 +210,7 @@ private fun AudioStage(path: String, name: String) {
             true
         }
         if (runCatching {
-                player.setDataSource(path)
+                MediaAuth.setSource(player, path)
                 player.prepareAsync()
             }.isFailure
         ) {
@@ -417,6 +418,7 @@ private fun materialize(ctx: Context, url: String, name: String): File? {
     val dest = File(ctx.cacheDir, "view/${UUID.randomUUID()}${if (ext.isEmpty()) "" else ".$ext"}")
     dest.parentFile?.mkdirs()
     val conn = URL(url).openConnection()
+    MediaAuth.authorize(conn)
     conn.connectTimeout = 20_000
     conn.readTimeout = 20_000
     conn.getInputStream().use { input -> dest.outputStream().use { input.copyTo(it) } }

@@ -34,7 +34,8 @@ import {
 } from "./calls";
 import { buildInfo } from "./build";
 import { databaseSource } from "./env";
-import { dbError, migrate, query, usesNeonHttp } from "./db";
+import { dbError, migrate, query, queryOne, usesNeonHttp } from "./db";
+import { clearMediaCookie, mediaCookieFor, quietUser, requireMediaAccess } from "./mediaAuth";
 import { envelope, hub, presence } from "./hub";
 import { bearer, corsHeaders, errorResponse, HttpError, json, readJSON } from "./http";
 import { deleteMessage, editMessage, listMessages, receipts, sendMessage } from "./messages";
@@ -158,6 +159,9 @@ export async function handleRequest(req: Request): Promise<Response> {
         throw new HttpError(400, "bad_request", "bad id");
       }
       if (!UUID.test(id)) throw new HttpError(404, "not_found", "not found");
+      const upload = await queryOne<{ object_key: string }>(`SELECT object_key FROM uploads WHERE id=$1`, [id]);
+      if (!upload) throw new HttpError(404, "not_found", "not found");
+      await requireMediaAccess(req, upload.object_key, `/media/id/${id}`);
       const opened = await readSealedUpload(id);
       return mediaResponse(req, opened.buf, opened.mime, "private, max-age=86400");
     }
@@ -168,18 +172,37 @@ export async function handleRequest(req: Request): Promise<Response> {
       } catch {
         throw new HttpError(400, "bad_request", "bad key");
       }
+      await requireMediaAccess(req, key, `/media/${key}`);
       const media = await readPublicMedia(key);
-      return mediaResponse(req, media.buf, media.mime, "public, max-age=86400");
+      return mediaResponse(req, media.buf, media.mime, "private, max-age=86400");
     }
     if (!pathname.startsWith("/v1/")) {
       return json(404, { error: { code: "not_found", message: "not found" } });
     }
     const parts = pathname.slice(4).split("/").filter(Boolean);
     const method = req.method.toUpperCase();
-    return await dispatch(method, parts, req, url);
+    const res = await dispatch(method, parts, req, url);
+    return await withMediaCookie(req, res, parts);
   } catch (err) {
     return errorResponse(err);
   }
+}
+
+/** Authorized /v1 responses carry the /media cookie; signing out clears it. */
+async function withMediaCookie(req: Request, res: Response, parts: string[]) {
+  try {
+    if (parts.join("/") === "auth/logout") {
+      res.headers.append("Set-Cookie", clearMediaCookie(req));
+      return res;
+    }
+    if (res.status >= 400) return res;
+    const userId = await quietUser(req);
+    const cookie = userId ? await mediaCookieFor(req, userId) : null;
+    if (cookie) res.headers.append("Set-Cookie", cookie);
+  } catch {
+    /* immutable headers (a proxied response): skip the cookie */
+  }
+  return res;
 }
 
 async function dispatch(method: string, parts: string[], req: Request, url: URL): Promise<Response> {

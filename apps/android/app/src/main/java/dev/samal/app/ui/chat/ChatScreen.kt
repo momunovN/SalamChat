@@ -78,6 +78,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import coil.compose.AsyncImage
+import dev.samal.app.data.api.MediaAuth
 import dev.samal.app.R
 import dev.samal.app.data.api.SamalApi
 import dev.samal.app.data.sync.chatEntity
@@ -889,7 +890,7 @@ private object VoicePlayer {
         val mp = MediaPlayer()
         player = mp
         runCatching {
-            mp.setDataSource(url)
+            MediaAuth.setSource(mp, url)
             mp.setOnCompletionListener { stop(); onEnd() }
             mp.prepare()
             mp.start()
