@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Mic, MicOff, Phone, PhoneOff, Video, VideoOff } from "lucide-react";
+import { Mic, MicOff, Phone, PhoneOff, SwitchCamera, Video, VideoOff } from "lucide-react";
 import {
   AudioPresets,
   Room,
   RoomEvent,
   Track,
   VideoPresets,
+  type LocalVideoTrack,
   type RemoteTrack,
 } from "livekit-client";
 import { api, loadSession } from "@/lib/api";
@@ -41,6 +42,11 @@ const videoPublish = {
   degradationPreference: "balanced" as const,
   videoEncoding: VideoPresets.h720.encoding,
 };
+
+/** The corner picture: tap it to swap with the big one. */
+const PIP =
+  "absolute right-4 z-[5] w-28 cursor-pointer rounded-2xl shadow-lg ring-1 ring-white/15 transition-[width] sm:w-44 lg:w-60";
+const PIP_BOTTOM = "calc(7.5rem + env(safe-area-inset-bottom))";
 
 function mountPreview(box: HTMLDivElement, track: MediaStreamTrack, mirror: boolean) {
   const el = document.createElement("video");
@@ -136,6 +142,14 @@ export function CallRoom({
   const [peerJoined, setPeerJoined] = useState(false);
   const [remoteOn, setRemoteOn] = useState(false);
   const [elapsed, setElapsed] = useState(0);
+  /** Which camera is on: the front one (mirrored in our preview) or the back one. */
+  const [facing, setFacing] = useState<"user" | "environment">("user");
+  const [canFlip, setCanFlip] = useState(false);
+  const [flipping, setFlipping] = useState(false);
+  /** Our own picture big and theirs in the corner, as after a tap on the corner in WhatsApp. */
+  const [swapped, setSwapped] = useState(false);
+  /** Camera tracks opened by a flip: ours to stop, unlike the one the call started with. */
+  const flipped = useRef<MediaStreamTrack[]>([]);
   const video = call.kind === "video";
   const talking = phase === "live" && peerJoined;
 
@@ -148,8 +162,30 @@ export function CallRoom({
   useEffect(() => {
     const box = localVideo.current;
     if (!box || !preview) return;
-    mountPreview(box, preview, true);
+    mountPreview(box, preview, facing === "user");
+  }, [preview, facing]);
+
+  // Only phones and tablets have a second camera worth offering.
+  useEffect(() => {
+    if (!preview || !navigator.mediaDevices?.enumerateDevices) return;
+    let stop = false;
+    void navigator.mediaDevices
+      .enumerateDevices()
+      .then((devices) => {
+        if (!stop) setCanFlip(devices.filter((d) => d.kind === "videoinput").length > 1);
+      })
+      .catch(() => undefined);
+    return () => {
+      stop = true;
+    };
   }, [preview]);
+
+  useEffect(
+    () => () => {
+      for (const track of flipped.current) track.stop();
+    },
+    [],
+  );
 
   // Our own picture keeps its camera's shape: a laptop's landscape, a phone's portrait.
   // Phones report the sensor's landscape size even when held upright, so they stay portrait.
@@ -354,6 +390,50 @@ export function CallRoom({
     setCam(next);
   }
 
+  async function openCamera(want: "user" | "environment", exact: boolean) {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: exact ? { exact: want } : want,
+        width: { ideal: 1280 },
+        height: { ideal: 720 },
+      },
+    });
+    return stream.getVideoTracks()[0];
+  }
+
+  async function flipCamera() {
+    if (flipping || !preview) return;
+    setFlipping(true);
+    const next: "user" | "environment" = facing === "user" ? "environment" : "user";
+    const pub = roomRef.current?.localParticipant.getTrackPublication(Track.Source.Camera);
+    const sending = pub?.track as LocalVideoTrack | undefined;
+    // iPhones open one camera at a time: release the current one first.
+    preview.stop();
+    let fresh: MediaStreamTrack | null = null;
+    let now = next;
+    try {
+      fresh = await openCamera(next, true);
+    } catch {
+      now = facing;
+      fresh = await openCamera(facing, false).catch(() => null);
+    }
+    if (fresh) {
+      flipped.current.push(fresh);
+      try {
+        if (sending) await sending.replaceTrack(fresh, true);
+      } catch {
+        /* the next publish picks the camera up */
+      }
+      if (liveMedia.current) liveMedia.current = { ...liveMedia.current, video: fresh };
+      setPreview(fresh);
+      setFacing(now);
+    }
+    setFlipping(false);
+  }
+
+  // Swapping makes sense only while their video is there to put in the corner.
+  const big = swapped && remoteOn && video;
+
   const status =
     phase === "error" ? error : talking ? formatDuration(elapsed) : call.status === "ringing" && !peerJoined ? t.callDialing : t.callLinking;
 
@@ -374,19 +454,34 @@ export function CallRoom({
               {cam ? <Video size={22} /> : <VideoOff size={22} />}
             </CallButton>
           ) : null}
+          {video && canFlip ? (
+            <CallButton label={t.flipCamera} tone="bg-white/15" onClick={() => void flipCamera()}>
+              <SwitchCamera size={22} className={flipping ? "animate-spin" : ""} />
+            </CallButton>
+          ) : null}
           <CallButton label={t.hangup} big tone="bg-danger text-white" onClick={() => endRef.current(true)}>
             <PhoneOff size={28} />
           </CallButton>
         </>
       }
     >
-      <div ref={remoteVideo} className={`absolute inset-0 overflow-hidden bg-black ${remoteOn ? "" : "invisible"}`} />
+      <div
+        ref={remoteVideo}
+        role={big ? "button" : undefined}
+        aria-label={big ? t.swapVideo : undefined}
+        onClick={big ? () => setSwapped(false) : undefined}
+        className={`overflow-hidden bg-black ${remoteOn ? "" : "invisible"} ${big ? PIP : "absolute inset-0"}`}
+        style={big ? { bottom: PIP_BOTTOM, aspectRatio: "3 / 4" } : undefined}
+      />
       <div ref={remoteAudio} className="hidden" />
       {video ? (
         <div
           ref={localVideo}
-          className="absolute right-4 w-28 overflow-hidden rounded-2xl bg-white/10 shadow-lg ring-1 ring-white/10 sm:w-44 lg:w-60"
-          style={{ bottom: "calc(7.5rem + env(safe-area-inset-bottom))", aspectRatio: localAspect }}
+          role={big ? undefined : "button"}
+          aria-label={big ? undefined : t.swapVideo}
+          onClick={big || !remoteOn ? undefined : () => setSwapped(true)}
+          className={`overflow-hidden bg-black ${big ? "absolute inset-0" : `${PIP} bg-white/10`}`}
+          style={big ? undefined : { bottom: PIP_BOTTOM, aspectRatio: localAspect }}
         />
       ) : null}
     </CallStage>

@@ -110,6 +110,7 @@
     <string name="dialing">Вызов…</string>
     <string name="mic">Микрофон</string>
     <string name="camera">Камера</string>
+    <string name="flip_camera">Сменить камеру</string>
     <string name="speaker">Динамик</string>
     <string name="mic_failed">Нет доступа к микрофону — собеседник вас не слышит</string>
 </resources>

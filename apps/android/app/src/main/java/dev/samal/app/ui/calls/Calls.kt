@@ -89,6 +89,10 @@ import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import io.livekit.android.room.track.LocalVideoTrack
+import io.livekit.android.room.track.CameraPosition
+import androidx.compose.material.icons.filled.Cameraswitch
+import io.livekit.android.room.Room
 
 data class Stage(
     val id: String,
@@ -208,6 +212,10 @@ fun CallStage(stage: Stage, api: SamalApi, onHangup: () -> Unit) {
     var peer by remember { mutableStateOf(false) }
     var remote by remember { mutableStateOf<VideoTrack?>(null) }
     var local by remember { mutableStateOf<VideoTrack?>(null) }
+    /** Front camera (mirrored in our preview) or the back one. */
+    var front by remember { mutableStateOf(true) }
+    /** Our picture big and theirs in the corner, after a tap on the corner (as in WhatsApp). */
+    var swapped by remember { mutableStateOf(false) }
     var mic by remember { mutableStateOf(true) }
     var cam by remember { mutableStateOf(stage.video) }
     var speaker by remember { mutableStateOf(true) }
@@ -349,45 +357,51 @@ fun CallStage(stage: Stage, api: SamalApi, onHangup: () -> Unit) {
 
     Box(Modifier.fillMaxSize().background(Bg)) {
         val track = remote
-        if (track != null) {
-            key(track) {
-                AndroidView(
-                    factory = { viewCtx ->
-                        SurfaceViewRenderer(viewCtx).also { renderer ->
-                            room.initVideoRenderer(renderer)
-                            track.addRenderer(renderer)
-                        }
-                    },
-                    modifier = Modifier.fillMaxSize(),
-                    onRelease = { renderer ->
-                        track.removeRenderer(renderer)
-                        renderer.release()
-                    },
-                )
+        val self = if (cam) local else null
+        // Swapping needs both pictures; with one of them gone the remaining one is big.
+        val ours = swapped && track != null && self != null
+        val bigTrack = if (ours) self else track
+        val smallTrack = if (ours) track else self
+        if (bigTrack != null) {
+            key(bigTrack, ours, front) {
+                VideoSurface(room, bigTrack, mirror = ours && front, overlay = false, modifier = Modifier.fillMaxSize())
             }
         }
-        val self = local
-        if (self != null && cam) {
-            key(self) {
-                AndroidView(
-                    factory = { viewCtx ->
-                        SurfaceViewRenderer(viewCtx).also { renderer ->
-                            room.initVideoRenderer(renderer)
-                            renderer.setMirror(true)
-                            renderer.setZOrderMediaOverlay(true)
-                            self.addRenderer(renderer)
+        if (smallTrack != null) {
+            val corner = Modifier
+                .align(Alignment.TopEnd)
+                .padding(16.dp)
+                .size(width = 110.dp, height = 160.dp)
+                .clip(RoundedCornerShape(14.dp))
+            key(smallTrack, ours, front) {
+                VideoSurface(room, smallTrack, mirror = !ours && front, overlay = true, modifier = corner)
+            }
+            // A see-through layer over the surface takes the tap (SurfaceView does not).
+            if (track != null) {
+                Box(corner.clickable { swapped = !swapped })
+            }
+        }
+        if (stage.video && cam && local != null) {
+            Box(
+                Modifier
+                    .align(Alignment.TopStart)
+                    .padding(16.dp)
+                    .size(48.dp)
+                    .clip(CircleShape)
+                    .background(Color.Black.copy(alpha = 0.4f))
+                    .clickable {
+                        val next = !front
+                        val cameraTrack = room.localParticipant.getTrackPublication(Track.Source.CAMERA)?.track as? LocalVideoTrack
+                        if (cameraTrack != null) {
+                            runCatching {
+                                cameraTrack.switchCamera(position = if (next) CameraPosition.FRONT else CameraPosition.BACK)
+                                front = next
+                            }
                         }
                     },
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(16.dp)
-                        .size(width = 110.dp, height = 160.dp)
-                        .clip(RoundedCornerShape(14.dp)),
-                    onRelease = { renderer ->
-                        self.removeRenderer(renderer)
-                        renderer.release()
-                    },
-                )
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Default.Cameraswitch, stringResource(R.string.flip_camera), tint = Color.White)
             }
         }
         Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -453,6 +467,25 @@ fun CallStage(stage: Stage, api: SamalApi, onHangup: () -> Unit) {
             CallButton(stringResource(R.string.hangup), Danger) { finish(true) }
         }
     }
+}
+
+@Composable
+private fun VideoSurface(room: Room, track: VideoTrack, mirror: Boolean, overlay: Boolean, modifier: Modifier) {
+    AndroidView(
+        factory = { viewCtx ->
+            SurfaceViewRenderer(viewCtx).also { renderer ->
+                room.initVideoRenderer(renderer)
+                renderer.setMirror(mirror)
+                if (overlay) renderer.setZOrderMediaOverlay(true)
+                track.addRenderer(renderer)
+            }
+        },
+        modifier = modifier,
+        onRelease = { renderer ->
+            track.removeRenderer(renderer)
+            renderer.release()
+        },
+    )
 }
 
 @Composable
