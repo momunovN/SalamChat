@@ -48,6 +48,8 @@ data class MessageEntity(
     val durationMs: Int = 0,
     val waveform: String = "",
     val authorName: String = "",
+    /** Id of the message this one answers, so a tap on the quote can go to it. */
+    val replyToId: String = "",
 )
 
 @Entity(tableName = "outbox")
@@ -170,7 +172,13 @@ val MIGRATION_4_5 = object : Migration(4, 5) {
     }
 }
 
-@Database(entities = [ChatEntity::class, MessageEntity::class, OutboxEntity::class], version = 5)
+val MIGRATION_5_6 = object : Migration(5, 6) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE messages ADD COLUMN replyToId TEXT NOT NULL DEFAULT ''")
+    }
+}
+
+@Database(entities = [ChatEntity::class, MessageEntity::class, OutboxEntity::class], version = 6)
 abstract class SamalDb : RoomDatabase() {
     abstract fun dao(): SamalDao
 }

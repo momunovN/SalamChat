@@ -44,6 +44,7 @@ fun messageEntity(o: JSONObject, me: String): MessageEntity {
         status = o.optString("status").ifBlank { "sent" },
         outgoing = author == me,
         replyText = reply,
+        replyToId = o.optJSONObject("reply_to")?.optString("id").orEmpty(),
         edited = o.optString("edited_at").isNotBlank(),
         deleted = deleted,
         mediaUrl = attachment?.optString("url").orEmpty(),

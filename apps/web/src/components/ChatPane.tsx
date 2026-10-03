@@ -223,7 +223,7 @@ export function ChatPane({
   }
 
   /** Search result click: page back until the message is loaded, then scroll to it and flash it. */
-  async function jumpTo(target: Message) {
+  async function jumpTo(target: { id: string }) {
     stick.current = false;
     if (!messages.some((m) => m.id === target.id)) {
       let cur = cursor;
@@ -708,7 +708,7 @@ export function ChatPane({
               <div
                 key={m.id}
                 id={`msg-${m.id}`}
-                className={`rounded-xl transition-colors duration-500 ${flashId === m.id ? "bg-accent/15" : ""}`}
+                className={`rounded-xl transition-colors duration-500 ${flashId === m.id ? "bg-accent/25" : ""}`}
               >
                 {showDay ? (
                   <div className="my-3 flex justify-center">
@@ -749,7 +749,21 @@ export function ChatPane({
                       }`}
                     >
                       {m.reply_to ? (
-                        <div className="mb-1 whitespace-normal border-l-2 border-white/40 pl-2 text-[12px] text-white/80">
+                        <div
+                          role="button"
+                          tabIndex={0}
+                          onClick={(e) => {
+                            // Tapping the quote goes to the message it answers and lights it up.
+                            e.stopPropagation();
+                            if (m.reply_to && !m.reply_to.deleted) void jumpTo(m.reply_to);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" && m.reply_to && !m.reply_to.deleted) void jumpTo(m.reply_to);
+                          }}
+                          className={`mb-1 cursor-pointer rounded-r-lg border-l-2 py-0.5 pr-2 pl-2 text-[12px] whitespace-normal transition-colors ${
+                            mine ? "border-white/60 bg-white/10 text-white/85 hover:bg-white/15" : "border-accent bg-accent/10 text-ink/85 hover:bg-accent/15"
+                          }`}
+                        >
                           <p className="font-semibold">
                             {m.reply_to.author_id === me ? t.you : m.reply_to.author_name || t.replyTo}
                           </p>

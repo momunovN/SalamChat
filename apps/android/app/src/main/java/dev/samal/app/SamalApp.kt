@@ -10,6 +10,7 @@ import dev.samal.app.data.db.MIGRATION_1_2
 import dev.samal.app.data.db.MIGRATION_2_3
 import dev.samal.app.data.db.MIGRATION_3_4
 import dev.samal.app.data.db.MIGRATION_4_5
+import dev.samal.app.data.db.MIGRATION_5_6
 import dev.samal.app.data.db.SamalDb
 import dev.samal.app.data.notify.Push
 import dev.samal.app.data.session.SessionStore
@@ -25,7 +26,7 @@ class SamalApp : Application(), ImageLoaderFactory {
     override fun onCreate() {
         super.onCreate()
         db = Room.databaseBuilder(this, SamalDb::class.java, "samal.db")
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
             .build()
         session = SessionStore(this, api)
         MediaAuth.init(this, api)

@@ -150,6 +150,8 @@ fun ChatScreen(
     var editing by remember { mutableStateOf<MessageEntity?>(null) }
     var menu by remember { mutableStateOf<MessageEntity?>(null) }
     var stage by remember { mutableStateOf<MessageEntity?>(null) }
+    /** The message a tapped quote pointed to, lit up for a moment. */
+    var flash by remember { mutableStateOf<String?>(null) }
     var attach by remember { mutableStateOf(false) }
     var members by remember { mutableStateOf(false) }
     var profile by remember { mutableStateOf<String?>(null) }
@@ -270,6 +272,18 @@ fun ChatScreen(
                     showDay,
                     showAuthor,
                     lastInRun,
+                    flashed = flash == msg.id,
+                    onQuote = {
+                        val target = messages.indexOfFirst { it.id == msg.replyToId || it.clientId == msg.replyToId }
+                        if (target >= 0) {
+                            scope.launch {
+                                listState.animateScrollToItem(target)
+                                flash = messages[target].id
+                                delay(1600)
+                                if (flash == messages.getOrNull(target)?.id) flash = null
+                            }
+                        }
+                    },
                     onOpen = { stage = msg },
                     onMenu = { menu = msg },
                     onAuthor = { msg.authorId?.let { profile = it } },
@@ -579,6 +593,8 @@ private fun Bubble(
     showDay: Boolean,
     showAuthor: Boolean,
     lastInRun: Boolean,
+    flashed: Boolean,
+    onQuote: () -> Unit,
     onOpen: () -> Unit,
     onMenu: () -> Unit,
     onAuthor: () -> Unit,
@@ -586,7 +602,13 @@ private fun Bubble(
     val ctx = LocalContext.current
     val time = remember(msg.createdAt) { SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(msg.createdAt)) }
     val day = dayLabel(msg.createdAt, stringResource(R.string.today), stringResource(R.string.yesterday))
-    Column(Modifier.fillMaxWidth().padding(bottom = if (lastInRun) 8.dp else 2.dp)) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (flashed) Accent.copy(alpha = 0.25f) else Color.Transparent)
+            .padding(bottom = if (lastInRun) 8.dp else 2.dp),
+    ) {
         if (showDay) {
             Text(
                 day,
@@ -626,7 +648,25 @@ private fun Bubble(
                     .background(if (msg.outgoing) Outgoing else Incoming)
                     .padding(horizontal = 12.dp, vertical = 7.dp),
             ) {
-                if (msg.replyText.isNotBlank()) Text(msg.replyText, color = Accent, fontSize = 12.sp, maxLines = 2)
+                if (msg.replyText.isNotBlank()) {
+                    Row(
+                        Modifier
+                            .padding(bottom = 4.dp)
+                            .clip(RoundedCornerShape(topEnd = 8.dp, bottomEnd = 8.dp))
+                            .background(if (msg.outgoing) Color.White.copy(alpha = 0.12f) else Accent.copy(alpha = 0.12f))
+                            .clickable(enabled = msg.replyToId.isNotBlank(), onClick = onQuote),
+                    ) {
+                        Box(Modifier.width(3.dp).height(34.dp).background(if (msg.outgoing) Color.White else Accent))
+                        Text(
+                            msg.replyText,
+                            color = if (msg.outgoing) Color.White else Text,
+                            fontSize = 13.sp,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        )
+                    }
+                }
                 val kind = openKind(msg.type, msg.text, msg.mediaUrl, msg.deleted)
                 when {
                     msg.deleted -> Text(stringResource(R.string.deleted), color = Muted)
@@ -755,6 +795,7 @@ private suspend fun sendPayload(
             MessageEntity(
                 client, chatId, me, type, text, client, now, "sending", true,
                 replyText = reply?.text.orEmpty(),
+                replyToId = reply?.id.orEmpty(),
                 mediaUrl = local,
                 durationMs = payload.optInt("duration_ms"),
                 waveform = (payload.optJSONArray("waveform")?.let { arr ->
