@@ -54,14 +54,48 @@ function mountPreview(box: HTMLDivElement, track: MediaStreamTrack, mirror: bool
   void el.play().catch(() => undefined);
 }
 
+/**
+ * Fills the screen when the picture's shape is close to the screen's; otherwise (a phone's
+ * portrait video on a laptop, or the reverse) shows it whole over a blurred copy of itself,
+ * instead of cropping half the face away.
+ */
+function fitRemote(box: HTMLDivElement, el: HTMLVideoElement) {
+  const vw = el.videoWidth;
+  const vh = el.videoHeight;
+  const bw = box.clientWidth;
+  const bh = box.clientHeight;
+  if (!vw || !vh || !bw || !bh) return;
+  const ratio = vw / vh / (bw / bh);
+  const fill = ratio > 0.8 && ratio < 1.25;
+  el.style.objectFit = fill ? "cover" : "contain";
+  box.dataset.fit = fill ? "cover" : "contain";
+}
+
 function mountRemote(box: HTMLDivElement, track: RemoteTrack) {
   const el = track.attach();
-  el.className = "h-full w-full object-cover";
+  el.className = "relative h-full w-full object-contain";
   if (el instanceof HTMLVideoElement) {
     el.autoplay = true;
     el.playsInline = true;
   }
-  if (track.kind === Track.Kind.Video) box.replaceChildren(el);
+  if (track.kind === Track.Kind.Video && el instanceof HTMLVideoElement) {
+    // The backdrop: the same stream, cropped to fill and blurred, under the whole picture.
+    const backdrop = document.createElement("video");
+    backdrop.srcObject = new MediaStream([track.mediaStreamTrack]);
+    backdrop.muted = true;
+    backdrop.autoplay = true;
+    backdrop.playsInline = true;
+    backdrop.setAttribute("aria-hidden", "true");
+    backdrop.className = "pointer-events-none absolute inset-0 h-full w-full scale-110 object-cover opacity-60 blur-2xl";
+    box.replaceChildren(backdrop, el);
+    const fit = () => fitRemote(box, el);
+    el.addEventListener("loadedmetadata", fit);
+    el.addEventListener("resize", fit);
+    const watch = new ResizeObserver(fit);
+    watch.observe(box);
+    el.addEventListener("emptied", () => watch.disconnect(), { once: true });
+    void backdrop.play().catch(() => undefined);
+  } else if (track.kind === Track.Kind.Video) box.replaceChildren(el);
   else box.appendChild(el);
   void el.play?.().catch(() => undefined);
 }
@@ -116,6 +150,13 @@ export function CallRoom({
     if (!box || !preview) return;
     mountPreview(box, preview, true);
   }, [preview]);
+
+  // Our own picture keeps its camera's shape: a laptop's landscape, a phone's portrait.
+  // Phones report the sensor's landscape size even when held upright, so they stay portrait.
+  const settings = preview?.getSettings();
+  const phone = typeof window !== "undefined" && window.innerWidth < 640;
+  const localAspect =
+    !phone && settings?.width && settings?.height ? `${settings.width} / ${settings.height}` : "3 / 4";
 
   useEffect(() => {
     const room = new Room({
@@ -339,13 +380,13 @@ export function CallRoom({
         </>
       }
     >
-      <div ref={remoteVideo} className={`absolute inset-0 bg-black ${remoteOn ? "" : "invisible"}`} />
+      <div ref={remoteVideo} className={`absolute inset-0 overflow-hidden bg-black ${remoteOn ? "" : "invisible"}`} />
       <div ref={remoteAudio} className="hidden" />
       {video ? (
         <div
           ref={localVideo}
-          className="absolute right-4 h-40 w-28 overflow-hidden rounded-2xl bg-white/10 shadow-lg"
-          style={{ bottom: "calc(7.5rem + env(safe-area-inset-bottom))" }}
+          className="absolute right-4 w-28 overflow-hidden rounded-2xl bg-white/10 shadow-lg ring-1 ring-white/10 sm:w-44 lg:w-60"
+          style={{ bottom: "calc(7.5rem + env(safe-area-inset-bottom))", aspectRatio: localAspect }}
         />
       ) : null}
     </CallStage>
