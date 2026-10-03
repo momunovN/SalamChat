@@ -40,6 +40,7 @@ import { envelope, hub, presence } from "./hub";
 import { bearer, corsHeaders, errorResponse, HttpError, json, readJSON } from "./http";
 import { deleteMessage, editMessage, listMessages, receipts, sendMessage } from "./messages";
 import { listContacts, syncContacts } from "./contacts";
+import { createStory, deleteStory, listStories, storyViews, sweepStories, viewStory } from "./stories";
 import { profileLibrary } from "./profile";
 import { getUserPublic, lookupPhones, resolveSlug, searchUsers } from "./users";
 import { completeUpload, createIntent, putUpload, readPublicMedia, readSealedUpload } from "./uploads";
@@ -468,6 +469,26 @@ async function dispatch(method: string, parts: string[], req: Request, url: URL)
   {
     const m = p("calls/:id/token");
     if (method === "GET" && m) return json(200, await callToken(auth.userId, m.id));
+  }
+  if (method === "GET" && p("stories")) {
+    void sweepStories().catch(() => undefined);
+    return json(200, await listStories(auth.userId, req));
+  }
+  if (method === "POST" && p("stories")) {
+    const body = await readJSON<{ kind?: string; text?: string; bg?: string; upload_id?: string }>(req);
+    return json(201, await createStory(auth.userId, body, req));
+  }
+  {
+    const m = p("stories/:id/view");
+    if (method === "POST" && m && UUID.test(m.id)) return json(200, await viewStory(auth.userId, m.id));
+  }
+  {
+    const m = p("stories/:id/views");
+    if (method === "GET" && m && UUID.test(m.id)) return json(200, await storyViews(auth.userId, m.id));
+  }
+  {
+    const m = p("stories/:id");
+    if (method === "DELETE" && m && UUID.test(m.id)) return json(200, await deleteStory(auth.userId, m.id));
   }
   if (method === "POST" && p("uploads/intent")) {
     const body = await readJSON<{ mime?: string; kind?: string; size_bytes?: number }>(req);

@@ -78,8 +78,9 @@ const allowed = new Map<string, number>();
 const ALLOW_TTL_MS = 10 * 60_000;
 
 /**
- * Who may read a stored file: its uploader, members of a chat where it was sent, and, for
- * profile photos, any signed-in user (avatars show in search and member lists).
+ * Who may read a stored file: its uploader, members of a chat where it was sent, the audience
+ * of a status it belongs to, and, for profile photos, any signed-in user (avatars show in
+ * search and member lists).
  */
 async function mayRead(userId: string, objectKey: string, path: string) {
   const memo = `${userId}|${path}`;
@@ -95,6 +96,17 @@ async function mayRead(userId: string, objectKey: string, path: string) {
          WHERE a.object_key = $1
        )
        OR EXISTS (SELECT 1 FROM users WHERE avatar_url LIKE '%' || $3)
+       OR EXISTS (
+         -- A status photo or video: its author and everyone they have a direct chat with.
+         SELECT 1 FROM stories s
+         JOIN uploads up ON up.id = s.upload_id AND up.object_key = $1
+         WHERE s.user_id = $2 OR s.user_id IN (
+           SELECT m2.user_id FROM chat_members m1
+           JOIN chats c ON c.id = m1.chat_id AND c.type = 'direct'
+           JOIN chat_members m2 ON m2.chat_id = c.id AND m2.user_id <> m1.user_id
+           WHERE m1.user_id = $2
+         )
+       )
      ) AS ok`,
     [objectKey, userId, path],
   );

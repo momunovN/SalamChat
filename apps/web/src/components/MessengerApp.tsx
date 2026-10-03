@@ -41,7 +41,7 @@ import {
 } from "@/lib/notify";
 import { formatPhone } from "@/lib/phone";
 import { canPickContacts, isApple, parseVCard, pickContacts, type BookEntry } from "@/lib/contacts";
-import type { Call, Chat, Envelope, Message, Session, User } from "@/lib/types";
+import type { Call, Chat, Envelope, Message, Session, StoryGroup, User } from "@/lib/types";
 import { Avatar } from "./Avatar";
 import { BrandMark } from "./BrandMark";
 import { CallRoom, IncomingCall } from "./CallRoom";
@@ -51,6 +51,7 @@ import { NameOnboarding } from "./NameOnboarding";
 import { PeopleResults, PersonRow, useUserSearch } from "./PeopleSearch";
 import { PermitToast } from "./PermitToast";
 import { PhoneAuth } from "./PhoneAuth";
+import { StoryComposer, StoryStrip, StoryViewer } from "./Stories";
 
 type Tab = "chats" | "calls" | "contacts" | "more";
 type Seg = "all" | "direct" | "group";
@@ -94,6 +95,10 @@ export function MessengerApp() {
   const [pickerQ, setPickerQ] = useState("");
   const [syncedPeople, setSyncedPeople] = useState<User[]>([]);
   const [contactsSynced, setContactsSynced] = useState(false);
+  const [storyGroups, setStoryGroups] = useState<StoryGroup[]>([]);
+  const [storyOpen, setStoryOpen] = useState<number | null>(null);
+  const [composeStory, setComposeStory] = useState(false);
+  const loadStoriesRef = useRef<() => void>(() => undefined);
   const [bookBusy, setBookBusy] = useState(false);
   const [bookNote, setBookNote] = useState<string | null>(null);
   const bookFile = useRef<HTMLInputElement | null>(null);
@@ -564,6 +569,7 @@ export function MessengerApp() {
         if (env.type === "call.updated") {
           applyRemoteCall(env.body as Call);
         }
+        if (env.type === "story.updated") loadStoriesRef.current();
       } catch {
         /* ignore */
       }
@@ -721,6 +727,33 @@ export function MessengerApp() {
     }
     bookFile.current?.click();
   }
+
+  const loadStories = useCallback(() => {
+    void api
+      .stories()
+      .then(setStoryGroups)
+      .catch(() => undefined);
+  }, []);
+  useEffect(() => {
+    loadStoriesRef.current = loadStories;
+  }, [loadStories]);
+  useEffect(() => {
+    if (!sessionUser) return;
+    loadStories();
+    // Statuses expire on their own: a light refresh keeps the strip honest.
+    const timer = window.setInterval(loadStories, 5 * 60_000);
+    return () => window.clearInterval(timer);
+  }, [sessionUser, loadStories]);
+
+  const markStorySeen = useCallback((id: string) => {
+    setStoryGroups((prev) =>
+      prev.map((g) => {
+        if (!g.stories.some((st) => st.id === id)) return g;
+        const stories = g.stories.map((st) => (st.id === id ? { ...st, viewed: true } : st));
+        return { ...g, stories, unseen: stories.some((st) => !st.viewed) };
+      }),
+    );
+  }, []);
 
   const contactsSearch = useUserSearch(tab === "contacts" ? contactQ : "", me);
   const pickerSearch = useUserSearch(newOpen ? pickerQ : "", me);
@@ -1491,7 +1524,18 @@ export function MessengerApp() {
         </div>
       ) : null}
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+        {tab === "chats" && !picking && !query.trim() && session ? (
+          <StoryStrip
+            groups={storyGroups}
+            me={session.user.id}
+            meName={session.user.display_name}
+            meAvatar={session.user.avatar_url}
+            t={t}
+            onOpen={setStoryOpen}
+            onAdd={() => setComposeStory(true)}
+          />
+        ) : null}
         {tab === "chats" && chats.length === 0 ? (
           <p className="px-4 pt-16 text-center text-base text-muted">{t.emptyChats}</p>
         ) : null}
@@ -2217,6 +2261,19 @@ export function MessengerApp() {
           <p className="rounded-2xl bg-elevated px-4 py-3 text-center text-sm text-ink shadow-lg">{t.callDialing}</p>
         </div>
       ) : null}
+
+      {storyOpen !== null && session && storyGroups[storyOpen] ? (
+        <StoryViewer
+          groups={storyGroups}
+          start={storyOpen}
+          me={session.user.id}
+          t={t}
+          onClose={() => setStoryOpen(null)}
+          onSeen={markStorySeen}
+          onDeleted={loadStories}
+        />
+      ) : null}
+      {composeStory ? <StoryComposer t={t} onClose={() => setComposeStory(false)} onPosted={loadStories} /> : null}
 
       {incoming && !callBusy ? (
         <IncomingCall

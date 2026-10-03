@@ -89,6 +89,28 @@ export type ProfileLibrary = {
   groups: { id: string; title: string; username?: string | null; avatar_url?: string | null; member_count: number }[];
 };
 
+export type Story = {
+  id: string;
+  kind: "text" | "photo" | "video" | string;
+  text: string;
+  bg: string;
+  url: string | null;
+  mime: string | null;
+  created_at: string;
+  expires_at: string;
+  viewed: boolean;
+  /** Only on our own statuses. */
+  views?: number;
+};
+
+export type StoryGroup = {
+  user: { id: string; display_name: string; avatar_url?: string | null };
+  stories: Story[];
+  unseen: boolean;
+};
+
+export type StoryViewer = { id: string; display_name: string; avatar_url?: string | null; viewed_at?: string };
+
 export type Call = {
   id: string;
   chat_id: string;

@@ -1,5 +1,5 @@
 import { migrateLegacyStorage } from "./storage";
-import type { Call, Chat, ChatMember, Message, ProfileLibrary, Session, User } from "./types";
+import type { Call, Chat, ChatMember, Message, ProfileLibrary, Session, Story, StoryGroup, StoryViewer, User } from "./types";
 
 const SESSION_KEY = "salam.session";
 migrateLegacyStorage();
@@ -237,7 +237,14 @@ export const api = {
     request<{ ok: boolean }>("/v1/typing", { method: "POST", body: JSON.stringify({ chat_id: chatId }) }).catch(() => ({
       ok: false,
     })),
-  upload: async (file: File, kind: "photo" | "file" | "voice") => {
+  stories: () => request<{ items: StoryGroup[] }>("/v1/stories").then((r) => r.items ?? []),
+  postStory: (body: { kind: "text" | "photo" | "video"; text?: string; bg?: string; upload_id?: string }) =>
+    request<Story>("/v1/stories", { method: "POST", body: JSON.stringify(body) }),
+  viewStory: (id: string) => request<{ ok: boolean }>(`/v1/stories/${id}/view`, { method: "POST" }),
+  storyViews: (id: string) =>
+    request<{ items: StoryViewer[] }>(`/v1/stories/${id}/views`).then((r) => r.items ?? []),
+  deleteStory: (id: string) => request<{ ok: boolean }>(`/v1/stories/${id}`, { method: "DELETE" }),
+  upload: async (file: File, kind: "photo" | "video" | "file" | "voice") => {
     const intent = await request<{ id: string; put_url: string }>("/v1/uploads/intent", {
       method: "POST",
       body: JSON.stringify({ mime: file.type || "application/octet-stream", kind, size_bytes: file.size }),
