@@ -31,7 +31,7 @@ import { levelFromTimeDomain, packWave, WAVE_BARS } from "@/lib/voice";
 import { dayKey, dayLabel, formatClock, membersPhrase, messageBody, payloadText } from "@/lib/chat";
 import type { Dict, Lang } from "@/lib/i18n";
 import type { Chat, ChatMember, Message, ReplyPreview, User } from "@/lib/types";
-import { Avatar } from "./Avatar";
+import { Avatar, nameColor } from "./Avatar";
 import { ProfileSheet } from "./ProfileSheet";
 import { PermitToast } from "./PermitToast";
 import { PeopleResults, useUserSearch } from "./PeopleSearch";
@@ -60,6 +60,7 @@ export function ChatPane({
   setCursor,
   isTyping,
   onBack,
+  loaded = true,
   onRefreshChats,
   onOpenDirect,
   onOpenChat,
@@ -80,6 +81,8 @@ export function ChatPane({
   setCursor: Dispatch<SetStateAction<string | null>>;
   isTyping: boolean;
   onBack: () => void;
+  /** The thread's first page arrived (or failed): an empty list now really means "no messages". */
+  loaded?: boolean;
   onRefreshChats: () => void;
   onOpenDirect: (userId: string) => void;
   onOpenChat?: (chatId: string) => void;
@@ -605,26 +608,26 @@ export function ChatPane({
 
   return (
     <div className="flex h-full min-w-0 flex-1 flex-col bg-bg">
-      <div className="flex h-14 items-center gap-2.5 border-b border-line px-2">
+      <div className="flex h-14 shrink-0 items-center gap-1 border-b border-line bg-bg/95 px-1.5 backdrop-blur sm:gap-2 sm:px-3">
         <button
           type="button"
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-ink hover:bg-elevated md:hidden"
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-ink hover:bg-elevated md:hidden"
           onClick={onBack}
           aria-label={t.back}
         >
-          <ArrowLeft size={18} />
+          <ArrowLeft size={20} />
         </button>
         <button
           type="button"
-          className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
+          className="flex min-w-0 flex-1 items-center gap-2.5 rounded-xl py-1 pr-2 pl-1 text-left hover:bg-elevated/60"
           onClick={() => {
             if (group) setMembersOpen(true);
             else if (chat.peer?.id) setProfileId(chat.peer.id);
           }}
         >
-          <Avatar name={chat.title} src={chat.avatar_url} size={36} online={chat.peer?.online} />
+          <Avatar name={chat.title} src={chat.avatar_url} size={40} online={chat.peer?.online} />
           <div className="min-w-0 flex-1">
-            <p className="flex min-w-0 items-center gap-1 truncate text-[17px] font-semibold text-ink">
+            <p className="flex min-w-0 items-center gap-1 truncate text-[16px] font-semibold text-ink">
               <Lock size={12} className="shrink-0 text-muted" aria-label={t.sealed} />
               <span className="truncate">{chat.title}</span>
             </p>
@@ -634,7 +637,7 @@ export function ChatPane({
         <button
           type="button"
           onClick={() => setSearchOpen((open) => !open)}
-          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-ink hover:bg-elevated ${searchOpen ? "bg-elevated" : ""}`}
+          className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-muted hover:bg-elevated hover:text-ink ${searchOpen ? "bg-elevated text-ink" : ""}`}
           aria-label={t.searchMessages}
         >
           <Search size={18} />
@@ -642,7 +645,7 @@ export function ChatPane({
         <button
           type="button"
           onClick={() => onCall("audio")}
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-ink hover:bg-elevated"
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-muted hover:bg-elevated hover:text-ink"
           aria-label={t.audio}
         >
           <Phone size={18} />
@@ -650,7 +653,7 @@ export function ChatPane({
         <button
           type="button"
           onClick={() => onCall("video")}
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-ink hover:bg-elevated"
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-muted hover:bg-elevated hover:text-ink"
           aria-label={t.video}
         >
           <Video size={18} />
@@ -671,7 +674,7 @@ export function ChatPane({
 
       <div
         ref={scrollRef}
-        className="min-h-0 flex-1 overflow-y-auto px-3"
+        className="min-h-0 flex-1 overflow-y-auto px-2 sm:px-4"
         onScroll={(e) => {
           const el = e.currentTarget;
           stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
@@ -679,15 +682,28 @@ export function ChatPane({
         }}
         onClick={() => setMenuId(null)}
       >
-        <div className="flex min-h-full flex-col justify-end py-2">
+        <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col justify-end py-2">
           {messages.length === 0 ? (
-            <p className="py-10 text-center text-sm text-muted">{t.noMessages}</p>
+            loaded ? (
+              <div className="flex flex-col items-center py-10 text-center">
+                <Avatar name={chat.title} src={chat.avatar_url} size={72} />
+                <p className="mt-3 font-semibold text-ink">{chat.title}</p>
+                <p className="mt-1 text-sm text-muted">{t.noMessages}</p>
+              </div>
+            ) : (
+              <div className="flex justify-center py-10" aria-busy="true">
+                <span className="h-6 w-6 animate-spin rounded-full border-2 border-muted/40 border-t-accent" />
+              </div>
+            )
           ) : null}
           {messages.map((m, i) => {
             const mine = m.author_id === me;
             const prev = messages[i - 1];
             const showDay = !prev || dayKey(prev.created_at) !== dayKey(m.created_at);
+            const next = messages[i + 1];
             const showName = group && !mine && m.author_id && m.author_id !== prev?.author_id;
+            // Consecutive messages from one author sit closer; only the last one keeps the tail.
+            const lastInRun = !next || next.author_id !== m.author_id || dayKey(next.created_at) !== dayKey(m.created_at);
             return (
               <div
                 key={m.id}
@@ -701,12 +717,13 @@ export function ChatPane({
                     </span>
                   </div>
                 ) : null}
-                <div className={`mb-1 flex ${mine ? "justify-end" : "justify-start"}`}>
-                  <div className={`max-w-[78%] ${mine ? "items-end" : "items-start"} flex flex-col`}>
+                <div className={`flex ${lastInRun ? "mb-2" : "mb-0.5"} ${mine ? "justify-end" : "justify-start"}`}>
+                  <div className={`max-w-[85%] sm:max-w-[75%] lg:max-w-[65%] ${mine ? "items-end" : "items-start"} flex flex-col`}>
                     {showName && m.author_name ? (
                       <button
                         type="button"
-                        className="mb-0.5 px-1 text-left text-[12px] font-semibold text-accent"
+                        className="mb-0.5 px-1 text-left text-[13px] font-semibold"
+                        style={{ color: nameColor(m.author_name) }}
                         onClick={(e) => {
                           e.stopPropagation();
                           if (m.author_id) setProfileId(m.author_id);
@@ -725,10 +742,10 @@ export function ChatPane({
                         e.stopPropagation();
                         setMenuId(m.id);
                       }}
-                      className={`min-w-0 max-w-full cursor-pointer whitespace-pre-wrap px-3 py-2 text-left text-base leading-snug text-ink [overflow-wrap:anywhere] ${
+                      className={`min-w-0 max-w-full cursor-pointer whitespace-pre-wrap rounded-[18px] px-3 py-1.5 text-left text-[15px] leading-[1.4] text-ink [overflow-wrap:anywhere] sm:text-base ${
                         mine
-                          ? "rounded-[16px] rounded-br-sm bg-outgoing"
-                          : "rounded-[16px] rounded-bl-sm bg-incoming"
+                          ? `bg-outgoing ${lastInRun ? "rounded-br-[6px]" : ""}`
+                          : `bg-incoming ${lastInRun ? "rounded-bl-[6px]" : ""}`
                       }`}
                     >
                       {m.reply_to ? (
@@ -777,6 +794,23 @@ export function ChatPane({
                         ),
                       )}
                       {bubbleLine(m)}
+                      <span
+                        className={`relative top-1.5 float-right ml-2 inline-flex items-center gap-1 text-[11px] leading-none font-medium whitespace-nowrap select-none ${
+                          mine ? "text-white/70" : "text-muted"
+                        }`}
+                      >
+                        {m.edited_at ? <span>{t.edited}</span> : null}
+                        <span className="tabular-nums">{fmtTime(m.created_at)}</span>
+                        {mine && m.status !== "failed" ? (
+                          m.status === "read" ? (
+                            <CheckCheck size={14} className="text-white" />
+                          ) : m.status === "delivered" ? (
+                            <CheckCheck size={14} />
+                          ) : (
+                            <Check size={14} />
+                          )
+                        ) : null}
+                      </span>
                     </div>
                     {menuId === m.id ? (
                       <div
@@ -804,23 +838,11 @@ export function ChatPane({
                         ) : null}
                       </div>
                     ) : null}
-                    <div className="mt-0.5 flex items-center gap-1 px-1 text-[12px] font-medium text-muted">
-                      {m.edited_at ? <span>{t.edited}</span> : null}
-                      <span>{fmtTime(m.created_at)}</span>
-                      {mine ? (
-                        m.status === "failed" ? (
-                          <button type="button" className="text-danger" onClick={() => void retry(m)}>
-                            {t.retrySend}
-                          </button>
-                        ) : m.status === "read" ? (
-                          <CheckCheck size={12} className="text-success" />
-                        ) : m.status === "delivered" ? (
-                          <CheckCheck size={12} />
-                        ) : (
-                          <Check size={12} />
-                        )
-                      ) : null}
-                    </div>
+                    {mine && m.status === "failed" ? (
+                      <button type="button" className="mt-0.5 px-1 text-[12px] font-medium text-danger" onClick={() => void retry(m)}>
+                        {t.retrySend}
+                      </button>
+                    ) : null}
                   </div>
                 </div>
               </div>

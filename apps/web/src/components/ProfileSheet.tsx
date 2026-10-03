@@ -166,10 +166,10 @@ export function ProfileSheet({
                   aria-checked={notes}
                   disabled={noteBusy}
                   onClick={() => void toggleNotes()}
-                  className={`relative h-7 w-12 shrink-0 rounded-full ${notes ? "bg-accent" : "bg-bg"}`}
+                  className={`relative h-7 w-12 shrink-0 rounded-full transition-colors active:!scale-100 disabled:opacity-60 ${notes ? "bg-accent" : "bg-white/15"}`}
                 >
                   <span
-                    className={`absolute top-0.5 h-6 w-6 rounded-full bg-white transition-transform ${notes ? "translate-x-5" : "translate-x-0.5"}`}
+                    className={`absolute top-0.5 left-0.5 h-6 w-6 rounded-full bg-white shadow transition-transform ${notes ? "translate-x-5" : "translate-x-0"}`}
                   />
                 </button>
               </div>
