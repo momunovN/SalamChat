@@ -1,7 +1,6 @@
 package dev.samal.app.ui.calls
 
 import android.Manifest
-import dev.samal.app.BuildConfig
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import com.twilio.audioswitch.AudioDevice
@@ -205,9 +204,6 @@ fun CallStage(stage: Stage, api: SamalApi, onHangup: () -> Unit) {
     var mic by remember { mutableStateOf(true) }
     var cam by remember { mutableStateOf(stage.video) }
     var speaker by remember { mutableStateOf(true) }
-    // Test builds: one line of LiveKit state under the status, so a screenshot shows what is wrong.
-    var diag by remember { mutableStateOf("") }
-    var lastEvent by remember { mutableStateOf("-") }
     val micFailed = stringResource(R.string.mic_failed)
     var since by remember { mutableLongStateOf(0L) }
     var tick by remember { mutableLongStateOf(0L) }
@@ -262,7 +258,6 @@ fun CallStage(stage: Stage, api: SamalApi, onHangup: () -> Unit) {
         launch {
             var leaveJob: Job? = null
             room.events.collect { event ->
-                lastEvent = event::class.simpleName ?: "?"
                 when (event) {
                     is RoomEvent.TrackSubscribed -> {
                         peer = true
@@ -340,13 +335,7 @@ fun CallStage(stage: Stage, api: SamalApi, onHangup: () -> Unit) {
             delay(500)
         }
     }
-    LaunchedEffect(room) {
-        while (isActive) {
-            diag = "LK ${room.state} · peers ${room.remoteParticipants.size} · " +
-                "mine ${room.localParticipant.trackPublications.size} · $lastEvent"
-            delay(1_000)
-        }
-    }
+
 
     Box(Modifier.fillMaxSize().background(Bg)) {
         val track = remote
@@ -404,10 +393,6 @@ fun CallStage(stage: Stage, api: SamalApi, onHangup: () -> Unit) {
                 color = Muted,
                 fontSize = 16.sp,
             )
-            if (BuildConfig.DEBUG) {
-                Spacer(Modifier.height(6.dp))
-                Text(diag, color = Muted, fontSize = 11.sp)
-            }
         }
         Row(
             Modifier.align(Alignment.BottomCenter).padding(bottom = 48.dp),
