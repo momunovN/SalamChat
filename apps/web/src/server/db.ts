@@ -39,7 +39,7 @@ function poolConfig(): pg.PoolConfig {
   return {
     connectionString,
     ssl,
-    max: Number(process.env.SALAM_DB_POOL || 10) || 10,
+    max: Number(process.env["SALAM_DB_POOL"] || 10) || 10,
     // Below Neon's idle suspend, so the pool drops sockets before the compute kills them.
     idleTimeoutMillis: 30_000,
     connectionTimeoutMillis: 10_000,
@@ -59,7 +59,7 @@ function neonSql() {
 }
 
 export function usesNeonHttp() {
-  return isNeon(databaseURL()) && process.env.SALAM_DB_DRIVER !== "pg";
+  return isNeon(databaseURL()) && process.env["SALAM_DB_DRIVER"] !== "pg";
 }
 
 /**

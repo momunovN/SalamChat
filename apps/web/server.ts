@@ -10,7 +10,7 @@ import { attachWs } from "./src/server/ws";
 loadEnv();
 
 const dev = process.env.NODE_ENV !== "production";
-const port = parseInt(process.env.PORT || process.env.WEB_PORT || "3000", 10) || 3000;
+const port = parseInt(process.env.PORT || process.env["WEB_PORT"] || "3000", 10) || 3000;
 
 async function main() {
   const app = next({ dev });
