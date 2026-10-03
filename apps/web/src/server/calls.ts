@@ -213,6 +213,7 @@ export async function answerCall(userId: string, id: string) {
   if (!row) {
     const call = await getCall(userId, id);
     if (call.status !== "active") return call;
+    noteEvent(id, userId, "join");
     return withCreds(call, userId);
   }
   const call = mapCall(row);
@@ -224,6 +225,19 @@ export async function answerCall(userId: string, id: string) {
 }
 
 export async function rejectCall(userId: string, id: string) {
+  const call = await getCall(userId, id);
+  const members = await memberIds(call.chat_id);
+  if (members.length <= 2) return transit(userId, id, "reject", "declined", "ended_at", ["ringing"]);
+  // In a group one "no" only stops this member's ring; the call is declined once nobody is left to answer.
+  if (call.status !== "ringing") return call;
+  await query(`INSERT INTO call_events (call_id, user_id, event) VALUES ($1,$2,'reject')`, [id, userId]);
+  const left = await queryOne<{ n: number }>(
+    `SELECT count(*)::int AS n FROM chat_members m
+     WHERE m.chat_id = $2 AND m.user_id <> $3
+       AND NOT EXISTS (SELECT 1 FROM call_events e WHERE e.call_id = $1 AND e.user_id = m.user_id AND e.event = 'reject')`,
+    [id, call.chat_id, call.initiator_id],
+  );
+  if ((left?.n ?? 0) > 0) return call;
   return transit(userId, id, "reject", "declined", "ended_at", ["ringing"]);
 }
 
@@ -234,9 +248,25 @@ export async function hangupCall(userId: string, id: string) {
     hub.publishMany(members, envelope("call.updated", call));
     return call;
   }
+  if (call.status === "active") {
+    // One participant leaving ends the call only when fewer than two are still in it (1:1 included).
+    await query(`INSERT INTO call_events (call_id, user_id, event) VALUES ($1,$2,'leave')`, [id, userId]);
+    const inCall = await queryOne<{ n: number }>(
+      `SELECT count(*)::int AS n FROM (
+         SELECT DISTINCT ON (user_id) user_id, event FROM call_events
+         WHERE call_id = $1 AND user_id IS NOT NULL AND event IN ('invite','join','leave')
+         ORDER BY user_id, at DESC
+       ) last WHERE last.event <> 'leave'`,
+      [id],
+    );
+    if ((inCall?.n ?? 0) >= 2) return call;
+  }
   const status = call.status === "ringing" ? "missed" : "ended";
-  await query(`UPDATE calls SET status=$2, ended_at=now() WHERE id=$1`, [id, status]);
-  await query(`INSERT INTO call_events (call_id, user_id, event) VALUES ($1,$2,'end')`, [id, userId]);
+  const ended = await queryOne<{ id: string }>(
+    `UPDATE calls SET status=$2, ended_at=now() WHERE id=$1 AND status IN ('ringing','active') RETURNING id`,
+    [id, status],
+  );
+  if (ended) await query(`INSERT INTO call_events (call_id, user_id, event) VALUES ($1,$2,'end')`, [id, userId]);
   const next = await getCall(userId, id);
   hub.publishMany(members, envelope("call.updated", next));
   if (call.status === "ringing") cancelCallPush(members, id);

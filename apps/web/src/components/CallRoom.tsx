@@ -200,7 +200,10 @@ export function CallRoom({
       if (room.remoteParticipants.size === 0) scheduleLeave();
     });
     room.on(RoomEvent.DataReceived, (payload, _participant, _kind, topic) => {
-      if (topic === HANGUP_TOPIC && new TextDecoder().decode(payload) === HANGUP) finish(false);
+      // In a group the others stay: leave only when the one hanging up was the last peer.
+      if (topic === HANGUP_TOPIC && new TextDecoder().decode(payload) === HANGUP && room.remoteParticipants.size <= 1) {
+        finish(false);
+      }
     });
 
     void (async () => {

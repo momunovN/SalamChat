@@ -280,7 +280,10 @@ fun CallStage(stage: Stage, api: SamalApi, onHangup: () -> Unit) {
                         }
                     }
                     is RoomEvent.DataReceived -> {
-                        if (event.topic == HANGUP_TOPIC && String(event.data) == HANGUP) finish(false)
+                        // In a group the others stay: leave only when the one hanging up was the last peer.
+                        if (event.topic == HANGUP_TOPIC && String(event.data) == HANGUP && room.remoteParticipants.size <= 1) {
+                            finish(false)
+                        }
                     }
                     is RoomEvent.Disconnected -> if (phase == "live") finish(false)
                     else -> Unit
