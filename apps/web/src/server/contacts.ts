@@ -11,6 +11,8 @@ export async function syncContacts(
   ownerId: string,
   enabled: boolean,
   items: { phone?: string; name?: string }[],
+  /** Add to the stored book instead of replacing it (the website picks a few contacts at a time). */
+  merge = false,
 ) {
   if (!enabled) {
     await query(`DELETE FROM contacts WHERE owner_id=$1`, [ownerId]);
@@ -28,7 +30,7 @@ export async function syncContacts(
     if (rows.length >= MAX) break;
   }
 
-  await query(`DELETE FROM contacts WHERE owner_id=$1`, [ownerId]);
+  if (!merge) await query(`DELETE FROM contacts WHERE owner_id=$1`, [ownerId]);
   for (let i = 0; i < rows.length; i += 80) {
     const chunk = rows.slice(i, i + 80);
     const params: unknown[] = [ownerId];

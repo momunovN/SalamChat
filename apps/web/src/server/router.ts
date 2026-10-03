@@ -411,8 +411,8 @@ async function dispatch(method: string, parts: string[], req: Request, url: URL)
     return json(200, await listContacts(auth.userId));
   }
   if (method === "POST" && p("contacts/sync")) {
-    const body = await readJSON<{ enabled?: boolean; items?: { phone?: string; name?: string }[] }>(req);
-    return json(200, await syncContacts(auth.userId, body.enabled !== false, body.items || []));
+    const body = await readJSON<{ enabled?: boolean; merge?: boolean; items?: { phone?: string; name?: string }[] }>(req);
+    return json(200, await syncContacts(auth.userId, body.enabled !== false, body.items || [], !!body.merge));
   }
   if (method === "GET" && p("resolve")) {
     return json(200, await resolveSlug(auth.userId, url.searchParams.get("slug") || ""));

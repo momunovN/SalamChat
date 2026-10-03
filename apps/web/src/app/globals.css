@@ -30,6 +30,30 @@ body {
 body {
   font-family: var(--font-sans), "Segoe UI", system-ui, sans-serif;
   -webkit-text-size-adjust: 100%;
+  /* No rubber-band of the whole page: the app shell stays put, only its lists scroll. */
+  overscroll-behavior: none;
+}
+
+/* iPhone zooms the page into any field under 16px and leaves it zoomed: keep phones at 16px. */
+@media (max-width: 767px) {
+  input,
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+}
+
+/* Safari gives date fields an intrinsic width that pushes past their container. */
+input[type="date"] {
+  min-width: 0;
+  max-width: 100%;
+  -webkit-appearance: none;
+  appearance: none;
+  text-align: left;
+}
+
+input[type="date"]::-webkit-date-and-time-value {
+  text-align: left;
 }
 
 ::selection {

@@ -219,10 +219,10 @@ export const api = {
       items: r.items ?? [],
       synced: !!r.synced,
     })),
-  syncContacts: (enabled: boolean, items: { phone: string; name?: string }[]) =>
+  syncContacts: (enabled: boolean, items: { phone: string; name?: string }[], merge = false) =>
     request<{ ok: boolean; count?: number }>("/v1/contacts/sync", {
       method: "POST",
-      body: JSON.stringify({ enabled, items }),
+      body: JSON.stringify({ enabled, items, merge }),
     }),
   calls: () => request<{ items: Call[] }>("/v1/calls").then((r) => ({ items: r.items ?? [] })),
   call: (id: string) => request<Call>(`/v1/calls/${id}`),

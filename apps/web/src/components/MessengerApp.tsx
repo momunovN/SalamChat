@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import { flushSync } from "react-dom";
 import {
+  BookUser,
   Check,
   Languages,
   LogOut,
@@ -39,6 +40,7 @@ import {
   unlockSounds,
 } from "@/lib/notify";
 import { formatPhone } from "@/lib/phone";
+import { canPickContacts, isApple, parseVCard, pickContacts, type BookEntry } from "@/lib/contacts";
 import type { Call, Chat, Envelope, Message, Session, User } from "@/lib/types";
 import { Avatar } from "./Avatar";
 import { BrandMark } from "./BrandMark";
@@ -92,6 +94,13 @@ export function MessengerApp() {
   const [pickerQ, setPickerQ] = useState("");
   const [syncedPeople, setSyncedPeople] = useState<User[]>([]);
   const [contactsSynced, setContactsSynced] = useState(false);
+  const [bookBusy, setBookBusy] = useState(false);
+  const [bookNote, setBookNote] = useState<string | null>(null);
+  const bookFile = useRef<HTMLInputElement | null>(null);
+  /** The chat was opened from the list, so "back" can pop that history entry instead of pushing "/". */
+  const listBelow = useRef(false);
+  const swipeRef = useRef<HTMLDivElement | null>(null);
+  const swipe = useRef<{ x: number; y: number; t: number; dx: number; on: boolean; off: boolean } | null>(null);
   const [profileError, setProfileError] = useState<string | null>(null);
   const [incoming, setIncoming] = useState<Call | null>(null);
   const [activeCall, setActiveCall] = useState<Call | null>(null);
@@ -680,6 +689,39 @@ export function MessengerApp() {
       .catch(() => undefined);
   }, [session, tab, me]);
 
+  async function syncBook(entries: BookEntry[]) {
+    if (!entries.length) {
+      setBookNote(t.syncNone);
+      return;
+    }
+    setBookBusy(true);
+    setBookNote(null);
+    try {
+      const before = new Set(syncedPeople.map((u) => u.id));
+      await api.syncContacts(true, entries, true);
+      const r = await api.contacts();
+      const people = (r.items ?? []).filter((u) => u.id !== me);
+      setSyncedPeople(people);
+      setContactsSynced(true);
+      const fresh = people.filter((u) => !before.has(u.id)).length;
+      setBookNote(fresh || people.length ? t.syncFound.replace("{n}", String(fresh || people.length)) : t.syncNone);
+    } catch {
+      setBookNote(t.syncFail);
+    } finally {
+      setBookBusy(false);
+    }
+  }
+
+  function startBookSync() {
+    if (canPickContacts()) {
+      void pickContacts()
+        .then((entries) => syncBook(entries))
+        .catch(() => undefined);
+      return;
+    }
+    bookFile.current?.click();
+  }
+
   const contactsSearch = useUserSearch(tab === "contacts" ? contactQ : "", me);
   const pickerSearch = useUserSearch(newOpen ? pickerQ : "", me);
 
@@ -976,6 +1018,15 @@ export function MessengerApp() {
   function leaveChat() {
     activeChatRef.current = null;
     setActiveId(null);
+    // A chat the person closed does not reopen by itself on the next visit.
+    if (meRef.current) writeActive(meRef.current, null);
+    // Opened from the list: step back in history, so the browser's own Back/forward stay in step.
+    if (listBelow.current && !pathsEqual(window.location.pathname || "/", "/")) {
+      listBelow.current = false;
+      pendingUrl.current = "/";
+      window.history.back();
+      return;
+    }
     publishUrl("/", "push");
   }
 
@@ -992,6 +1043,7 @@ export function MessengerApp() {
     if (meRef.current) writeActive(meRef.current, id);
     paintChat(id, (item) => ({ ...item, unread_count: 0 }));
     setTab("chats");
+    listBelow.current = pathsEqual(window.location.pathname || "/", "/");
     publishUrl(pathForChat(chat), "push");
   }
 
@@ -1362,7 +1414,7 @@ export function MessengerApp() {
   );
 
   const listPanel = (
-    <div className="flex h-full min-w-0 flex-col border-r border-line bg-bg">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col border-r border-line bg-bg">
       <div className="flex min-h-14 items-center justify-between gap-2 px-4 pt-2 pb-2 sm:pt-3">
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <BrandMark alt="" className="h-8 w-8 shrink-0 sm:h-9 sm:w-9 md:hidden" />
@@ -1573,15 +1625,61 @@ export function MessengerApp() {
                 error={contactsSearch.error}
                 onPick={(u) => void openDirect(u.id)}
               />
-            ) : syncedPeople.length > 0 ? (
-              syncedPeople.map((u) => (
-                <PersonRow key={u.id} user={u} onClick={() => void openDirect(u.id)} />
-              ))
             ) : (
-              <div className="px-1 py-10 text-center">
-                <p className="text-sm text-muted">{contactsSynced ? t.emptySynced : t.emptyContacts}</p>
-                <p className="mt-3 text-xs leading-5 text-muted">{t.syncHint}</p>
-              </div>
+              <>
+                <div className="mx-1 mb-3 rounded-2xl bg-elevated p-4">
+                  <div className="flex items-start gap-3">
+                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-accent/15 text-accent">
+                      <BookUser size={20} />
+                    </span>
+                    <div className="min-w-0">
+                      <p className="font-semibold text-ink">{t.syncTitle}</p>
+                      <p className="mt-0.5 text-sm leading-5 text-muted">
+                        {canPickContacts() ? t.syncBody : isApple() ? t.syncIos : t.syncDesktop}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={bookBusy}
+                    onClick={startBookSync}
+                    className="mt-3 flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-accent font-semibold text-white disabled:opacity-60"
+                  >
+                    {bookBusy ? (
+                      <span className="h-5 w-5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+                    ) : syncedPeople.length ? (
+                      t.syncMore
+                    ) : canPickContacts() ? (
+                      t.syncPick
+                    ) : (
+                      t.syncFile
+                    )}
+                  </button>
+                  {bookNote ? <p className="mt-2 text-center text-sm text-muted">{bookNote}</p> : null}
+                  <input
+                    ref={bookFile}
+                    type="file"
+                    accept=".vcf,text/vcard,text/x-vcard"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      e.target.value = "";
+                      if (!file) return;
+                      void file
+                        .text()
+                        .then((text) => syncBook(parseVCard(text)))
+                        .catch(() => setBookNote(t.syncFail));
+                    }}
+                  />
+                </div>
+                {syncedPeople.length > 0 ? (
+                  syncedPeople.map((u) => <PersonRow key={u.id} user={u} onClick={() => void openDirect(u.id)} />)
+                ) : (
+                  <p className="px-1 py-6 text-center text-sm text-muted">
+                    {contactsSynced ? t.emptySynced : t.emptyContacts}
+                  </p>
+                )}
+              </>
             )}
           </div>
         ) : null}
@@ -1800,7 +1898,7 @@ export function MessengerApp() {
 
   return (
     <div
-      className="flex h-[100dvh] bg-bg text-ink"
+      className="fixed inset-0 flex overflow-hidden overscroll-none bg-bg text-ink"
       style={{ paddingTop: "env(safe-area-inset-top)", paddingBottom: "env(safe-area-inset-bottom)" }}
     >
       <aside className="hidden w-[76px] shrink-0 flex-col items-center gap-3 border-r border-line bg-elevated py-4 md:flex">
@@ -1812,7 +1910,7 @@ export function MessengerApp() {
       </aside>
 
       <div
-        className={`w-full md:w-[320px] md:shrink-0 lg:w-[360px] xl:w-[400px] ${activeId ? "hidden md:flex md:flex-col" : "flex flex-col"}`}
+        className="flex w-full flex-col md:w-[320px] md:shrink-0 lg:w-[360px] xl:w-[400px]"
       >
         {listPanel}
         <nav className="flex border-t border-line bg-elevated pt-1.5 pb-1 md:hidden">
@@ -1825,7 +1923,64 @@ export function MessengerApp() {
         </nav>
       </div>
 
-      <div className={`${activeId ? "flex" : "hidden md:flex"} min-w-0 flex-1`}>{conversation}</div>
+      <div
+        ref={swipeRef}
+        className={`${activeId ? "flex" : "hidden md:flex"} min-w-0 flex-1 max-md:absolute max-md:inset-0 max-md:z-10 max-md:bg-bg max-md:pt-[env(safe-area-inset-top)] max-md:pb-[env(safe-area-inset-bottom)]`}
+        onTouchStart={(e) => {
+          if (window.innerWidth >= 768 || e.touches.length !== 1) return;
+          const p = e.touches[0];
+          // In the browser (not the home-screen app) a swipe from the very edge is Safari's own Back.
+          const standalone = window.matchMedia("(display-mode: standalone)").matches;
+          if (!standalone && p.clientX < 24) return;
+          swipe.current = { x: p.clientX, y: p.clientY, t: Date.now(), dx: 0, on: false, off: false };
+        }}
+        onTouchMove={(e) => {
+          const s = swipe.current;
+          const el = swipeRef.current;
+          if (!s || s.off || !el) return;
+          const p = e.touches[0];
+          const dx = p.clientX - s.x;
+          const dy = p.clientY - s.y;
+          if (!s.on) {
+            if (Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx)) {
+              s.off = true;
+              return;
+            }
+            if (dx < 12 || dx < Math.abs(dy) * 1.5) return;
+            s.on = true;
+            el.style.transition = "none";
+            el.style.boxShadow = "-12px 0 24px rgb(0 0 0 / 0.45)";
+          }
+          s.dx = Math.max(0, dx);
+          el.style.transform = `translateX(${s.dx}px)`;
+        }}
+        onTouchEnd={() => {
+          const s = swipe.current;
+          const el = swipeRef.current;
+          swipe.current = null;
+          if (!s?.on || !el) return;
+          const fast = s.dx / Math.max(1, Date.now() - s.t) > 0.5;
+          const go = s.dx > el.clientWidth * 0.33 || (fast && s.dx > 40);
+          el.style.transition = "transform 200ms ease-out";
+          el.style.transform = go ? "translateX(100%)" : "translateX(0)";
+          window.setTimeout(() => {
+            el.style.transition = "";
+            el.style.transform = "";
+            el.style.boxShadow = "";
+            if (go) leaveChat();
+          }, 200);
+        }}
+        onTouchCancel={() => {
+          const el = swipeRef.current;
+          swipe.current = null;
+          if (!el) return;
+          el.style.transition = "";
+          el.style.transform = "";
+          el.style.boxShadow = "";
+        }}
+      >
+        {conversation}
+      </div>
 
       {newOpen ? (
         <div
