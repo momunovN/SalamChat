@@ -20,6 +20,7 @@ enum L10n {
     static var incomingAudio: String { t("call.incoming_audio") }
     static var decline: String { t("call.decline") }
     static var answer: String { t("call.answer") }
+    static var joinCall: String { t("call.join") }
     static var inCall: String { t("call.in_progress") }
     static var online: String { t("presence.online") }
     static var lastSeen: String { t("presence.last_seen") }

@@ -202,9 +202,9 @@ class Inbox(
         val calls = api.calls()
         for (i in 0 until calls.length()) {
             val call = calls.optJSONObject(i) ?: continue
-            if (call.optString("status") != "ringing" || call.optString("initiator_id") == me) continue
+            if (!NavBus.joinable(call, me)) continue
             if (NavBus.incoming.value == null) NavBus.incoming.value = call.toString()
-            if (!NavBus.resumed) {
+            if (!NavBus.resumed && call.optString("status") == "ringing") {
                 val title = dao.chat(call.optString("chat_id"))?.title.orEmpty()
                 Notifier.incomingCall(app, call, title)
             }
@@ -253,7 +253,14 @@ class Inbox(
             }
             "call.updated" -> {
                 val body = env.optJSONObject("body") ?: return
-                if (body.optString("initiator_id") != me && body.optString("status") == "ringing") {
+                if (body.optString("status") == "active" && NavBus.joinable(body, me)) {
+                    // Someone answered a group call: the ring stops, the offer to join stays.
+                    Notifier.cancelCall(app, body.optString("id"))
+                    val current = NavBus.incoming.value
+                    if (current == null || JSONObject(current).optString("id") == body.optString("id")) {
+                        NavBus.incoming.value = body.toString()
+                    }
+                } else if (body.optString("initiator_id") != me && body.optString("status") == "ringing") {
                     NavBus.incoming.value = body.toString()
                     if (!NavBus.resumed) {
                         val title = dao.chat(body.optString("chat_id"))?.title.orEmpty()

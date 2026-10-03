@@ -226,7 +226,7 @@ private fun MainShell(app: SamalApp) {
         val shown = stage == null && raw != null
         if (shown && raw != null) {
             val call = runCatching { JSONObject(raw) }.getOrNull()
-            if (call != null && call.optString("status") == "ringing" && call.optString("initiator_id") != me) {
+            if (call != null && NavBus.joinable(call, me)) {
                 val fallback = stringResource(R.string.incoming_audio)
                 var title by remember(call.optString("id")) { mutableStateOf(fallback) }
                 LaunchedEffect(call.optString("chat_id")) {
@@ -237,12 +237,15 @@ private fun MainShell(app: SamalApp) {
                 IncomingCall(
                     title = title,
                     video = call.optString("kind") == "video",
+                    ongoing = call.optString("status") == "active",
                     onAnswer = {
+                        NavBus.left += call.optString("id")
                         NavBus.incoming.value = null
                         Notifier.cancelCall(activity, call.optString("id"))
                         answer(call, title)
                     },
                     onDecline = {
+                        NavBus.left += call.optString("id")
                         NavBus.incoming.value = null
                         Notifier.cancelCall(activity, call.optString("id"))
                         scope.launch(Dispatchers.IO) { runCatching { app.api.rejectCall(call.getString("id")) } }
@@ -253,6 +256,7 @@ private fun MainShell(app: SamalApp) {
         stage?.let { current ->
             CallStage(current, app.api) {
                 val id = current.id
+                NavBus.left += id
                 stage = null
                 scope.launch(Dispatchers.IO) { runCatching { app.api.hangupCall(id) } }
             }

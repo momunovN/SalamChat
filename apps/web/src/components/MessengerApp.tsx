@@ -228,14 +228,24 @@ export function MessengerApp() {
 
   useEffect(() => {
     const outgoing = activeCall?.status === "ringing" && activeCall.initiator_id === me;
-    const incomingRing = !!incoming && !callBusy && !activeCall;
+    // A group call someone already answered rings out its usual 45 s, then just waits to be joined.
+    const ringLeft = incoming
+      ? incoming.status === "ringing"
+        ? Infinity
+        : 45_000 - (Date.now() - Date.parse(incoming.started_at))
+      : 0;
+    const incomingRing = !!incoming && !callBusy && !activeCall && ringLeft > 0;
     if (incomingRing || outgoing) {
       startRingtone();
+      const quiet = !outgoing && Number.isFinite(ringLeft) ? window.setTimeout(stopRingtone, ringLeft) : undefined;
       if (incoming && document.visibilityState !== "visible") {
         const title = chatsRef.current.find((chat) => chat.id === incoming.chat_id)?.title;
         notifyCall(title || t.incomingAudio, incoming.kind === "video" ? t.incomingVideo : t.incomingAudio);
       }
-      return () => stopRingtone();
+      return () => {
+        if (quiet) window.clearTimeout(quiet);
+        stopRingtone();
+      };
     }
     stopRingtone();
   }, [incoming, callBusy, activeCall, me, t.incomingAudio, t.incomingVideo]);
@@ -418,7 +428,14 @@ export function MessengerApp() {
       return;
     }
     if (call.status === "active") {
+      // A group call goes on after the first answer: members not in it yet keep a "join" card.
+      const joinable =
+        !!call.group &&
+        call.initiator_id !== myId &&
+        activeCallIdRef.current !== call.id &&
+        !closedCalls.current.has(call.id);
       setIncoming((c) => {
+        if (joinable && (!c || c.id === call.id)) return call;
         if (c?.id !== call.id || armingRef.current) return c;
         return null;
       });
@@ -553,7 +570,9 @@ export function MessengerApp() {
           .calls()
           .then((r) => {
             const me = meRef.current;
-            const ringing = (r.items ?? []).find((c) => c.status === "ringing" && c.initiator_id !== me);
+            const ringing = (r.items ?? []).find(
+              (c) => c.initiator_id !== me && (c.status === "ringing" || (c.status === "active" && c.group)),
+            );
             if (ringing) applyRemoteCall(ringing);
           })
           .catch(() => undefined);
@@ -666,6 +685,7 @@ export function MessengerApp() {
   }
 
   function closeCall(id: string) {
+    closedCalls.current.add(id);
     void api.hangupCall(id).catch(() => undefined);
     setCallMedia(null);
     setCallCreds(null);
@@ -774,6 +794,7 @@ export function MessengerApp() {
     setCallMedia(mediaPromise);
     setIncoming(null);
     const shown = listedCall(call);
+    activeCallIdRef.current = shown.id;
     setActiveCall(shown);
     setCalls((prev) => [shown, ...prev.filter((item) => item.id !== shown.id)]);
   }
@@ -2021,10 +2042,12 @@ export function MessengerApp() {
           title={incomingChat?.title || (incoming.kind === "video" ? t.incomingVideo : t.incomingAudio)}
           avatarUrl={incomingChat?.avatar_url}
           kind={incoming.kind === "video" ? "video" : "audio"}
+          ongoing={incoming.status === "active"}
           t={t}
           busy={callBusy || pendingCall !== null}
           onDecline={() => {
             cancelPermit();
+            closedCalls.current.add(incoming.id);
             void api.rejectCall(incoming.id);
             setIncoming(null);
           }}

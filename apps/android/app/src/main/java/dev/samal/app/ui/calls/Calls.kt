@@ -153,13 +153,20 @@ fun CallsScreen(api: SamalApi, dao: SamalDao) {
 fun IncomingCall(
     title: String,
     video: Boolean,
+    ongoing: Boolean = false,
     onAnswer: () -> Unit,
     onDecline: () -> Unit,
 ) {
     Box(Modifier.fillMaxSize().background(Bg.copy(alpha = 0.96f)), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
-                stringResource(if (video) R.string.incoming_video else R.string.incoming_audio),
+                stringResource(
+                    when {
+                        ongoing -> R.string.in_call
+                        video -> R.string.incoming_video
+                        else -> R.string.incoming_audio
+                    },
+                ),
                 color = Text,
                 fontSize = 28.sp,
                 fontWeight = FontWeight.Bold,
@@ -170,7 +177,7 @@ fun IncomingCall(
             Row {
                 CallButton(stringResource(R.string.decline), Danger, onDecline)
                 Spacer(Modifier.padding(24.dp))
-                CallButton(stringResource(R.string.answer), Success, onAnswer)
+                CallButton(stringResource(if (ongoing) R.string.join_call else R.string.answer), Success, onAnswer)
             }
         }
     }

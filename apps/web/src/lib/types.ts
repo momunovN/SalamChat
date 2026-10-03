@@ -98,6 +98,8 @@ export type Call = {
   started_at: string;
   answered_at?: string | null;
   ended_at?: string | null;
+  /** Group chat: members who are not in the call yet may still join it. */
+  group?: boolean;
   url?: string;
   token?: string;
   room?: string;

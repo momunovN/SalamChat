@@ -17,6 +17,7 @@
 "call.incoming_audio" = "Кирүүчү чалуу";
 "call.decline" = "Четке кагуу";
 "call.answer" = "Жооп берүү";
+"call.join" = "Кошулуу";
 "call.in_progress" = "Чалуу жүрүп жатат";
 "presence.online" = "тармакка";
 "presence.last_seen" = "жакында болгон";

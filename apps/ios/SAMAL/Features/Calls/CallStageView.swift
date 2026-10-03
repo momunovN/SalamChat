@@ -87,6 +87,7 @@ struct CallStageView: View {
 
     private func hangup() async {
         let id = session.activeCall?.id
+        if let id { session.leftCalls.insert(id) }
         await model.stop()
         session.activeCall = nil
         if let id { try? await session.api.hangupCall(id: id) }

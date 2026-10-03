@@ -16,6 +16,8 @@ export type Call = {
   started_at: string;
   answered_at?: string | null;
   ended_at?: string | null;
+  /** More than two members in the chat: others may join a call that is already going. */
+  group: boolean;
 };
 
 type CallRow = {
@@ -28,7 +30,14 @@ type CallRow = {
   started_at: Date;
   answered_at: Date | null;
   ended_at: Date | null;
+  grp: boolean;
 };
+
+/** Call columns plus the group flag, for a `calls` table referred to as `a`. */
+function cols(a: string) {
+  return `${a}.id, ${a}.chat_id, ${a}.initiator_id, ${a}.kind, ${a}.status, ${a}.sfu_room, ${a}.started_at, ${a}.answered_at, ${a}.ended_at,
+    (SELECT count(*) > 2 FROM chat_members gm WHERE gm.chat_id = ${a}.chat_id) AS grp`;
+}
 
 function mapCall(r: CallRow): Call {
   return {
@@ -41,12 +50,13 @@ function mapCall(r: CallRow): Call {
     started_at: iso(r.started_at) || new Date().toISOString(),
     answered_at: iso(r.answered_at),
     ended_at: iso(r.ended_at),
+    group: !!r.grp,
   };
 }
 
 export async function getCall(userId: string, id: string) {
   const row = await queryOne<CallRow>(
-    `SELECT id, chat_id, initiator_id, kind, status, sfu_room, started_at, answered_at, ended_at FROM calls WHERE id=$1`,
+    `SELECT ${cols("calls")} FROM calls WHERE id=$1`,
     [id],
   );
   if (!row) throw new HttpError(404, "not_found", "not found");
@@ -98,7 +108,7 @@ export async function startCall(userId: string, chatId: string, kind: string) {
     `INSERT INTO calls (id, chat_id, initiator_id, kind, status, sfu_room)
      SELECT $1, $2, $3, $4, 'ringing', $5
      WHERE EXISTS (SELECT 1 FROM chat_members WHERE chat_id = $2 AND user_id = $3)
-     RETURNING id, chat_id, initiator_id, kind, status, sfu_room, started_at, answered_at, ended_at`,
+     RETURNING ${cols("calls")}`,
     [id, chatId, userId, kind, room],
   );
   if (!row) throw new HttpError(403, "forbidden", "forbidden");
@@ -124,7 +134,7 @@ export async function startCall(userId: string, chatId: string, kind: string) {
 
 export async function listCalls(userId: string) {
   const rows = await query<CallRow>(
-    `SELECT c.id, c.chat_id, c.initiator_id, c.kind, c.status, c.sfu_room, c.started_at, c.answered_at, c.ended_at
+    `SELECT ${cols("c")}
      FROM calls c
      JOIN chat_members m ON m.chat_id = c.chat_id
      WHERE m.user_id=$1
@@ -139,7 +149,6 @@ const closed = new Set(["ended", "missed", "declined"]);
 
 /** Unanswered calls stop ringing after this long and become "missed" for everyone. */
 export const RING_TIMEOUT_MS = 45_000;
-const CALL_COLS = `id, chat_id, initiator_id, kind, status, sfu_room, started_at, answered_at, ended_at`;
 
 /**
  * Marks ringing calls older than the timeout as missed and tells every member.
@@ -152,7 +161,7 @@ export async function expireRinging(id?: string) {
     `UPDATE calls SET status='missed', ended_at=now()
      WHERE status='ringing' AND ($1::uuid IS NULL OR id=$1::uuid)
        AND started_at <= now() - make_interval(secs => $2::double precision)
-     RETURNING ${CALL_COLS}`,
+     RETURNING ${cols("calls")}`,
     [id ?? null, (RING_TIMEOUT_MS - 2000) / 1000],
   );
   for (const row of rows) {
@@ -174,10 +183,61 @@ function armRingTimeout(id: string) {
   timer.unref?.();
 }
 
+/** People in a LiveKit room right now, or null when LiveKit is not configured or did not answer. */
+async function roomSize(room: string): Promise<number | null> {
+  const url = env("LIVEKIT_URL", "");
+  const key = env("LIVEKIT_API_KEY", "");
+  const secret = env("LIVEKIT_API_SECRET", "");
+  if (!url || !key || !secret || !room) return null;
+  const token = await new SignJWT({ video: { roomAdmin: true, room } })
+    .setProtectedHeader({ alg: "HS256", typ: "JWT" })
+    .setIssuer(key)
+    .setIssuedAt()
+    .setExpirationTime("1m")
+    .sign(new TextEncoder().encode(secret));
+  const base = url.replace(/^ws(s?):\/\//i, "http$1://").replace(/\/+$/, "");
+  const res = await fetch(`${base}/twirp/livekit.RoomService/ListParticipants`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+    body: JSON.stringify({ room }),
+    signal: AbortSignal.timeout(5000),
+  }).catch(() => null);
+  if (!res) return null;
+  // LiveKit answers not_found once the empty room has been closed.
+  if (res.status === 404) return 0;
+  if (!res.ok) return null;
+  const body = (await res.json().catch(() => null)) as { participants?: unknown[] } | null;
+  return body ? (body.participants?.length ?? 0) : null;
+}
+
+/**
+ * Ends active calls whose LiveKit room is empty: everyone dropped without a hangup (crash,
+ * lost network). Without this a group call would keep offering "join" to a room nobody is in.
+ */
+export async function expireEmpty() {
+  const rows = await query<{ id: string; sfu_room: string | null }>(
+    `SELECT id, sfu_room FROM calls WHERE status='active' AND answered_at <= now() - interval '1 minute'`,
+  );
+  for (const row of rows) {
+    if ((await roomSize(row.sfu_room || "")) !== 0) continue;
+    const ended = await queryOne<CallRow>(
+      `UPDATE calls SET status='ended', ended_at=now() WHERE id=$1 AND status='active' RETURNING ${cols("calls")}`,
+      [row.id],
+    );
+    if (!ended) continue;
+    const call = mapCall(ended);
+    void query(`INSERT INTO call_events (call_id, event, payload) VALUES ($1,'end','{"reason":"empty"}'::jsonb)`, [call.id]).catch(
+      () => undefined,
+    );
+    hub.publishMany(await memberIds(call.chat_id), envelope("call.updated", call));
+  }
+}
+
 const g = globalThis as typeof globalThis & { __salamRingSweep?: ReturnType<typeof setInterval> };
 if (!g.__salamRingSweep) {
   g.__salamRingSweep = setInterval(() => {
     void expireRinging().catch(() => undefined);
+    void expireEmpty().catch(() => undefined);
   }, 15_000);
   g.__salamRingSweep.unref?.();
 }
@@ -207,7 +267,7 @@ export async function answerCall(userId: string, id: string) {
      SET status = 'active', answered_at = now()
      WHERE c.id = $1 AND c.status = 'ringing'
        AND EXISTS (SELECT 1 FROM chat_members m WHERE m.chat_id = c.chat_id AND m.user_id = $2)
-     RETURNING c.id, c.chat_id, c.initiator_id, c.kind, c.status, c.sfu_room, c.started_at, c.answered_at, c.ended_at`,
+     RETURNING ${cols("c")}`,
     [id, userId],
   );
   if (!row) {
@@ -220,7 +280,8 @@ export async function answerCall(userId: string, id: string) {
   const [members, signed] = await Promise.all([memberIds(call.chat_id), signLiveKitToken(userId, call.sfu_room || "")]);
   noteEvent(id, userId, "join");
   hub.publishMany(members, envelope("call.updated", call));
-  cancelCallPush(members, id);
+  // A group call keeps ringing the others' phones until its usual timeout: they may still join.
+  if (!call.group) cancelCallPush(members, id);
   return { ...call, ...withIce(signed) };
 }
 

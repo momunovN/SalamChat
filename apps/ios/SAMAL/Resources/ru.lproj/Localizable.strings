@@ -17,6 +17,7 @@
 "call.incoming_audio" = "Входящий звонок";
 "call.decline" = "Сбросить";
 "call.answer" = "Ответить";
+"call.join" = "Присоединиться";
 "call.in_progress" = "Идёт звонок";
 "presence.online" = "в сети";
 "presence.last_seen" = "был(а) недавно";

@@ -70,6 +70,7 @@ struct IncomingCallView: View {
                 Button {
                     let id = session.incomingCall?.id
                     session.incomingCall = nil
+                    if let id { session.leftCalls.insert(id) }
                     if let id { Task { try? await session.api.rejectCall(id: id) } }
                 } label: {
                     VStack {
@@ -81,6 +82,7 @@ struct IncomingCallView: View {
                 Button {
                     guard let call = session.incomingCall else { return }
                     session.incomingCall = nil
+                    session.leftCalls.insert(call.id)
                     Task {
                         guard let answered = try? await session.api.answerCall(id: call.id),
                               let token = try? await session.api.liveKitToken(for: answered) else { return }
@@ -91,7 +93,7 @@ struct IncomingCallView: View {
                     VStack {
                         Circle().fill(SamalColor.success).frame(width: 72, height: 72)
                             .overlay(Image(systemName: "phone.fill").font(.title).foregroundStyle(.white))
-                        Text(L10n.answer).font(SamalFont.caption()).foregroundStyle(SamalColor.muted)
+                        Text(call.status == "active" ? L10n.joinCall : L10n.answer).font(SamalFont.caption()).foregroundStyle(SamalColor.muted)
                     }
                 }
             }

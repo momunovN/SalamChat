@@ -17,6 +17,7 @@
     <string name="incoming_video">Входящий видеозвонок</string>
     <string name="decline">Сбросить</string>
     <string name="answer">Ответить</string>
+    <string name="join_call">Присоединиться</string>
     <string name="in_call">Идёт звонок</string>
     <string name="chats_empty">Пока нет чатов</string>
     <string name="online">в сети</string>

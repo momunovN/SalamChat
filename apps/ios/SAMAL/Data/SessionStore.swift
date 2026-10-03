@@ -17,6 +17,14 @@ final class SessionStore: ObservableObject {
     @Published var incomingCall: APICall?
     @Published var activeCall: ActiveCall?
     @Published var liveCall: APICall?
+    /// Calls this device answered, declined or left: never offered again.
+    var leftCalls: Set<UUID> = []
+
+    /// Someone else's call we can pick up: ringing, or a group call that is already going.
+    func joinable(_ call: APICall) -> Bool {
+        guard call.initiatorID != user?.id, !leftCalls.contains(call.id) else { return false }
+        return call.status == "ringing" || (call.status == "active" && call.group == true)
+    }
     @Published var openChatID: String?
     @Published var pendingChatID: String?
     @Published var typingChatID: String?
@@ -174,7 +182,7 @@ final class SessionStore: ObservableObject {
         }
         // A call that started ringing before the stream was (re)connected sent us no event.
         if incomingCall == nil, activeCall == nil, let calls = try? await api.calls(),
-           let ringing = calls.first(where: { $0.status == "ringing" && $0.initiatorID != me.id }) {
+           let ringing = calls.first(where: { joinable($0) }) {
             incomingCall = ringing
         }
     }
@@ -293,6 +301,10 @@ final class SessionStore: ObservableObject {
                     if incomingCall?.id == call.id { incomingCall = nil }
                     if activeCall?.id == call.id { activeCall = nil }
                 } else if call.status == "ringing", call.initiatorID != me.id {
+                    incomingCall = call
+                } else if call.status == "active", joinable(call), activeCall?.id != call.id,
+                          incomingCall == nil || incomingCall?.id == call.id {
+                    // Someone answered a group call: the offer to join stays for the rest.
                     incomingCall = call
                 }
             }

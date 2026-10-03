@@ -179,12 +179,14 @@ struct APICall: Codable, Identifiable {
     var startedAt: Date
     var answeredAt: Date?
     var endedAt: Date?
+    /// Group chat: members not in the call yet may still join it.
+    var group: Bool?
     var url: String?
     var token: String?
     var room: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, kind, status, url, token, room
+        case id, kind, status, url, token, room, group
         case chatID = "chat_id"
         case initiatorID = "initiator_id"
         case startedAt = "started_at"

@@ -377,6 +377,7 @@ export function IncomingCall({
   title,
   avatarUrl,
   kind,
+  ongoing,
   t,
   busy,
   onDecline,
@@ -385,6 +386,8 @@ export function IncomingCall({
   title: string;
   avatarUrl?: string | null;
   kind: "audio" | "video";
+  /** A group call already in progress: offer to join it rather than answer. */
+  ongoing?: boolean;
   t: Dict;
   busy: boolean;
   onDecline: () => void;
@@ -395,7 +398,7 @@ export function IncomingCall({
       title={title}
       avatarUrl={avatarUrl}
       label={kind === "video" ? t.incomingVideo : t.incomingAudio}
-      status={t.callDialing}
+      status={ongoing ? t.inCall : t.callDialing}
       live={false}
       showAvatar
       footer={
@@ -403,7 +406,7 @@ export function IncomingCall({
           <CallButton label={t.decline} big tone="bg-danger text-white" onClick={onDecline}>
             <PhoneOff size={28} />
           </CallButton>
-          <CallButton label={t.answer} big tone="bg-success text-white" disabled={busy} onClick={onAnswer}>
+          <CallButton label={ongoing ? t.join : t.answer} big tone="bg-success text-white" disabled={busy} onClick={onAnswer}>
             <Phone size={28} />
           </CallButton>
         </>
